@@ -53,12 +53,13 @@ from mewgenics_overlay.core.maladies import (
     defect_lines,
     disorder_summary,
 )
+from mewgenics_overlay.core.gameassets import GameAssets, locate_gpak
 
 log = logging.getLogger("mewgenics_overlay.ui")
 
 STAT_NAMES = ["STR", "DEX", "CON", "INT", "SPD", "CHA", "LCK"]
 
-_COLS = ["Cat", "Family", "GenΔ", "Room", "Risk", "Compat", "Exp/stat", "≥7", "Note"]
+_COLS = ["Cat", "Family", "GenΔ", "Room", "Risk", "Compat", "Exp/stat", "≥7", "Defects", "Note"]
 
 # Column explanations shown as tooltips when hovering each header.
 _COL_TIPS = [
@@ -103,6 +104,12 @@ _COL_TIPS = [
     "Expected number of the kitten's stats that land on 7 or higher "
     "(Perfect-7 planning). A stat both parents have at 7 counts 1.0; "
     "a stat that can reach 7 counts fractionally.",
+    # Defects
+    "Birth defects the parents carry and what the kitten inherits. ✓ = both "
+    "parents carry it (the kitten gets it; '1 line' means it descends from a "
+    "single shared ancestor — same part/side). Percentages are single-carrier "
+    "odds at 50 Stimulation. Hover the cell for sides, lineage and each "
+    "defect's in-game effect.",
     # Note
     "Relationship flags and blockers. ♥ = the focused cat is in love "
     "with them, ♥♥ = mutual lovers, 'hates you' = hater conflict. "
@@ -125,6 +132,32 @@ def _note_text(row, kids: list[str]) -> str:
     if kids:
         parts.append(f"{len(kids)} kitten(s)")
     return "  ".join(parts)
+
+
+def _defect_short(name: str) -> str:
+    return name.replace(" Birth Defect", "") or name
+
+
+def _defects_summary(row) -> str:
+    """Compact Defects cell text: shared defects as '✓', single-carrier as %."""
+    factors = row.pair_factors
+    if factors is None:
+        return ""
+    parts = []
+    for d in defect_inheritance_rows(factors.cat_a, factors.cat_b, row.coi):
+        short = _defect_short(d.name)
+        parts.append(short + (" ✓" if len(d.carriers) == 2
+                              else f" ≈{d.chance_pct:.0f}%"))
+    return "; ".join(parts)
+
+
+def _any_defect_guaranteed(row) -> bool:
+    factors = row.pair_factors
+    if factors is None:
+        return False
+    return any(len(d.carriers) == 2
+               for d in defect_inheritance_rows(factors.cat_a, factors.cat_b,
+                                                row.coi))
 
 
 class _DragLabel(QLabel):
@@ -186,6 +219,9 @@ class PaletteWindow(QWidget):
         self._pinned = True               # mirror of the 📌 button state
         self._click_through = False       # mouse passes through to the game
         self._flag_applied = False        # non-Windows fallback guard
+        self._ga: Optional[GameAssets] = None   # gpak effect tables (async)
+        self._assets_started = False
+        self._asset_result: Optional[GameAssets] = None
 
         self.setWindowTitle("Mewgenics Breeding Overlay")
         flags = Qt.WindowType.FramelessWindowHint
@@ -210,6 +246,26 @@ class PaletteWindow(QWidget):
 
         self._adopt_session(None)
         self._load_last_save()
+        self._maybe_start_assets()
+
+    def _maybe_start_assets(self) -> None:
+        """Load resources.gpak effect tables off the UI thread (once)."""
+        if self._assets_started:
+            return
+        self._assets_started = True
+        path = locate_gpak()
+        if not path:
+            return
+
+        def work():
+            try:
+                ga = GameAssets(path)
+            except Exception:
+                ga = None
+            with self._lock:
+                self._asset_result = ga
+
+        threading.Thread(target=work, name="gpak-assets", daemon=True).start()
 
     # ── UI construction ───────────────────────────────────────────────────
     def _build_ui(self) -> None:
@@ -331,7 +387,7 @@ class PaletteWindow(QWidget):
         self._table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         hdr = self._table.horizontalHeader()
         hdr.setStretchLastSection(True)
-        for i, w in enumerate([150, 118, 46, 84, 56, 60, 58, 40]):
+        for i, w in enumerate([140, 106, 42, 74, 54, 58, 54, 36, 128]):
             self._table.setColumnWidth(i, w)
         # manual sorting (headers clickable; tri-state per column)
         self._table.setSortingEnabled(False)
@@ -588,6 +644,14 @@ class PaletteWindow(QWidget):
         with self._lock:
             items = self._pending
             self._pending = []
+            assets = self._asset_result
+            self._asset_result = None
+        if assets is not None:
+            self._ga = assets if assets.ok else None
+            if self._rows:
+                self._redraw_table()          # effects now available in tooltips
+            if self._focus is not None:
+                self._show_focus(self._focus)  # refresh health/effect tooltip
         for token, kind, result in items:
             if kind == "session":
                 if token >= self._token:
@@ -688,8 +752,38 @@ class PaletteWindow(QWidget):
             health_bits.append("disorders: " + ", ".join(disorders))
         if own_defects:
             health_bits.append("birth defects: " + ", ".join(own_defects))
-        self._cat_health.setText("⚠ " + " · ".join(health_bits)
-                                 if health_bits else "")
+        self._cat_health.setText(
+            "⚠ " + " · ".join(health_bits) if health_bits else ""
+        )
+        self._cat_health.setToolTip(self._health_tooltip(cat, disorders,
+                                                         own_defects))
+
+    def _health_tooltip(self, cat, disorders, own_defects) -> str:
+        """Hover text for the ⚠ health line: carried traits + in-game effects
+        (effects come from resources.gpak when available)."""
+        if not (disorders or own_defects):
+            return "No birth defects or disorders."
+        lines = [f"{cat.name} carries:"]
+        if disorders:
+            lines.append("• disorders: " + ", ".join(disorders)
+                         + " — each parent with a disorder has a 15% chance "
+                           "to pass one")
+        if own_defects:
+            lines.append("• birth defects (odds depend on the partner — "
+                         "select one to see them):")
+            seen: set = set()
+            for e in (getattr(cat, "visual_mutation_entries", None) or []):
+                if not e.get("is_defect"):
+                    continue
+                name = e.get("name")
+                if not name or name in seen:
+                    continue
+                seen.add(name)
+                eff = (self._ga.effect_for(e.get("group_key"),
+                                           e.get("mutation_id"))
+                       if self._ga is not None else "")
+                lines.append("    · " + name + (f" — {eff}" if eff else ""))
+        return "\n".join(lines)
 
     # ── search results ─────────────────────────────────────────────────────
     def _on_search_text(self, text: str) -> None:
@@ -752,6 +846,8 @@ class PaletteWindow(QWidget):
             return row.expected_avg
         if col == 7:
             return row.seven_plus_total
+        if col == 8:
+            return _defects_summary(row).lower()
         return _note_text(row, kids).lower()
 
     def _order_rows(self) -> list:
@@ -763,7 +859,7 @@ class PaletteWindow(QWidget):
         blocked = [e for e in self._rows if not e[0].compatible]
         good.sort(key=lambda e: self._col_key(self._sort_col, e[0], e[1]), reverse=rev)
         # blocked rows keep a readable fixed order (text columns only)
-        if self._sort_col in (0, 1, 8):
+        if self._sort_col in (0, 1, 8, 9):
             blocked.sort(key=lambda e: self._col_key(self._sort_col, e[0], e[1]),
                          reverse=rev)
         return good + blocked
@@ -818,6 +914,11 @@ class PaletteWindow(QWidget):
             it_comp = QTableWidgetItem(_fmt_compat(row.game_compat) if ok else "—")
             it_exp = QTableWidgetItem(f"{row.expected_avg:.2f}" if ok else "—")
             it_7 = QTableWidgetItem(f"{row.seven_plus_total:.1f}" if ok else "—")
+            defects_text = _defects_summary(row)
+            it_defects = QTableWidgetItem(defects_text)
+            it_defects.setToolTip(
+                "\n".join(self._pair_malady_lines(row)) or "Both parents clean."
+            )
             it_note = QTableWidgetItem(_note_text(row, kids))
 
             if ok:
@@ -858,7 +959,7 @@ class PaletteWindow(QWidget):
 
             color = "#8a849f" if not ok else "#e8e6ee"
             cells = [it_name, it_family, it_gap, it_room, it_risk, it_comp,
-                     it_exp, it_7, it_note]
+                     it_exp, it_7, it_defects, it_note]
             for col, it in enumerate(cells):
                 it.setForeground(QColor(color))
                 if ok and col == 1 and rel.is_family:
@@ -868,6 +969,8 @@ class PaletteWindow(QWidget):
                 if ok and col == 5:
                     it.setForeground(QColor("#7fe08a" if row.game_compat > 0.05
                                            else "#e0a63a"))
+                if ok and col == 8 and _any_defect_guaranteed(row):
+                    it.setForeground(QColor("#e0a63a"))   # inherited defects
                 self._table.setItem(r_i, col, it)
         self._update_sort_indicator()
 
@@ -894,8 +997,7 @@ class PaletteWindow(QWidget):
                          "the safest kind of pairing.")
         return "\n".join(lines)
 
-    @staticmethod
-    def _partner_tooltip(row: PartnerRow, kids: list[str]) -> str:
+    def _partner_tooltip(self, row: PartnerRow, kids: list[str]) -> str:
         lines = [f"{row.partner.name}  ({row.partner.gender}, {row.partner.room})"]
         rel = row.relation
         lines.append(f"Family: {rel.label} · Δgen {rel.gen_gap:+d} "
@@ -911,7 +1013,7 @@ class PaletteWindow(QWidget):
             )
             lines.append(f"Expected kitten stats: {ranges}")
             lines.append(f"Expected ≥7 stats: {row.seven_plus_total:.1f}")
-        malady = PaletteWindow._pair_malady_lines(row)
+        malady = self._pair_malady_lines(row)
         if malady:
             lines.append("")
             lines.extend(malady)
@@ -922,10 +1024,10 @@ class PaletteWindow(QWidget):
         lines.append("Double-click to analyse breeding from this cat.")
         return "\n".join(lines)
 
-    @staticmethod
-    def _pair_malady_lines(row: PartnerRow) -> list[str]:
+    def _pair_malady_lines(self, row: PartnerRow) -> list[str]:
         """Inheritance of traits the parents ALREADY carry (disorders exact,
-        visual birth defects per body part). Empty when both clean."""
+        visual birth defects per body part, effects when the gpak is present).
+        Empty when both parents are clean."""
         if row.pair_factors is None:
             return []
         a = row.pair_factors.cat_a          # focused cat
@@ -974,11 +1076,27 @@ class PaletteWindow(QWidget):
                     f"→ {drow.name} (carried by {who} only{loc}): "
                     f"≈{drow.chance_pct:.0f}% to pass at 50 Stimulation"
                 )
+            effect = self._effect_for_name(a, b, drow.name)
+            if effect:
+                lines.append(f"    effect: {effect}")
         if rows and any(len(r.carriers) == 1 for r in rows):
             lines.append("(single-sided odds assume the other parent's matching "
                          "body part is normal; a 20% part-reroll can still "
                          "change one part)")
         return lines
+
+    def _effect_for_name(self, a, b, name: str) -> str:
+        """Look up the first known gpak effect for a defect carried by a/b."""
+        if self._ga is None:
+            return ""
+        for cat in (a, b):
+            for e in (getattr(cat, "visual_mutation_entries", None) or []):
+                if e.get("is_defect") and e.get("name") == name:
+                    text = self._ga.effect_for(e.get("group_key"),
+                                               e.get("mutation_id"))
+                    if text:
+                        return text
+        return ""
 
     def _on_partner_selected(self) -> None:
         item = self._table.currentItem()
