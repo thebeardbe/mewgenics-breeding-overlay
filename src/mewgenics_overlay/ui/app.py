@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 
 from PySide6.QtCore import Qt, QPoint
@@ -96,6 +97,15 @@ def main(argv=None) -> int:
     # for an overlay. Keep our own loggers at INFO, vendors at WARNING.
     for noisy in ("mewgenics.parser", "mewgenics.breeding"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
+
+    # On Hyprland run under XWayland: the always-on-top flag is honoured
+    # reliably there, and Hyprland window rules (pin/float) can keep the
+    # palette above a fullscreen game. Wayland-native can't guarantee that.
+    if os.environ.get("HYPRLAND_INSTANCE_SIGNATURE") and \
+            "QT_QPA_PLATFORM" not in os.environ:
+        os.environ["QT_QPA_PLATFORM"] = "xcb"
+        logging.info("Hyprland detected — using xcb platform for overlay "
+                     "above game windows")
 
     app = QApplication(sys.argv[:1])
     app.setApplicationName("mewgenics-overlay")
