@@ -47,7 +47,7 @@ from mewgenics_overlay.vendor.breeding import tracked_offspring
 from . import config as cfg
 from .theme import STYLESHEET, gender_badge, risk_color
 from mewgenics_overlay.core.maladies import (
-    DEFECT_PASS_APPROX_PCT,
+    defect_inheritance_rows,
     defect_lines,
     disorder_summary,
 )
@@ -294,9 +294,8 @@ class PaletteWindow(QWidget):
             "Traits this cat already carries that can pass to kittens:\n"
             "• Disorders: 15% per parent that carries one — the kitten rolls "
             "once per parent and inherits one random disorder from it.\n"
-            "• Birth defects: inherited as appearance per body part "
-            f"(~{DEFECT_PASS_APPROX_PCT:.0f}% each with a normal partner at "
-            "50 Stimulation — approximate)."
+            "• Birth defects: inherited as appearance per body part. Select a "
+            "partner to see each defect's pass chance for that pair."
         )
         row2 = QHBoxLayout()
         self._btn_swap = QPushButton("Hide blocked rows")
@@ -924,14 +923,12 @@ class PaletteWindow(QWidget):
     @staticmethod
     def _pair_malady_lines(row: PartnerRow) -> list[str]:
         """Inheritance of traits the parents ALREADY carry (disorders exact,
-        visual birth defects approximate per body part). Empty when both
-        parents are clean."""
+        visual birth defects per body part). Empty when both clean."""
         if row.pair_factors is None:
             return []
         a = row.pair_factors.cat_a          # focused cat
         b = row.pair_factors.cat_b          # partner
         dis = disorder_summary(a, b)
-        def_a, def_b = defect_lines(a), defect_lines(b)
         lines: list[str] = []
         if dis["a"]:
             lines.append(f"⚠ {a.name} carries disorder(s): "
@@ -943,16 +940,21 @@ class PaletteWindow(QWidget):
             lines.append(f"→ Kitten inherits ≥1 parent disorder: "
                          f"{dis['any_pct']:.0f}% "
                          f"(15% per parent that carries one)")
-        if def_a:
-            lines.append(f"⚠ {a.name}'s birth defects: {', '.join(def_a)}")
-        if def_b:
-            lines.append(f"⚠ {b.name}'s birth defects: {', '.join(def_b)}")
-        if def_a or def_b:
-            lines.append(
-                f"→ Birth defects pass per body part "
-                f"(≈{DEFECT_PASS_APPROX_PCT:.0f}% each with a normal partner "
-                f"at 50 Stimulation — approximate)"
-            )
+        rows = defect_inheritance_rows(a, b, row.coi)
+        for drow in rows:
+            if len(drow.carriers) == 2:
+                lines.append(f"→ {drow.name}: both parents carry it — "
+                             f"the kitten gets it (≈100%)")
+            else:
+                who = a.name if drow.carriers[0] == "a" else b.name
+                lines.append(
+                    f"→ {drow.name} (carried by {who} only): "
+                    f"≈{drow.chance_pct:.0f}% to pass at 50 Stimulation"
+                )
+        if rows and any(len(r.carriers) == 1 for r in rows):
+            lines.append("(single-sided odds assume the other parent's matching "
+                         "body part is normal; a 20% part-reroll can still "
+                         "change one part)")
         return lines
 
     def _on_partner_selected(self) -> None:
