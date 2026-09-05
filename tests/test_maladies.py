@@ -13,7 +13,8 @@ from mewgenics_overlay.core.maladies import (
 
 
 def cat(disorders=None, defects=None):
-    return SimpleNamespace(disorders=disorders, defects=defects)
+    return SimpleNamespace(disorders=disorders, defects=defects,
+                           parent_a=None, parent_b=None)
 
 
 def test_disorder_summary_clean():
@@ -84,3 +85,62 @@ def test_inbreeding_raises_single_carrier_chance():
 def test_no_defects_no_rows():
     assert defect_inheritance_rows(cat(), cat(), 0.5) == []
     assert defect_inheritance_rows(cat(), cat(), 0.5, stimulation=120.0) == []
+
+
+# ── lineage (shared ancestor) checks ────────────────────────────────────────
+from dataclasses import dataclass, field  # noqa: E402
+
+
+@dataclass(eq=False)
+class Node:
+    name: str
+    parent_a: object = field(default=None, repr=False)
+    parent_b: object = field(default=None, repr=False)
+    visual_mutation_entries: list = field(default_factory=list)
+    defects: list = field(default_factory=list)
+    disorders: list = field(default_factory=list)
+
+
+def _arm_defect(slots):
+    return [{"is_defect": True, "name": "Arm Birth Defect",
+             "group_key": "arms", "slot_key": s} for s in slots]
+
+
+def test_same_line_when_shared_ancestor_carries_defect():
+    founder = Node("f", visual_mutation_entries=_arm_defect(["arm_L", "arm_R"]),
+                   defects=["Arm Birth Defect"])
+    mate = Node("m")
+    # two unrelated mates, both bred through the founder => cousins
+    a = Node("a", parent_a=founder, parent_b=mate,
+             visual_mutation_entries=_arm_defect(["arm_L", "arm_R"]),
+             defects=["Arm Birth Defect"])
+    b = Node("b", parent_a=founder, parent_b=mate,
+             visual_mutation_entries=_arm_defect(["arm_L", "arm_R"]),
+             defects=["Arm Birth Defect"])
+    rows = defect_inheritance_rows(a, b, coi=0.2)
+    r = _row(rows, "Arm Birth Defect")
+    assert r.carriers == ("a", "b")
+    assert r.chance_pct == 100.0
+    assert r.same_line is True
+
+
+def test_different_lines_when_no_shared_carrier_ancestor():
+    # founder A-line and a completely separate founder B-line both carry the
+    # defect; the pair shares no defect-carrying ancestor.
+    f1 = Node("f1", visual_mutation_entries=_arm_defect(["arm_L"]),
+              defects=["Arm Birth Defect"])
+    f2 = Node("f2", visual_mutation_entries=_arm_defect(["arm_R"]),
+              defects=["Arm Birth Defect"])
+    m1, m2 = Node("m1"), Node("m2")
+    a = Node("a", parent_a=f1, parent_b=m1,
+             visual_mutation_entries=_arm_defect(["arm_L"]),
+             defects=["Arm Birth Defect"])
+    b = Node("b", parent_a=f2, parent_b=m2,
+             visual_mutation_entries=_arm_defect(["arm_R"]),
+             defects=["Arm Birth Defect"])
+    rows = defect_inheritance_rows(a, b, coi=0.0)
+    r = _row(rows, "Arm Birth Defect")
+    assert r.chance_pct == 100.0
+    assert r.same_line is False
+    assert r.slots_a == frozenset({"arm_L"})
+    assert r.slots_b == frozenset({"arm_R"})

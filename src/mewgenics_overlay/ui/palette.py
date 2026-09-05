@@ -47,6 +47,8 @@ from mewgenics_overlay.vendor.breeding import tracked_offspring
 from . import config as cfg
 from .theme import STYLESHEET, gender_badge, risk_color
 from mewgenics_overlay.core.maladies import (
+    ASYMMETRIC_GROUPS,
+    _side_text,
     defect_inheritance_rows,
     defect_lines,
     disorder_summary,
@@ -942,13 +944,34 @@ class PaletteWindow(QWidget):
                          f"(15% per parent that carries one)")
         rows = defect_inheritance_rows(a, b, row.coi)
         for drow in rows:
+            asym = drow.group in ASYMMETRIC_GROUPS
             if len(drow.carriers) == 2:
-                lines.append(f"→ {drow.name}: both parents carry it — "
-                             f"the kitten gets it (≈100%)")
+                if not asym:
+                    lines.append(f"→ {drow.name}: both parents carry it — "
+                                 f"the kitten gets it (≈100%)")
+                elif drow.same_line:
+                    lines.append(
+                        f"→ {drow.name}: both parents carry it from the SAME "
+                        f"line → the kitten gets it on the same part/side "
+                        f"(≈100%)"
+                    )
+                else:
+                    lines.append(
+                        f"→ {drow.name}: both parents carry it from DIFFERENT "
+                        f"lines → the kitten gets it on the same side as one "
+                        f"parent OR the opposite side (≈100%)"
+                    )
+                if asym:
+                    sa = _side_text(drow.slots_a)
+                    sb = _side_text(drow.slots_b)
+                    if sa and sb:
+                        lines.append(f"    ({a.name}: {sa} · {b.name}: {sb})")
             else:
                 who = a.name if drow.carriers[0] == "a" else b.name
+                where = _side_text(drow.slots_a or drow.slots_b)
+                loc = f", on {where}" if where else ""
                 lines.append(
-                    f"→ {drow.name} (carried by {who} only): "
+                    f"→ {drow.name} (carried by {who} only{loc}): "
                     f"≈{drow.chance_pct:.0f}% to pass at 50 Stimulation"
                 )
         if rows and any(len(r.carriers) == 1 for r in rows):
