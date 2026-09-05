@@ -17,11 +17,13 @@ inject a cat key the same way `set_focus_key()` does.
 from __future__ import annotations
 
 import logging
+import os
+import sys
 import threading
 from typing import Optional
 
-from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QColor
+from PySide6.QtCore import Qt, QRect, QTimer
+from PySide6.QtGui import QColor, QGuiApplication
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -174,14 +176,23 @@ class PaletteWindow(QWidget):
         self._pending: list[tuple] = []   # (token, kind, result)
         self._token = 0
         self._ui_busy = False
+        self._pinned = True               # mirror of the 📌 button state
+        self._click_through = False       # mouse passes through to the game
+        self._flag_applied = False        # non-Windows fallback guard
 
         self.setWindowTitle("Mewgenics Breeding Overlay")
-        self.setWindowFlags(
-            Qt.WindowType.FramelessWindowHint
-            | Qt.WindowType.WindowStaysOnTopHint
-        )
+        flags = Qt.WindowType.FramelessWindowHint
+        # Pinning is done natively on Windows (SetWindowPos) and via compositor
+        # rules on Hyprland; only generic X11/Wayland keep the Qt flag, which
+        # re-creates the native window when toggled (Windows hides it -> the
+        # "can't find it anymore" bug).
+        if sys.platform != "win32" and not os.environ.get(
+                "HYPRLAND_INSTANCE_SIGNATURE"):
+            flags |= Qt.WindowType.WindowStaysOnTopHint
+        self.setWindowFlags(flags)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, False)
         self.resize(760, 560)
+        self._restore_geometry()
         self.setStyleSheet(STYLESHEET)
         self._build_ui()
         self._wire_ui()
@@ -212,10 +223,20 @@ class PaletteWindow(QWidget):
         self._status.setStyleSheet("color:#9a94b8; font-size:11px;")
         pin = QPushButton("📌")
         pin.setCheckable(True)
-        pin.setChecked(True)
-        pin.setToolTip("Always on top")
+        pin.setChecked(self._pinned)
         pin.setFixedWidth(34)
+        pin.setToolTip("Keep above the game (native pin on Windows, "
+                       "Hyprland rules on Linux)")
         pin.clicked.connect(self._toggle_pin)
+        self._btn_pin = pin
+        ct = QPushButton("🧿")
+        ct.setCheckable(True)
+        ct.setChecked(self._click_through)
+        ct.setFixedWidth(34)
+        ct.setToolTip("Click-through: let mouse clicks reach Mewgenics. "
+                      "Press Ctrl+Shift+B (Windows) / tray to interact again.")
+        ct.clicked.connect(self._on_ct_clicked)
+        self._btn_ct = ct
         open_save = QPushButton("📁")
         open_save.setFixedWidth(34)
         open_save.setToolTip("Choose a different save file")
@@ -228,6 +249,7 @@ class PaletteWindow(QWidget):
         head.addWidget(self._title)
         head.addWidget(self._status, 1)
         head.addWidget(pin)
+        head.addWidget(ct)
         head.addWidget(open_save)
         head.addWidget(close)
         root.addLayout(head)
@@ -321,14 +343,90 @@ class PaletteWindow(QWidget):
         self._table.horizontalHeader().sectionClicked.connect(self._on_header_clicked)
         self._btn_swap.toggled.connect(self._recompute_partners)
 
+    # ── window behaviour: pin, click-through, summoning ────────────────────
     def _toggle_pin(self, checked: bool) -> None:
-        flags = self.windowFlags()
-        if checked:
-            flags |= Qt.WindowType.WindowStaysOnTopHint
-        else:
-            flags &= ~Qt.WindowType.WindowStaysOnTopHint
-        self.setWindowFlags(flags)
+        """Pin toggle. Never re-creates the native window on Windows."""
+        self._pinned = bool(checked)
+        if sys.platform == "win32":
+            self._set_topmost_win32(self._pinned)
+        elif not os.environ.get("HYPRLAND_INSTANCE_SIGNATURE"):
+            # generic X11/Wayland: Qt flag fallback (may flash once)
+            self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint,
+                               self._pinned)
+            self.show()
+        # Hyprland: stacking is controlled by compositor rules — visual only.
+
+    def _set_topmost_win32(self, on: bool) -> None:
+        """Set/unset always-on-top without touching window flags (no HWND
+        re-creation -> the overlay can't get 'lost')."""
+        try:
+            import ctypes
+            hwnd = int(self.winId())
+            HWND_TOPMOST, HWND_NOTOPMOST = -1, -2
+            SWP_NOSIZE, SWP_NOMOVE, SWP_NOACTIVATE = 0x0001, 0x0002, 0x0010
+            ctypes.windll.user32.SetWindowPos(
+                hwnd,
+                HWND_TOPMOST if on else HWND_NOTOPMOST,
+                0, 0, 0, 0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+            )
+        except Exception:
+            pass
+
+    def _on_ct_clicked(self, checked: bool) -> None:
+        self.set_click_through(checked)
+
+    def set_click_through(self, on: bool) -> None:
+        """When ON, mouse events pass through to the game underneath."""
+        self._click_through = bool(on)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents,
+                          self._click_through)
+        btn = getattr(self, "_btn_ct", None)
+        if btn is not None:
+            btn.blockSignals(True)
+            btn.setChecked(self._click_through)
+            btn.blockSignals(False)
+
+    def _engage(self) -> None:
+        """Show the palette and make it interactive (hotkey/tray summon)."""
+        self.set_click_through(False)
         self.show()
+        self.raise_()
+        self.activateWindow()
+        self.setFocus()
+
+    def toggle_activate(self) -> None:
+        """Hotkey/tray cycle: hidden -> engage; passive -> engage; active -> hide."""
+        if not self.isVisible():
+            self._engage()
+        elif self._click_through:
+            self._engage()
+        else:
+            self.hide()
+
+    def showEvent(self, event):  # noqa: N802 (Qt API)
+        super().showEvent(event)
+        if sys.platform == "win32":
+            self._set_topmost_win32(self._pinned)
+
+    def hideEvent(self, event):  # noqa: N802 (Qt API)
+        self._save_geometry()
+        super().hideEvent(event)
+
+    def _restore_geometry(self) -> None:
+        """Restore the last window rect, clamped to a visible screen."""
+        rect = self._settings.get("window_rect")
+        if not (isinstance(rect, list) and len(rect) == 4):
+            return
+        r = QRect(*rect)
+        screens = QGuiApplication.screens()
+        if any(r.intersects(s.availableGeometry()) for s in screens):
+            self.setGeometry(r)
+
+    def _save_geometry(self) -> None:
+        g = self.geometry()
+        self._settings["window_rect"] = [g.x(), g.y(), g.width(), g.height()]
+        cfg.save(self._settings)
 
     def _on_close_clicked(self) -> None:
         """Hide when a tray icon can bring us back; otherwise quit."""

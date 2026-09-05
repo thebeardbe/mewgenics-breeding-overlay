@@ -53,30 +53,27 @@ def _build_tray(app: QApplication, palette: PaletteWindow):
     if not QSystemTrayIcon.isSystemTrayAvailable():
         return None
 
-    def _toggle():
-        if palette.isVisible():
-            palette.hide()
-        else:
-            palette.show()
-            palette.raise_()
-            palette.activateWindow()
-
     tray = QSystemTrayIcon(_make_tray_icon(), app)
     tray.setToolTip("Mewgenics Breeding Overlay")
     menu = QMenu()
     act_show = QAction("Show overlay", None)
-    act_show.triggered.connect(_toggle)
+    act_show.triggered.connect(palette._engage)
+    act_ct = QAction("Toggle click-through", None)
+    act_ct.triggered.connect(
+        lambda: palette.set_click_through(not palette._click_through))
     act_save = QAction("Choose save…", None)
     act_save.triggered.connect(palette._pick_save)
     act_quit = QAction("Quit", None)
     act_quit.triggered.connect(app.quit)
     menu.addAction(act_show)
+    menu.addAction(act_ct)
     menu.addAction(act_save)
     menu.addSeparator()
     menu.addAction(act_quit)
     tray.setContextMenu(menu)
     tray.activated.connect(
-        lambda reason: _toggle() if reason == QSystemTrayIcon.ActivationReason.Trigger else None
+        lambda reason: palette.toggle_activate()
+        if reason == QSystemTrayIcon.ActivationReason.Trigger else None
     )
     tray.show()
     return tray
@@ -112,12 +109,13 @@ def main(argv=None) -> int:
     app.setStyleSheet(STYLESHEET)
 
     palette = PaletteWindow()
-    hotkey = hotkey_mod.install(app, palette_toggle_cb(palette))
+    hotkey = hotkey_mod.install(app, palette.toggle_activate)
     if not hotkey.active:
         logging.info("global hotkey unavailable; use the tray icon to toggle")
     tray = None
     if not args.no_tray:
         tray = _build_tray(app, palette)
+    app.aboutToQuit.connect(palette._save_geometry)
 
     if args.save:
         palette.open_save(args.save)
@@ -131,17 +129,6 @@ def main(argv=None) -> int:
     if tray is not None:
         tray.hide()
     return code
-
-
-def palette_toggle_cb(palette: PaletteWindow):
-    def cb():
-        if palette.isVisible():
-            palette.hide()
-        else:
-            palette.show()
-            palette.raise_()
-            palette.activateWindow()
-    return cb
 
 
 if __name__ == "__main__":

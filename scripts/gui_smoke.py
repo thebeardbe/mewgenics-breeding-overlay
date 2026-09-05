@@ -143,6 +143,23 @@ def main() -> int:
     assert got_results, "search results never populated"
     print(f"[ok] search returns {pal._results.count()} result(s)")
 
+    # 6) window-state cycle: engage -> click-through -> re-engage -> hide
+    pal.set_click_through(True)
+    assert pal._click_through
+    pal._engage()
+    assert not pal._click_through
+    pal.set_click_through(True)
+    pal.toggle_activate()                # passive + hotkey -> interactive
+    assert not pal._click_through
+    assert pal.isVisible()
+    pal.toggle_activate()                # active + hotkey -> hide
+    assert not pal.isVisible()
+    pal.toggle_activate()                # hidden -> engage again
+    assert pal.isVisible() and not pal._click_through
+    print("[ok] engage/click-through/hide cycle")
+
+    pal.set_click_through(False)
+
     pal.shutdown()
     print("GUI SMOKE PASSED")
     return 0

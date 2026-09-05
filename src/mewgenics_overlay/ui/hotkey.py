@@ -25,6 +25,9 @@ from typing import Callable, Optional
 
 from PySide6.QtCore import QAbstractNativeEventFilter
 
+import ctypes  # noqa: E402  (used inside the Windows filter)
+
+
 _HOTKEY_ID = 0xBEEF
 
 
@@ -52,12 +55,23 @@ class _WindowsHotkeyFilter(QAbstractNativeEventFilter):
             self._registered = False
 
     def nativeEventFilter(self, event_type, message):  # noqa: N802 (Qt API)
-        if self._registered and event_type == b"windows_generic_MSG":
-            msg = message[0]
-            if msg.message == self.WM_HOTKEY and msg.wParam == _HOTKEY_ID:
+        """PySide6 passes the Win32 MSG as a Shiboken.VoidPtr; decode it with
+        ctypes so hotkeys never crash the event loop."""
+        if not self._registered or event_type != b"windows_generic_MSG":
+            return False, 0
+        try:
+            # Shiboken.VoidPtr -> memory address of the MSG struct
+            address = int(message)
+            msg = ctypes.wintypes.MSG.from_address(address)
+        except (TypeError, ValueError, AttributeError):
+            return False, 0
+        if msg.message == self.WM_HOTKEY and msg.wParam == _HOTKEY_ID:
+            try:
                 self._cb()
-                return True, 0
-        return super().nativeEventFilter(event_type, message)
+            except Exception:
+                pass
+            return True, 0
+        return False, 0
 
 
 class Hotkey:
