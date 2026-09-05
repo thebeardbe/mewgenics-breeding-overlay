@@ -42,6 +42,7 @@ QPushButton {
 }
 QPushButton:hover { background: #413865; }
 QPushButton:pressed { background: #2a2440; }
+QPushButton:checked { background: #6d5bd0; }
 QPushButton:disabled { color: #6d6890; }
 QLabel#headerName { font-size: 15px; font-weight: 700; }
 QLabel#muted { color: #9a94b8; }

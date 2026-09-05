@@ -22,7 +22,7 @@ import sys
 import threading
 from typing import Optional
 
-from PySide6.QtCore import Qt, QRect, QTimer
+from PySide6.QtCore import Qt, QEvent, QRect, QTimer
 from PySide6.QtGui import QColor, QGuiApplication
 from PySide6.QtWidgets import (
     QApplication,
@@ -412,6 +412,16 @@ class PaletteWindow(QWidget):
     def hideEvent(self, event):  # noqa: N802 (Qt API)
         self._save_geometry()
         super().hideEvent(event)
+
+    def changeEvent(self, event):  # noqa: N802 (Qt API)
+        """The moment the palette loses focus (user clicks the game), stop
+        intercepting mouse input: switch to click-through automatically so the
+        game always receives clicks in this area. Summon it again with
+        Ctrl+Shift+B / tray to interact."""
+        if (event.type() == QEvent.Type.WindowDeactivate
+                and self.isVisible() and not self._click_through):
+            self.set_click_through(True)
+        super().changeEvent(event)
 
     def _restore_geometry(self) -> None:
         """Restore the last window rect, clamped to a visible screen."""
