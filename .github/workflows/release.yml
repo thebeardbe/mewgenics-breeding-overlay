@@ -1,0 +1,95 @@
+name: build
+
+# Builds self-contained binaries for Windows and Linux on every push to a
+# v* tag and attaches them to a GitHub Release. Nobody who downloads the
+# release needs Python — they just run the binary.
+#
+#   git tag v0.1.0 && git push origin v0.1.0
+#
+# Manual trigger available under Actions -> build -> Run workflow.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            artifact: MewgenicsOverlay-windows-x64
+            script: packaging\build_windows.bat
+            binary: dist\MewgenicsOverlay.exe
+          - os: ubuntu-latest
+            artifact: MewgenicsOverlay-linux-x64
+            script: bash packaging/build_linux.sh
+            binary: dist/MewgenicsOverlay
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Qt offscreen plugin + GL libs needed for the import smoke test on Linux
+      - if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libgl1 libxkbcommon-x11-0 libdbus-1-3
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt "PySide6-Essentials>=6.5" pyinstaller
+
+      - name: Smoke test (imports + offscreen widget construction)
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          python - <<'PY'
+          import os
+          os.environ.setdefault("XDG_CONFIG_HOME", os.path.abspath(".ci-cfg"))
+          from PySide6.QtWidgets import QApplication
+          from mewgenics_overlay.ui.palette import PaletteWindow
+          app = QApplication([])
+          PaletteWindow()
+          print("smoke-ok")
+          PY
+        shell: bash
+
+      - name: Build binary
+        run: ${{ matrix.script }}
+
+      - name: Verify binary exists
+        run: test -f "${{ matrix.binary }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.binary }}
+          if-no-files-found: error
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            artifacts/MewgenicsOverlay-windows-x64/*
+            artifacts/MewgenicsOverlay-linux-x64/*

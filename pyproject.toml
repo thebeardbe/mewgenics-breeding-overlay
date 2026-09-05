@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mewgenics-breeding-overlay"
+version = "0.1.0"
+description = "Live breeding-manager overlay for Mewgenics: pick a cat, see ranked compatible partners while you play."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = ["lz4>=4.0"]
+
+[project.optional-dependencies]
+ui = ["PySide6-Essentials>=6.5"]
+
+[project.scripts]
+mewgenics-overlay = "mewgenics_overlay.ui.app:main"
+mewgenics-overlay-cli = "mewgenics_overlay.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,0 +1,5 @@
+# Core engine dependency only (no GUI).
+lz4>=4.0
+
+# Optional: run the overlay UI (Qt Widgets only — Essentials keeps it lean).
+# PySide6-Essentials>=6.5

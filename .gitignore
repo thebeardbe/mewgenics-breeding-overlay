@@ -1,0 +1,18 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.spec
+.venv/
+build/
+dist/
+.pytest_cache/
+.ci-cfg/
+
+# Extracted sample saves (obtain from upstream MBM tools/saves/saves.zip)
+samples/
+
+# Full upstream MBM checkout used as a vendor reference during development
+repo/
+
+# Local editor/OS noise
+.DS_Store
