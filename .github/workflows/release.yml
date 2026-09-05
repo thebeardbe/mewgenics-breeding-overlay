@@ -28,6 +28,8 @@ jobs:
             script: bash packaging/build_linux.sh
             binary: dist/MewgenicsOverlay
     runs-on: ${{ matrix.os }}
+    env:
+      PYTHONPATH: ${{ github.workspace }}/src
 
     steps:
       - uses: actions/checkout@v4
