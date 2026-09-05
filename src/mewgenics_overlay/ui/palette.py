@@ -46,6 +46,11 @@ from mewgenics_overlay.vendor.breeding import tracked_offspring
 
 from . import config as cfg
 from .theme import STYLESHEET, gender_badge, risk_color
+from mewgenics_overlay.core.maladies import (
+    DEFECT_PASS_APPROX_PCT,
+    defect_lines,
+    disorder_summary,
+)
 
 log = logging.getLogger("mewgenics_overlay.ui")
 
@@ -282,6 +287,17 @@ class PaletteWindow(QWidget):
         self._cat_stats.setTextFormat(Qt.TextFormat.RichText)
         self._cat_lovers = QLabel("")
         self._cat_lovers.setObjectName("muted")
+        self._cat_health = QLabel("")
+        self._cat_health.setWordWrap(True)
+        self._cat_health.setStyleSheet("color:#e0a63a; font-size:11px;")
+        self._cat_health.setToolTip(
+            "Traits this cat already carries that can pass to kittens:\n"
+            "• Disorders: 15% per parent that carries one — the kitten rolls "
+            "once per parent and inherits one random disorder from it.\n"
+            "• Birth defects: inherited as appearance per body part "
+            f"(~{DEFECT_PASS_APPROX_PCT:.0f}% each with a normal partner at "
+            "50 Stimulation — approximate)."
+        )
         row2 = QHBoxLayout()
         self._btn_swap = QPushButton("Hide blocked rows")
         self._btn_swap.setCheckable(True)
@@ -294,6 +310,7 @@ class PaletteWindow(QWidget):
         cat_l.addWidget(self._cat_meta)
         cat_l.addWidget(self._cat_stats)
         cat_l.addWidget(self._cat_lovers)
+        cat_l.addWidget(self._cat_health)
         cat_l.addLayout(row2)
         root.addWidget(self._cat_box)
 
@@ -619,6 +636,7 @@ class PaletteWindow(QWidget):
         self._cat_meta.setText("")
         self._cat_stats.setText("")
         self._cat_lovers.setText("")
+        self._cat_health.setText("")
         self._table.setRowCount(0)
         self._detail.setText("Select a partner row for inheritance detail.")
 
@@ -661,6 +679,16 @@ class PaletteWindow(QWidget):
             "not as a hard pair block." if lover_txt
             else "This cat has no in-game lovers right now."
         )
+        # traits this cat already carries (defects / disorders)
+        disorders = list(getattr(cat, "disorders", None) or [])
+        own_defects = defect_lines(cat)
+        health_bits = []
+        if disorders:
+            health_bits.append("disorders: " + ", ".join(disorders))
+        if own_defects:
+            health_bits.append("birth defects: " + ", ".join(own_defects))
+        self._cat_health.setText("⚠ " + " · ".join(health_bits)
+                                 if health_bits else "")
 
     # ── search results ─────────────────────────────────────────────────────
     def _on_search_text(self, text: str) -> None:
@@ -882,12 +910,50 @@ class PaletteWindow(QWidget):
             )
             lines.append(f"Expected kitten stats: {ranges}")
             lines.append(f"Expected ≥7 stats: {row.seven_plus_total:.1f}")
+        malady = PaletteWindow._pair_malady_lines(row)
+        if malady:
+            lines.append("")
+            lines.extend(malady)
         if row.is_lover or row.mutual_lover:
             lines.append("They are lovers" if row.mutual_lover else "They like you")
         if kids:
             lines.append("Existing kittens together: " + ", ".join(kids))
         lines.append("Double-click to analyse breeding from this cat.")
         return "\n".join(lines)
+
+    @staticmethod
+    def _pair_malady_lines(row: PartnerRow) -> list[str]:
+        """Inheritance of traits the parents ALREADY carry (disorders exact,
+        visual birth defects approximate per body part). Empty when both
+        parents are clean."""
+        if row.pair_factors is None:
+            return []
+        a = row.pair_factors.cat_a          # focused cat
+        b = row.pair_factors.cat_b          # partner
+        dis = disorder_summary(a, b)
+        def_a, def_b = defect_lines(a), defect_lines(b)
+        lines: list[str] = []
+        if dis["a"]:
+            lines.append(f"⚠ {a.name} carries disorder(s): "
+                         + ", ".join(dis["a"]))
+        if dis["b"]:
+            lines.append(f"⚠ {b.name} carries disorder(s): "
+                         + ", ".join(dis["b"]))
+        if dis["a"] or dis["b"]:
+            lines.append(f"→ Kitten inherits ≥1 parent disorder: "
+                         f"{dis['any_pct']:.0f}% "
+                         f"(15% per parent that carries one)")
+        if def_a:
+            lines.append(f"⚠ {a.name}'s birth defects: {', '.join(def_a)}")
+        if def_b:
+            lines.append(f"⚠ {b.name}'s birth defects: {', '.join(def_b)}")
+        if def_a or def_b:
+            lines.append(
+                f"→ Birth defects pass per body part "
+                f"(≈{DEFECT_PASS_APPROX_PCT:.0f}% each with a normal partner "
+                f"at 50 Stimulation — approximate)"
+            )
+        return lines
 
     def _on_partner_selected(self) -> None:
         item = self._table.currentItem()
@@ -914,6 +980,9 @@ class PaletteWindow(QWidget):
                 text += f"   ·   existing kittens: {', '.join(kids)}"
         else:
             text = head + f"\nCan't breed: {row.reason or 'blocked'}"
+        malady = self._pair_malady_lines(row)
+        if malady:
+            text += "\n" + "\n".join(malady)
         self._detail.setText(text)
 
     def _on_partner_double(self, item: QTableWidgetItem) -> None:
