@@ -47,6 +47,7 @@ class DonationsTab(QWidget):
         super().__init__()
         self._palette = palette
         self._slots = []
+        self._active_npc = None
         root = QVBoxLayout(self)
         root.setContentsMargins(10, 10, 10, 10)
         root.setSpacing(6)
@@ -100,6 +101,7 @@ class DonationsTab(QWidget):
 
     # ── data ───────────────────────────────────────────────────────────────
     def refresh(self, session) -> None:
+        previous = getattr(self, "_active_npc", None)
         palette = getattr(self, "_palette", None)
         self._effect_of_cat = getattr(palette, "defect_text_of", None) \
             if palette is not None else None
@@ -125,6 +127,20 @@ class DonationsTab(QWidget):
         # appear — that would give away who exists and what they want.
         self._slots = [s for s in report if s.supported and s.active]
         self._rebuild_combo()
+        self._restore_npc(previous)
+
+    def _restore_npc(self, npc) -> None:
+        """Keep the dropdown on the NPC the user was viewing after a refresh
+        (e.g. after pinning a cat) instead of snapping back to the first."""
+        if not npc or not self._slots:
+            return
+        for i, slot in enumerate(self._slots):
+            if slot.npc == npc:
+                self._combo.blockSignals(True)
+                self._combo.setCurrentIndex(i)
+                self._combo.blockSignals(False)
+                self._on_npc_selected(i)
+                break
 
     def _rebuild_combo(self) -> None:
         self._combo.blockSignals(True)
@@ -151,9 +167,11 @@ class DonationsTab(QWidget):
     def _on_npc_selected(self, index: int) -> None:
         slot = self._current_slot()
         if slot is None:
+            self._active_npc = None
             self._table.setRowCount(0)
             self._hint.setText("")
             return
+        self._active_npc = slot.npc
         if not slot.supported:
             self._table.setRowCount(0)
             self._hint.setText("")
