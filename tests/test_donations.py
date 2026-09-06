@@ -81,6 +81,18 @@ def test_recommendation_lines_explain_why():
     assert "Tink" in text and "Dr. Beanies" in text
 
 
+def test_baby_jack_takes_injured_cats():
+    hurt = cat("Hurt", base={k: 5 for k in
+                           ("STR", "DEX", "CON", "INT", "SPD", "CHA", "LCK")})
+    hurt.total_stats = {k: (3 if k == "SPD" else 5) for k in
+                        ("STR", "DEX", "CON", "INT", "SPD", "CHA", "LCK")}
+    healthy = cat("Fine")
+    healthy.total_stats = dict(healthy.base_stats)
+    report = donation_report([hurt, healthy])
+    slot = _slot(report, "Baby Jack")
+    assert [c.name for c in slot.candidates] == ["Hurt"]
+
+
 def test_unsupported_npcs_listed_but_empty():
     report = donation_report([cat(age=1)])
     for slot in report:

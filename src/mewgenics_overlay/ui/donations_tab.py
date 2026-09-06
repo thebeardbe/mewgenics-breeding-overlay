@@ -1,11 +1,9 @@
-"""Donations tab: which cats to send to each NPC today."""
+"""Donations tab: pick an NPC from a dropdown, see its candidates + why."""
 
 from __future__ import annotations
 
-from typing import Optional
-
-from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
+    QComboBox,
     QHBoxLayout,
     QLabel,
     QTableWidget,
@@ -14,15 +12,14 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from mewgenics_overlay.core.donations import donation_report
+from mewgenics_overlay.core.donations import donation_report, recommendation_lines
 from mewgenics_overlay.ui.theme import wrap_tooltip as _wt
 
-_COLS = ["NPC", "Wants", "Qualifying now", "Suggested first"]
+_COLS = ["Cat", "Age", "Stats", "Why donate"]
 
 
 class DonationsTab(QWidget):
-    """Lists every donation NPC and today's qualifying cats, ranked by who
-    to give away first (weakest/most expendable first)."""
+    """Pick which NPC you're feeding, see today's candidates with reasons."""
 
     def __init__(self, palette=None):
         super().__init__()
@@ -33,16 +30,14 @@ class DonationsTab(QWidget):
         root.setSpacing(6)
 
         head = QHBoxLayout()
-        self._summary = QLabel("Loading…")
+        lab = QLabel("Donating to:")
+        self._combo = QComboBox()
+        self._combo.setMinimumWidth(240)
+        self._combo.currentIndexChanged.connect(self._on_npc_selected)
+        self._summary = QLabel("")
         self._summary.setWordWrap(True)
-        self._summary.setToolTip(_wt(
-            "Who wants what, and how many of your cats currently qualify.\n"
-            "'Suggested first' lists the easiest cats to part with — weak "
-            "stats, inbred, older, carrying conditions. In-love, pinned and "
-            "must-breed cats are kept out of the top of the list.\n"
-            "Unsupported NPCs are shown for completeness; the save format "
-            "doesn't tell us their requirements yet."
-        ))
+        head.addWidget(lab)
+        head.addWidget(self._combo)
         head.addWidget(self._summary, 1)
         root.addLayout(head)
 
@@ -54,13 +49,14 @@ class DonationsTab(QWidget):
         self._table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         hdr = self._table.horizontalHeader()
         hdr.setStretchLastSection(True)
-        for i, w in enumerate([130, 220, 90, 260]):
+        for i, w in enumerate([170, 50, 80, 380]):
             self._table.setColumnWidth(i, w)
         root.addWidget(self._table, 1)
 
-        self._note = QLabel("Refresh happens automatically when the save updates.")
-        self._note.setObjectName("muted")
-        root.addWidget(self._note)
+        self._hint = QLabel("")
+        self._hint.setObjectName("muted")
+        self._hint.setWordWrap(True)
+        root.addWidget(self._hint)
 
     # ── data ───────────────────────────────────────────────────────────────
     def refresh(self, session) -> None:
@@ -68,56 +64,78 @@ class DonationsTab(QWidget):
         flags = getattr(session, "npc_progress_flags", set()) \
             if session is not None else set()
         self._slots = donation_report(cats, active=flags) if cats else []
-        self._render()
+        self._rebuild_combo()
 
-    def _render(self) -> None:
-        if not self._slots:
-            self._summary.setText("No save loaded — no donation advice yet.")
+    def _rebuild_combo(self) -> None:
+        self._combo.blockSignals(True)
+        self._combo.clear()
+        for slot in self._slots:
+            label = slot.npc
+            if slot.supported:
+                label += f"  ({slot.count} now)"
+                if not slot.active:
+                    label += " · locked"
+            else:
+                label += "  (unsupported)"
+            self._combo.addItem(label)
+            self._combo.setItemData(self._combo.count() - 1, slot, 0x0100)
+        self._combo.blockSignals(False)
+        if self._slots:
+            self._combo.setCurrentIndex(0)
+            self._on_npc_selected(0)
         else:
-            total = sum(s.count for s in self._slots if s.supported)
-            self._summary.setText(
-                f"Each NPC levels up when you send them their type of cat. "
-                f"Right now {total} of your cats qualify for a donation NPC."
-            )
+            self._summary.setText("No save loaded yet.")
+            self._table.setRowCount(0)
+
+    def _current_slot(self):
+        i = self._combo.currentIndex()
+        return self._slots[i] if 0 <= i < len(self._slots) else None
+
+    def _on_npc_selected(self, index: int) -> None:
+        slot = self._current_slot()
+        if slot is None:
+            self._table.setRowCount(0)
+            self._hint.setText("")
+            return
+        if not slot.supported:
+            self._table.setRowCount(0)
+            self._hint.setText(f"{slot.npc}: {slot.unlock_note}")
+            return
+        status = "this NPC is active" if slot.active \
+            else "locked — not unlocked in your game yet"
+        self._summary.setText(f"{slot.wants} · {slot.count} qualifying · {status}")
+        self._render_slot(slot)
+
+    def _render_slot(self, slot) -> None:
         self._table.setRowCount(0)
-        self._table.setRowCount(len(self._slots))
-        for r_i, slot in enumerate(self._slots):
-            name = slot.npc
-            if slot.supported and not slot.active:
-                name += "  (not unlocked)"
-            cells = [name, slot.wants,
-                     str(slot.count) if slot.supported else "—",
-                     self._suggested_text(slot)]
-            inactive = slot.supported and not slot.active
+        cats = slot.candidates
+        self._table.setRowCount(len(cats))
+        for r_i, cat in enumerate(cats):
+            base = sum(getattr(cat, "base_stats", {}).values())
+            inj = sum(1 for s, v in (getattr(cat, "base_stats", {}) or {}).items()
+                      if (getattr(cat, "total_stats", {}) or {}).get(s, v) < v)
+            why = " · ".join(recommendation_lines(cat))
+            cells = [cat.name, str(getattr(cat, "age", "?")), str(base), why]
             for c_i, text in enumerate(cells):
                 it = QTableWidgetItem(text)
-                it.setToolTip(self._cell_tip(slot, c_i))
-                if (not slot.supported or inactive) and c_i == 0:
-                    it.setForeground(QColor("#8a849f"))
+                it.setToolTip(self._row_tip(cat, slot, base, inj))
                 self._table.setItem(r_i, c_i, it)
+        self._hint.setText(
+            "Ordered weakest → strongest (the game takes any of them). "
+            "Pinned and must-breed cats are pushed to the bottom."
+        )
 
     @staticmethod
-    def _suggested_text(slot) -> str:
-        if not slot.supported or not slot.candidates:
-            return "—"
-        names = [c.name for c in slot.candidates[:5]]
-        if slot.count > 5:
-            names.append(f"+{slot.count - 5} more")
-        return ", ".join(names)
-
-    def _cell_tip(self, slot, c_i: int) -> str:
-        if not slot.supported:
-            return _wt(f"{slot.npc}\n{slot.unlock_note}")
-        status = "Active — takes cats now" if slot.active \
-            else "Not unlocked yet (greyed out)"
-        lines = [f"{slot.npc} — {slot.wants}",
-                 f"{status}",
-                 f"Unlock: {slot.unlock_note}",
-                 f"Qualifying now: {slot.count}"]
-        if slot.candidates:
-            lines.append("Give away first (weakest → strongest):")
-            for cat in slot.candidates[:10]:
-                base = sum(getattr(cat, "base_stats", {}).values())
-                age = getattr(cat, "age", "?")
-                lines.append(f"  • {cat.name}  (stats {base}, age {age})")
+    def _row_tip(cat, slot, base, injured) -> str:
+        lines = [f"{cat.name}  ({getattr(cat, 'gender', '?')})",
+                 f"Stats: {base} · age {getattr(cat, 'age', '?')}",
+                 f"Suitable for: {slot.npc} ({slot.wants})"]
+        why = recommendation_lines(cat)
+        if why:
+            lines.append("Why:")
+            lines += [f"  • {line}" for line in why]
+        if injured:
+            lines.append(f"  • {injured} stat(s) with an injury penalty")
+        room = getattr(cat, "room", "") or getattr(cat, "status", "")
+        lines.append(f"Where: {room or '?'}")
         return _wt("\n".join(lines))

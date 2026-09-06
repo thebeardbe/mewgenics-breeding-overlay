@@ -27,10 +27,9 @@ from typing import Callable, List, Optional
 
 from mewgenics_overlay.core.session import display_location
 
-NPC_ORDER = ["Tink", "Dr. Beanies", "Frank", "Tracy"]
+NPC_ORDER = ["Tink", "Dr. Beanies", "Frank", "Tracy", "Baby Jack"]
 # NPCs whose requirements the save format can't express yet.
 UNSUPPORTED = [
-    ("Baby Jack", "cats with injuries", "injuries are not in the save data"),
     ("Butch", "cats far from home", "chapter progress is not in the save data"),
     ("Organ Grinder", "dead cats", "collected automatically in-game"),
 ]
@@ -84,6 +83,17 @@ class DonationSlot:
         return len(self.candidates)
 
 
+def _injured_stat_count(cat) -> int:
+    """How many stats carry a penalty (total < base). The save keeps injuries
+    as stat penalties on the cat; MBM uses the same signal."""
+    base = getattr(cat, "base_stats", None) or {}
+    total = getattr(cat, "total_stats", None)
+    if not base or total is None:
+        return 0
+    return sum(1 for s, v in base.items()
+               if total.get(s, v) < v)
+
+
 def _qualifies(cat, npc: str) -> bool:
     if npc == "Tink":
         return _age(cat) == TINK_MAX_AGE
@@ -94,6 +104,8 @@ def _qualifies(cat, npc: str) -> bool:
         return _has_any_mutation_or_condition(cat)
     if npc == "Frank":
         return _is_retired(cat)
+    if npc == "Baby Jack":
+        return _injured_stat_count(cat) >= 1
     return False
 
 
@@ -133,12 +145,15 @@ def donation_report(cats, active: Optional[set] = None) -> List[DonationSlot]:
                       "unlocked after Alley + next day"),
             "Tracy": ("cats aged 5 or older",
                       "unlocked after Sewers + next day"),
+            "Baby Jack": ("cats with an injury",
+                          "unlocked after getting a piece of furniture"),
         }[npc]
 
     for npc in NPC_ORDER:
         wants, unlock = info(npc)
         slug = {"Tink": "tink", "Dr. Beanies": "beanies",
-                "Frank": "frank", "Tracy": "tracy"}[npc]
+                "Frank": "frank", "Tracy": "tracy",
+                "Baby Jack": "jack"}[npc]
         slot = DonationSlot(npc=npc, wants=wants, unlock_note=unlock,
                             active=any(flag.startswith(slug)
                                        for flag in flags))
@@ -179,6 +194,9 @@ def recommendation_lines(cat) -> List[str]:
                for e in (getattr(cat, "visual_mutation_entries", None) or [])):
             bits.append("mutations")
         lines.append("carries " + ", ".join(bits) + " — Dr. Beanies wants these")
+    if _injured_stat_count(cat) >= 1:
+        lines.append("stat penalties suggest an injury — Baby Jack will take "
+                     "them")
     if not lines:
         lines.append(f"currently {display_location(cat)}")
     return lines
