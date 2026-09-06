@@ -18,7 +18,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from collections import deque
-from typing import Optional
 
 MAX_DEPTH = 9    # generations of shared ancestry considered for labels
 RECENT_DEPTH = 4  # both sides must be within this many gens to 'count' for defects

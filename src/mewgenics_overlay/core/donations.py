@@ -22,10 +22,10 @@ with "unsupported" so the tab stays honest about coverage.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import bisect
+from dataclasses import dataclass, field
+from typing import List, Optional
 
-from typing import Callable, List, Optional
 
 from mewgenics_overlay.core.recommend import (
     W_AVG,

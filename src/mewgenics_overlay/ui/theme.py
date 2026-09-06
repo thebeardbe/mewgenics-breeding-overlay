@@ -14,6 +14,10 @@ active theme, so render-time code follows live switches.
 
 from __future__ import annotations
 
+# Tray/logo brand colours (theme-independent)
+C_TRAY_BASE = "#453a7a"
+C_TRAY_EAR = "#8a7bf0"
+
 _BRIGHT = {
     "name": "Noir · Bright",
     "C_TEXT": "#201f1c",

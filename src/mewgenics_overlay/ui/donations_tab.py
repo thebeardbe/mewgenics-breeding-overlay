@@ -67,8 +67,8 @@ class DonationsTab(QWidget):
         self._butch_note = QLabel("")
         self._butch_note.setWordWrap(True)
         self._butch_note.setStyleSheet(
-            "color:#6f6c65; padding:4px 8px; border:1px dashed #6a665e; "
-            "border-radius:6px;")
+            f"color:{_theme.C_MUTED}; padding:4px 8px; "
+            f"border:1px dashed {_theme.C_GRIP}; border-radius:6px;")
         self._butch_note.setVisible(False)
         root.addWidget(self._butch_note)
 

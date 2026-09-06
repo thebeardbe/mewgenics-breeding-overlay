@@ -12,7 +12,6 @@ If --save is omitted the most recently modified discovered save is used.
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 
 from mewgenics_overlay.core.discovery import newest_save
@@ -126,7 +125,7 @@ def main(argv=None) -> int:
     p = argparse.ArgumentParser(description=__doc__, parents=[common])
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    sp = sub.add_parser("list", help="list alive cats", parents=[common])
+    sub.add_parser("list", help="list alive cats", parents=[common])
     sp_pick = sub.add_parser("pick", help="show details for a cat", parents=[common])
     sp_pick.add_argument("name")
     sp_part = sub.add_parser("partners", help="rank breeding partners for a cat", parents=[common])
@@ -139,7 +138,7 @@ def main(argv=None) -> int:
                         help="breeding-room Stimulation used for inheritance "
                              "math (default 50)")
 
-    sp_donate = sub.add_parser("donate", help="show donation candidates per NPC")
+    sub.add_parser("donate", help="show donation candidates per NPC")
 
     args = p.parse_args(argv)
     save_path = _resolve_save(args)

@@ -21,7 +21,7 @@ import os
 import sys
 
 from PySide6.QtCore import Qt, QPoint
-from PySide6.QtGui import QAction, QColor, QFont, QIcon, QPainter, QPixmap
+from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
 from mewgenics_overlay import __version__
@@ -37,12 +37,12 @@ def _make_tray_icon() -> QIcon:
     pm.fill(QColor(0, 0, 0, 0))
     p = QPainter(pm)
     p.setRenderHint(QPainter.RenderHint.Antialiasing)
-    p.setBrush(QColor("#453a7a"))
+    p.setBrush(QColor(_theme.C_TRAY_BASE))
     p.setPen(Qt.PenStyle.NoPen)
     # rounded tile
     p.drawRoundedRect(2, 2, 60, 60, 14, 14)
     # cat ears
-    ear = QColor("#8a7bf0")
+    ear = QColor(_theme.C_TRAY_EAR)
     p.setBrush(ear)
     p.drawPolygon([QPoint(18, 24), QPoint(22, 4), QPoint(36, 18)])
     p.drawPolygon([QPoint(46, 24), QPoint(42, 4), QPoint(28, 18)])

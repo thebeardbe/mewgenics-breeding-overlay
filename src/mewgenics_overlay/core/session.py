@@ -31,7 +31,6 @@ from mewgenics_overlay.vendor.save_parser import (
 from mewgenics_overlay.vendor.breeding import (
     PairFactors,
     is_direct_family_pair,
-    is_mutual_lover_pair,
     score_pair,
 )
 

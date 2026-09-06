@@ -26,7 +26,6 @@ safety/quality tie-breakers so that equal-7 candidates are decided by them.
 from __future__ import annotations
 
 import re
-import math
 from dataclasses import dataclass, field
 from typing import Callable, List, Optional
 
