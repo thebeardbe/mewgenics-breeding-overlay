@@ -61,7 +61,9 @@ shell.nix                 dev shell (withGui arg adds PySide6)
 README.md / LICENSE
 .github/workflows/release.yml   tag → build + publish binaries
 packaging/entry.py, build_windows.bat, build_linux.sh   PyInstaller
-bugbox/                    self-hosted bug-intake service + LLM triage (VPS)
+
+> Bug reports: the self-hosted Bugbox intake service lives in its own repo
+> (thebeardbe/mewgenics-bugbox), not here, so forks of the app stay clean.
 scripts/gui_smoke.py      offscreen end-to-end UI test (loads save, sorts, theme, pin…)
 tests/                    unit tests (see §6)
 src/mewgenics_overlay/
