@@ -19,7 +19,6 @@ pyinstaller ^
   --name MewgenicsOverlay ^
   --paths src ^
   --collect-submodules mewgenics_overlay ^
-  --add-data "src\mewgenics_overlay\ui\assets;mewgenics_overlay\ui\assets" ^
   packaging\entry.py
 
 echo.

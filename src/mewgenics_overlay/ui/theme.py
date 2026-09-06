@@ -1,39 +1,24 @@
-"""Shared colours, fonts and styling helpers for the overlay UI.
+"""Shared colours and styling helpers for the overlay UI.
 
-Mewgenics notebook look: warm ruled-paper cream, ink-brown borders,
-highlighter-yellow selections, marker-red accents, and a bundled
-handwritten font (Patrick Hand, OFL) so it looks hand-drawn everywhere.
+Look: macabre flash-cartoon on bleached Technicolor film. Thick black
+vector-style outlines, flat fills, washed-out sepia/tan tones, faded
+mid-century palette — no saturated primaries.
 """
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
 # Shared UI colours (single source of truth for widgets)
-C_TEXT = "#33281f"        # main ink text
-C_MUTED = "#8a7354"       # blocked rows / low emphasis
-C_FAMILY = "#7d5ba6"      # related but breedable
-C_GOOD = "#2e7d43"        # pass / high stat
-C_WARN = "#b9730f"        # caution / inherited defect
-C_STAT_LOW = "#9c8a68"    # low-ish stat chip
-C_GRIP = "#8a6f49"        # drag grip
-C_STATUS = "#8f7a55"      # header status text
-
-# Handwriting font bundled with the app (Patrick Hand, OFL).
-_BUNDLED_FONT = Path(__file__).resolve().parent \
-    / "assets" / "fonts" / "PatrickHand-Regular.ttf"
-_FONT_ORDER = [
-    "Patrick Hand",
-    "Comic Neue",
-    "Comic Sans MS",
-    "Segoe Print",
-    "Chalkboard SE",
-    "DejaVu Sans",
-]
+C_TEXT = "#221d16"        # ink text
+C_MUTED = "#7d7460"       # blocked rows / low emphasis
+C_FAMILY = "#6f5f8f"      # related but breedable
+C_GOOD = "#57753f"        # pass / high stat (desaturated green)
+C_WARN = "#a8702c"        # caution / inherited defect (faded ochre)
+C_STAT_LOW = "#8f846a"    # low-ish stat chip
+C_GRIP = "#4a4236"        # drag grip
+C_STATUS = "#6f6750"      # header status text
 
 
-def wrap_tooltip(text: str, width: int = 84) -> str:
+def wrap_tooltip(text: str, width: int = 88) -> str:
     """Hard-wrap every line at *width* characters so tooltips stay compact
     instead of stretching across the screen on one line."""
     out: list[str] = []
@@ -56,12 +41,12 @@ def wrap_tooltip(text: str, width: int = 84) -> str:
 
 
 def risk_color(risk_pct: float) -> str:
-    """Semantic colour for a pair's combined birth-defect risk %."""
+    """Risk colour key — washed out but distinguishable on film stock."""
     if risk_pct <= 5.0:
-        return "#2e7d43"      # safe
+        return "#57753f"      # safe
     if risk_pct <= 12.0:
-        return "#b9730f"      # caution
-    return "#b5372a"          # dangerous
+        return "#a8702c"      # caution
+    return "#9c3a2a"          # dangerous
 
 
 def gender_badge(gender: str) -> str:
@@ -69,126 +54,98 @@ def gender_badge(gender: str) -> str:
     return {"male": "♂", "female": "♀", "?": "?"}.get(g, "?")
 
 
-def _font_paths():
-    paths = [_BUNDLED_FONT]
-    meipass = getattr(sys, "_MEIPASS", None)   # PyInstaller onefile bundle
-    if meipass:
-        paths.append(Path(meipass)
-                     / "mewgenics_overlay/ui/assets/fonts/PatrickHand-Regular.ttf")
-    return [p for p in paths if p.is_file()]
-
-
 def apply_casual_font(app) -> None:
-    """Load the bundled handwritten font and apply it app-wide."""
-    try:
-        from PySide6.QtGui import QFont, QFontDatabase
-        for path in _font_paths():
-            QFontDatabase.addApplicationFont(str(path))
-        available = set(QFontDatabase.families())
-        chosen = next((f for f in _FONT_ORDER if f in available), None)
-        if chosen:
-            font = QFont(chosen)
-            size = font.pointSize()
-            font.setPointSize(size + 1 if size > 0 else 12)
-            app.setFont(font)
-    except Exception:
-        pass
+    """No custom font: let the system font carry the bold flash-cartoon look
+    (weight handled in the stylesheet)."""
 
 
-# Hand-drawn notebook styling: paper gradients, highlighter selections,
-# ink-brown doodle borders, marker-red accents.
+# Macabre flash-cartoon styling: flat fills, thick black vector outlines,
+# bleached bone/sepia palette, faded accents.
 STYLESHEET = """
-* { font-family: 'Patrick Hand','Comic Neue','DejaVu Sans',sans-serif; }
-QWidget {
-    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-        stop:0 #f8eecf, stop:1 #efd9ae);
-    color: #33281f;
-}
-QDialog { background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-        stop:0 #f8eecf, stop:1 #efd9ae); }
-QLabel#muted { color: #8f7a55; }
+* { font-family: 'Arial','Helvetica','DejaVu Sans','Segoe UI',sans-serif; }
+QWidget { background: #e8dfc6; color: #221d16; }
+QDialog { background: #e8dfc6; }
+QLabel#muted { color: #6f6750; }
 QLabel#headerName {
-    font-size: 18px; font-weight: 700; color: #4a3520;
-    background-color: #f7d878; padding: 1px 8px; border-radius: 4px;
+    font-size: 17px; font-weight: 800; color: #17130c;
+    border-bottom: 3px solid #9c3a2a; padding-bottom: 2px;
 }
 
 QLineEdit, QComboBox {
-    background: #fdf6e3;
-    border: 2px solid #8a6f49;
-    border-radius: 9px;
+    background: #f3ebd3;
+    border: 2px solid #221c12;
+    border-radius: 6px;
     padding: 4px 9px;
-    selection-background-color: #f6d97e;
-    selection-color: #33281f;
+    selection-background-color: #2b251c;
+    selection-color: #efe6d0;
 }
 QComboBox::drop-down { border: none; width: 24px; }
 QComboBox QAbstractItemView {
-    background: #fdf6e3; color: #33281f;
-    selection-background-color: #f6d97e;
+    background: #f3ebd3; color: #221d16;
+    selection-background-color: #2b251c; selection-color: #efe6d0;
 }
 
 QListWidget, QTableWidget {
-    background: #fbf2d8;
-    alternate-background-color: #efe0bd;
-    border: 2px solid #9c7c4d;
-    border-radius: 12px;
+    background: #f0e7d0;
+    alternate-background-color: #e2d6b8;
+    border: 2px solid #221c12;
+    border-radius: 6px;
     outline: none;
-    gridline-color: #ddcaa2;
+    gridline-color: #cfc09a;
 }
-QListWidget::item { padding: 4px 7px; border-radius: 4px; }
+QListWidget::item { padding: 4px 7px; }
 QListWidget::item:selected, QTableWidget::item:selected {
-    background: #f6d97e; color: #33281f;      /* highlighter swipe */
+    background: #2b251c; color: #efe6d0;
 }
 QHeaderView::section {
-    background: #e8d4a2;
-    color: #5a442c;
+    background: #cbb98f;
+    color: #17130c;
     border: none;
-    border-right: 1px solid #d4bd87;
-    border-bottom: 3px solid #9c7c4d;
+    border-right: 1px solid #b7a273;
+    border-bottom: 3px solid #221c12;
     padding: 6px 8px;
-    font-weight: 700;
-    font-size: 14px;
+    font-weight: 800;
+    font-size: 13px;
 }
 
 QPushButton {
-    background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
-        stop:0 #f0ddb0, stop:1 #e0c48c);
-    border: 2px solid #7d5f3b;
-    border-radius: 11px;
+    background: #ddd0ae;
+    border: 2px solid #221c12;
+    border-radius: 7px;
     padding: 5px 13px;
-    color: #3a2c1e;
+    color: #221d16;
 }
-QPushButton:hover { background: #f6e6bd; }
-QPushButton:pressed { background: #d8b97f; }
+QPushButton:hover { background: #e9dcba; }
+QPushButton:pressed { background: #c9b78c; }
 QPushButton:checked {
-    background: #bf5a3a; color: #fff3e0; border-color: #8f3f26;
+    background: #9c3a2a; color: #f4ecd8; border-color: #3c150d;
 }
 QPushButton#best {
-    text-align: left; font-weight: 700; padding: 7px 11px;
-    background: #fbf0cd;
-    border: 2px dashed #a8763e;
-    border-bottom: 4px solid #c2572f;
-    border-radius: 12px;
-    color: #7c3f22;
+    text-align: left; font-weight: 800; padding: 7px 11px;
+    background: #d7c69e;
+    border: 3px solid #221c12;
+    border-radius: 8px;
+    color: #6b2a1c;
 }
-QPushButton#best:hover { background: #fff6dc; }
+QPushButton#best:hover { background: #e2d3ad; }
 
 QToolTip {
-    background: #fdf3d3; color: #33281f;
-    border: 2px solid #8a6f49; border-radius: 9px; padding: 6px;
+    background: #efe6d0; color: #221d16;
+    border: 2px solid #221c12; border-radius: 6px; padding: 6px;
 }
 
 QScrollBar:vertical { background: transparent; width: 12px; }
 QScrollBar::handle:vertical {
-    background: #b99a63; border-radius: 6px; min-height: 24px;
+    background: #9a8a5f; border-radius: 6px; min-height: 24px;
 }
-QScrollBar::handle:vertical:hover { background: #a98a53; }
+QScrollBar::handle:vertical:hover { background: #86774e; }
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
-QTabWidget::pane { border: 2px solid #9c7c4d; border-radius: 12px; }
+QTabWidget::pane { border: 2px solid #221c12; border-radius: 6px; }
 QTabBar::tab {
-    background: #e6cf9f; color: #5a442c;
-    border: 2px solid #9c7c4d; border-bottom: none;
-    border-top-left-radius: 10px; border-top-right-radius: 10px;
-    padding: 6px 18px; margin-right: 4px; font-size: 15px;
+    background: #d4c49d; color: #221d16;
+    border: 2px solid #221c12; border-bottom: none;
+    border-top-left-radius: 7px; border-top-right-radius: 7px;
+    padding: 6px 18px; margin-right: 3px; font-weight: 700;
 }
-QTabBar::tab:selected { background: #f6d97e; font-weight: 700; }
+QTabBar::tab:selected { background: #efe6d0; }
 """
