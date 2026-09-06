@@ -1,6 +1,32 @@
-"""Shared colors and styling helpers for the overlay UI."""
+"""Shared colours, fonts and styling helpers for the overlay UI.
+
+Palette follows Mewgenics' paper-craft notebook look: warm cream paper,
+dark ink outlines, marker-red accents, muted kraft tones.
+"""
 
 from __future__ import annotations
+
+# Shared UI colours (single source of truth for widgets)
+C_TEXT = "#33281f"        # main ink text
+C_MUTED = "#8a7354"       # blocked rows / low emphasis
+C_FAMILY = "#7d5ba6"      # related but breedable
+C_GOOD = "#2e7d43"        # pass / high stat
+C_WARN = "#b9730f"        # caution / inherited defect
+C_STAT_LOW = "#9c8a68"    # low-ish stat chip
+C_GRIP = "#8a6f49"        # drag grip
+C_STATUS = "#8f7a55"      # header status text
+
+# Casual, sketchy-looking fonts, tried in order (first installed wins).
+PREFERRED_FONTS = [
+    "Comic Sans MS",
+    "Comic Neue",
+    "Chalkboard SE",
+    "Segoe Print",
+    "Marker Felt",
+    "Patrick Hand",
+    "Comic Relief",
+    "DejaVu Sans",
+]
 
 
 def wrap_tooltip(text: str, width: int = 84) -> str:
@@ -29,23 +55,13 @@ def wrap_tooltip(text: str, width: int = 84) -> str:
     return "\n".join(out)
 
 
-# Shared UI colours (single source of truth for widgets)
-C_TEXT = "#e8e6ee"        # normal text
-C_MUTED = "#8a849f"       # blocked rows / low emphasis
-C_FAMILY = "#c9a0e8"      # related but breedable
-C_GOOD = "#7fe08a"        # pass / high stat
-C_WARN = "#e0a63a"        # caution / inherited defect
-C_STAT_LOW = "#c0b9d8"    # low-ish stat chip
-C_GRIP = "#6a6390"        # drag grip
-C_STATUS = "#9a94b8"      # header status text
-
 def risk_color(risk_pct: float) -> str:
-    """Semantic color for a pair's combined birth-defect risk %."""
+    """Semantic colour for a pair's combined birth-defect risk % (ink-safe)."""
     if risk_pct <= 5.0:
-        return "#3dbf6f"      # safe
+        return "#2e7d43"      # safe
     if risk_pct <= 12.0:
-        return "#e0a63a"      # caution
-    return "#e2574c"          # dangerous
+        return "#b9730f"      # caution
+    return "#b5372a"          # dangerous
 
 
 def gender_badge(gender: str) -> str:
@@ -53,42 +69,107 @@ def gender_badge(gender: str) -> str:
     return {"male": "♂", "female": "♀", "?": "?"}.get(g, "?")
 
 
+def apply_casual_font(app) -> None:
+    """Pick the first installed casual font from PREFERRED_FONTS and apply it
+    app-wide (falls back to whatever Qt resolves, usually DejaVu)."""
+    try:
+        from PySide6.QtGui import QFont, QFontDatabase
+        available = set(QFontDatabase.families())
+        chosen = next((f for f in PREFERRED_FONTS if f in available), None)
+        if chosen:
+            font = QFont(chosen)
+            font.setPointSize(font.pointSize() + 1 if font.pointSize() > 0 else 11)
+            app.setFont(font)
+    except Exception:
+        pass
+
+
+# Warm paper stylesheet. The emoji buttons are fine; everything else leans on
+# kraft paper tones with marker-ish borders and soft rounded corners.
 STYLESHEET = """
-* { font-family: 'DejaVu Sans', 'Segoe UI', sans-serif; }
-QWidget { background: rgba(24, 22, 30, 0.94); color: #e8e6ee; }
-QLineEdit {
-    background: #17141d; border: 1px solid #3a3450; border-radius: 6px;
-    padding: 4px 8px; selection-background-color: #6d5bd0;
+* { font-family: 'Comic Sans MS','Comic Neue','Segoe Print','DejaVu Sans',sans-serif; }
+QWidget {
+    background: #f2e4c8;
+    color: #33281f;
 }
-QLineEdit:focus { border-color: #8a7bf0; }
+QMainWindow, QDialog { background: #f2e4c8; }
+QLabel#muted { color: #8f7a55; }
+QLabel#headerName { font-size: 16px; font-weight: 700; color: #4a3520; }
+
+QLineEdit, QComboBox {
+    background: #fdf6e3;
+    border: 2px solid #8a6f49;
+    border-radius: 8px;
+    padding: 4px 8px;
+    selection-background-color: #d9b97c;
+    selection-color: #33281f;
+}
+QComboBox::drop-down { border: none; width: 22px; }
+QComboBox QAbstractItemView {
+    background: #fdf6e3;
+    color: #33281f;
+    selection-background-color: #e3c78f;
+}
+
 QListWidget, QTableWidget {
-    background: #17141d; alternate-background-color: #1e1a29;
-    border: 1px solid #2c2740; border-radius: 6px;
+    background: #f9efd9;
+    alternate-background-color: #efdfc0;
+    border: 2px solid #9c7c4d;
+    border-radius: 10px;
     outline: none;
+    gridline-color: #d8c49a;
 }
-QListWidget::item { padding: 4px 8px; border-radius: 4px; }
-QListWidget::item:selected { background: #453a7a; }
+QListWidget::item, QTableWidget::item { padding: 3px 6px; }
+QListWidget::item:selected, QTableWidget::item:selected {
+    background: #e3c78f; color: #33281f;
+}
 QHeaderView::section {
-    background: #221d30; color: #b9b2d4; border: none;
-    padding: 4px 6px; font-weight: 600;
+    background: #e3cf9f;
+    color: #5a442c;
+    border: none;
+    border-right: 1px solid #d0b581;
+    border-bottom: 2px solid #9c7c4d;
+    padding: 5px 7px;
+    font-weight: 700;
 }
+
 QPushButton {
-    background: #332c4d; border: 1px solid #4a4072; border-radius: 6px;
-    padding: 4px 10px;
+    background: #e6cf9f;
+    border: 2px solid #8a6f49;
+    border-radius: 10px;
+    padding: 5px 12px;
+    color: #3a2c1e;
 }
-QPushButton:hover { background: #413865; }
-QPushButton:pressed { background: #2a2440; }
-QPushButton:checked { background: #6d5bd0; }
-QPushButton:disabled { color: #6d6890; }
+QPushButton:hover { background: #efdcb2; }
+QPushButton:pressed { background: #d8b97f; }
+QPushButton:checked { background: #bf5a3a; color: #fff3e0; border-color: #8f3f26; }
 QPushButton#best {
-    text-align: left; font-weight: 600; padding: 6px 10px;
-    background: #241f38; border: 1px solid #7a6bd0; border-radius: 6px;
-    color: #c5b8ff;
+    text-align: left; font-weight: 700; padding: 6px 10px;
+    background: #f3dcae; border: 2px dashed #a8763e; border-radius: 10px;
+    color: #7c3f22;
 }
-QPushButton#best:hover { background: #332b52; }
-QLabel#headerName { font-size: 15px; font-weight: 700; }
-QLabel#muted { color: #9a94b8; }
-QScrollBar:vertical { background: transparent; width: 8px; }
-QScrollBar::handle:vertical { background: #4a4270; border-radius: 4px; min-height: 24px; }
+QPushButton#best:hover { background: #f6e3bf; }
+
+QToolTip {
+    background: #fdf6e3;
+    color: #33281f;
+    border: 1px solid #8a6f49;
+    border-radius: 8px;
+    padding: 6px;
+}
+
+QScrollBar:vertical { background: transparent; width: 10px; }
+QScrollBar::handle:vertical {
+    background: #b99a63; border-radius: 5px; min-height: 24px;
+}
+QScrollBar::handle:vertical:hover { background: #a98a53; }
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
+QTabWidget::pane { border: 2px solid #9c7c4d; border-radius: 10px; }
+QTabBar::tab {
+    background: #e6cf9f; color: #5a442c;
+    border: 2px solid #9c7c4d; border-bottom: none;
+    border-top-left-radius: 8px; border-top-right-radius: 8px;
+    padding: 5px 16px; margin-right: 3px;
+}
+QTabBar::tab:selected { background: #f9efd9; font-weight: 700; }
 """
