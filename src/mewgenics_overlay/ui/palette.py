@@ -754,7 +754,7 @@ class PaletteWindow(QWidget):
         if session is None or focus is None:
             return
         cat_key = focus.db_key
-        max_rows = int(self._settings.get("max_partners", 30))
+        max_rows = int(self._settings.get("max_partners", 100))
         show_blocked = 0 if self._btn_swap.isChecked() else int(
             self._settings.get("show_blocked", 3)
         )
@@ -1040,7 +1040,10 @@ class PaletteWindow(QWidget):
             return
         if self._session is None:
             return
-        hits = self._session.search(text, limit=8)
+        hits = self._session.search(text, limit=100)
+        truncated = len(hits) > 60
+        if truncated:
+            hits = hits[:60]
         self._results.clear()
         for c in hits:
             item = QListWidgetItem(
@@ -1049,6 +1052,10 @@ class PaletteWindow(QWidget):
             )
             item.setData(Qt.ItemDataRole.UserRole, c.db_key)
             self._results.addItem(item)
+        if truncated:
+            more = QListWidgetItem("… more matches — type more of the name")
+            more.setFlags(Qt.ItemFlag.NoItemFlags)
+            self._results.addItem(more)
         self._results.setVisible(True)
 
     def _on_result_clicked(self, item: QListWidgetItem) -> None:

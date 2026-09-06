@@ -17,7 +17,7 @@ DEFAULTS = {
     "save_path": None,            # last save shown
     "include_adventure": True,    # consider Adventure cats as partners
     "order": "risk",            # partner sort: "risk" (safe first) or "quality"
-    "max_partners": 30,
+    "max_partners": 100,
     "show_blocked": 3,
 }
 
