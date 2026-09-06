@@ -27,13 +27,13 @@ from PySide6.QtGui import QColor, QGuiApplication
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
+    QDialog,
     QFileDialog,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QListWidget,
     QListWidgetItem,
-    QMessageBox,
     QPushButton,
     QSystemTrayIcon,
     QTableWidget,
@@ -720,13 +720,20 @@ class PaletteWindow(QWidget):
             f"<p>Licensed MIT. Saves are read-only — this tool never "
             f"modifies them.</p>"
         )
-        box = QMessageBox(self)
-        box.setWindowTitle("About")
-        box.setTextFormat(Qt.TextFormat.RichText)
-        box.setText(text)
-        box.setOpenExternalLinks(True)
-        box.setStandardButtons(QMessageBox.StandardButton.Ok)
-        box.exec()
+        dialog = QDialog(self)
+        dialog.setWindowTitle("About")
+        dialog.setModal(True)
+        layout = QVBoxLayout(dialog)
+        label = QLabel(text)
+        label.setTextFormat(Qt.TextFormat.RichText)
+        label.setWordWrap(True)
+        label.setOpenExternalLinks(True)
+        layout.addWidget(label)
+        ok = QPushButton("OK")
+        ok.clicked.connect(dialog.accept)
+        layout.addWidget(ok, 0, Qt.AlignmentFlag.AlignRight)
+        dialog.resize(540, 460)
+        dialog.exec()
 
     # ── save loading ───────────────────────────────────────────────────────
     def _load_last_save(self) -> None:
