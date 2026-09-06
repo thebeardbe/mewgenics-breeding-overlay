@@ -28,8 +28,6 @@ def wrap_tooltip(text: str, width: int = 84) -> str:
         out.append(line)
     return "\n".join(out)
 
-from __future__ import annotations
-
 
 def risk_color(risk_pct: float) -> str:
     """Semantic color for a pair's combined birth-defect risk %."""
