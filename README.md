@@ -13,26 +13,71 @@ Every column is sortable, headers explain each metric, and the roster refreshes 
 
 Built on the parser/genetics engine of the MIT-licensed [MewgenicsBreedingManager](https://github.com/frankieg33/MewgenicsBreedingManager).
 
-## Download
+## Install & run
 
-Grab the latest binary from the [Releases](https://github.com/thebeardbe/mewgenics-breeding-overlay/releases) page — no Python or install needed:
+No Python or install step is needed for the binary builds — download, run, done. The overlay auto-detects your save (`%APPDATA%\Glaiel Games\Mewgenics\...\saves\` on Windows, the Proton prefix equivalent on Linux), or open one manually with the 📁 button. Set `MEWGENICS_SAVES_ROOT` to override discovery.
 
-- `MewgenicsOverlay.exe` — Windows
-- `MewgenicsOverlay` — Linux
+### Windows
 
-NixOS users: `nix run github:thebeardbe/mewgenics-breeding-overlay`
+1. Download **`MewgenicsOverlay.exe`** from the [Releases](https://github.com/thebeardbe/mewgenics-breeding-overlay/releases) page.
+2. Double-click it and press **Run anyway** when prompted (see below).
+3. Launch Mewgenics, and summon the overlay from anywhere with **`Ctrl+Shift+B`** — or right-click its tray icon.
 
-## Running from source
+> **Security warning — please read.** The exe is **not code-signed**, so Windows will show **“Windows protected your PC” (SmartScreen)** on first launch, and Defender/AV software may flag it. This is expected for small open-source projects: a code-signing certificate costs money. It is **not** a sign of malware. To run it: click **More info → Run anyway**. The project is MIT-licensed and fully open source — you can inspect the code, or build the exe yourself from source (below) if you prefer not to trust the release artifact.
 
-Requires Python 3.10+.
+### Linux (Arch, Ubuntu, Fedora, …)
+
+1. Download **`MewgenicsOverlay`** from the [Releases](https://github.com/thebeardbe/mewgenics-breeding-overlay/releases) page.
+2. Make it executable and run it:
 
 ```bash
-pip install -r requirements.txt "PySide6-Essentials>=6.5"
-python -m mewgenics_overlay                          # from the repo root (src on PYTHONPATH)
-python -m mewgenics_overlay.cli partners "Meeko"     # headless
+chmod +x MewgenicsOverlay
+./MewgenicsOverlay
 ```
 
-The overlay auto-detects your save (`%APPDATA%\Glaiel Games\Mewgenics\...\saves\` on Windows, the Proton prefix equivalent on Linux) — or open one with the 📁 button. Set `MEWGENICS_SAVES_ROOT` to override discovery.
+The binary bundles Python, Qt and everything else — no dependencies to install. It targets glibc x64 (not musl/Alpine). On Wayland sessions the overlay floats correctly under XWayland (auto-selected, e.g. on Hyprland); full Wayland-native support is not guaranteed.
+
+### NixOS
+
+The repository is a flake, so NixOS users install it directly from GitHub — Nix pulls the exact source revision and builds it once (then caches it):
+
+```bash
+# run without installing:
+nix run github:thebeardbe/mewgenics-breeding-overlay
+
+# install into your profile:
+nix profile install github:thebeardbe/mewgenics-breeding-overlay
+mewgenics-overlay
+```
+
+### From source (any distro, power users / developers)
+
+Requires Python 3.10+ and a real Mewgenics save for full functionality.
+
+```bash
+# install as an app (GUI extra pulls in PySide6):
+pip install "git+https://github.com/thebeardbe/mewgenics-breeding-overlay[ui]"
+mewgenics-overlay
+
+# or run straight from a checkout:
+pip install -r requirements.txt "PySide6-Essentials>=6.5"
+PYTHONPATH=src python -m mewgenics_overlay
+```
+
+Headless CLI (no GUI needed):
+
+```bash
+PYTHONPATH=src python -m mewgenics_overlay.cli list
+PYTHONPATH=src python -m mewgenics_overlay.cli partners "Meeko"
+PYTHONPATH=src python -m mewgenics_overlay.cli donate
+```
+
+## Using the overlay
+
+- **Breeding tab** — pick a cat, see every compatible partner ranked by risk/chance/expected ≥7s; the ⭐ **Best match** banner highlights the strongest candidate. Right-click any row for actions (pin for breeding, etc.). Pinned cats show a 📌 and are kept out of donation advice.
+- **Donations tab** — pick an NPC to see which of your cats they'd pay well for and why (only NPCs you have actually unlocked appear).
+- **Theme** — Noir·Dark is the default; hit the ◐ button in the header for a light variant. Your choice is remembered.
+- Column headers explain each metric; hover rows for detailed reasons. The window is a floating overlay — move it, or use the tray icon to hide/show while playing.
 
 ## Reading the partner list
 
