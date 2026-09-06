@@ -5,6 +5,7 @@ from __future__ import annotations
 from PySide6.QtWidgets import (
     QComboBox,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QTableWidget,
     QTableWidgetItem,
@@ -12,10 +13,25 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from mewgenics_overlay.core.donations import donation_report, recommendation_lines
+from mewgenics_overlay.core.donations import (
+    cat_status,
+    donation_report,
+    recommendation_lines,
+)
 from mewgenics_overlay.ui.theme import wrap_tooltip as _wt
 
-_COLS = ["Cat", "Age", "Stats", "Why donate"]
+_COLS = ["Cat", "Status", "Age", "Stats", "Why donate"]
+_COL_TIPS = [
+    "The cat's name. Hover a row for the full story.",
+    "kitten — born today, can't breed yet · retired — went on an adventure "
+    "· normal — a regular adult.",
+    "Age in days. Kittens (1) go to Tink; seniors (5+) to Tracy.",
+    "Sum of its 7 birth stats (0–49). Higher = stronger, and more likely to "
+    "be worth keeping as a breeder.",
+    "Why this cat qualifies for this NPC, weakest/expendable first. Cats "
+    "valuable for breeding (or pinned / must-breed) sink to the bottom — "
+    "donate them only if you must.",
+]
 
 
 class DonationsTab(QWidget):
@@ -43,13 +59,21 @@ class DonationsTab(QWidget):
 
         self._table = QTableWidget(0, len(_COLS))
         self._table.setHorizontalHeaderLabels(_COLS)
+        # explain each column (plain words)
+        for i, tip in enumerate(_COL_TIPS):
+            item = self._table.horizontalHeaderItem(i)
+            if item is not None:
+                item.setToolTip(_wt(tip))
+        self._table.setWordWrap(True)
+        self._table.verticalHeader().setSectionResizeMode(
+            QHeaderView.ResizeMode.ResizeToContents)
         self._table.verticalHeader().setVisible(False)
         self._table.setAlternatingRowColors(True)
         self._table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self._table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         hdr = self._table.horizontalHeader()
         hdr.setStretchLastSection(True)
-        for i, w in enumerate([170, 50, 80, 380]):
+        for i, w in enumerate([140, 70, 46, 60, 380]):
             self._table.setColumnWidth(i, w)
         root.addWidget(self._table, 1)
 
@@ -114,15 +138,17 @@ class DonationsTab(QWidget):
             base = sum(getattr(cat, "base_stats", {}).values())
             inj = sum(1 for s, v in (getattr(cat, "base_stats", {}) or {}).items()
                       if (getattr(cat, "total_stats", {}) or {}).get(s, v) < v)
-            why = " · ".join(recommendation_lines(cat))
-            cells = [cat.name, str(getattr(cat, "age", "?")), str(base), why]
+            why = "\n".join("• " + line
+                             for line in recommendation_lines(cat))
+            cells = [cat.name, cat_status(cat), str(getattr(cat, "age", "?")),
+                     str(base), why]
             for c_i, text in enumerate(cells):
                 it = QTableWidgetItem(text)
                 it.setToolTip(self._row_tip(cat, slot, base, inj))
                 self._table.setItem(r_i, c_i, it)
         self._hint.setText(
-            "Ordered weakest → strongest (the game takes any of them). "
-            "Pinned and must-breed cats are pushed to the bottom."
+            "Ordered weakest → strongest. Pinned, must-breed and breeding-"
+            "valuable cats sink to the bottom — donate them only if you must."
         )
 
     @staticmethod

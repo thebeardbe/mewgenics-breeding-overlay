@@ -26,6 +26,10 @@ from dataclasses import dataclass, field
 from typing import Callable, List, Optional
 
 from mewgenics_overlay.core.session import display_location
+from mewgenics_overlay.vendor.breeding import pair_projection
+
+# Adult/breedable threshold: 1-day-olds (and younger) can't breed yet.
+KITTEN_MAX_AGE = 1
 
 NPC_ORDER = ["Tink", "Dr. Beanies", "Frank", "Tracy", "Baby Jack"]
 # NPCs whose requirements the save format can't express yet.
@@ -64,6 +68,53 @@ def _age(cat) -> Optional[int]:
         return int(getattr(cat, "age", None))
     except (TypeError, ValueError):
         return None
+
+
+def cat_status(cat) -> str:
+    """kitten (can't breed yet) / retired (went on an adventure) / normal."""
+    age = _age(cat)
+    if age is not None and age <= KITTEN_MAX_AGE:
+        return "kitten"
+    if _is_retired(cat):
+        return "retired"
+    return "normal"
+
+
+def _pair_value(a, b) -> float:
+    """Breeding value of pairing a with b: 7s + stats, minus a safety
+    penalty for the pair's birth-defect risk (low-risk pairings are worth
+    more)."""
+    proj = pair_projection(a, b, stimulation=50.0)
+    risk = 0.0
+    try:
+        from mewgenics_overlay.vendor.save_parser import risk_percent
+        risk = float(risk_percent(a, b))
+    except Exception:
+        risk = 0.0
+    return 14.0 * proj.seven_plus_total + 2.0 * proj.avg_expected \
+        - 0.3 * risk
+
+
+def _breeding_keepers(cats) -> set:
+    """Cats that are a top-tier mate for someone — donating them hurts the
+    breeding pool. Kept deliberately simple: their best pairing score must
+    beat the 75th percentile of the roster's scores."""
+    scores: list = []
+    for a in cats:
+        best = 0.0
+        for b in cats:
+            if b is a:
+                continue
+            try:
+                best = max(best, _pair_value(a, b))
+            except Exception:
+                continue
+        scores.append((a, best))
+    if len(scores) < 4:
+        return set()
+    ordered = sorted(v for _, v in scores)
+    threshold = ordered[int(0.75 * (len(ordered) - 1))]
+    return {id(a) for a, v in scores if v > threshold}
 
 
 @dataclass
@@ -135,6 +186,7 @@ def donation_report(cats, active: Optional[set] = None) -> List[DonationSlot]:
     """
     flags = set(active or ())
     slots: List[DonationSlot] = []
+    keepers = _breeding_keepers(cats)
 
     def info(npc):
         return {
@@ -158,12 +210,19 @@ def donation_report(cats, active: Optional[set] = None) -> List[DonationSlot]:
                             active=any(flag.startswith(slug)
                                        for flag in flags))
         slot.candidates = [c for c in cats if _qualifies(c, npc)]
-        # keep protected cats out of the giveaway list entirely-ish: any
-        # must-breed / pinned cat sorts after everything else.
+        for c in slot.candidates:
+            if id(c) in keepers:
+                c._donate_keep_for_breeding = True
+        # protect the breeding pool: cats that are a top mate for someone
+        # sort below expendable cats (but above pinned/must-breed).
         def _protected(c):
             return bool(getattr(c, "must_breed", False)
                         or getattr(c, "is_pinned", False))
+
+        def _keeper(c):
+            return bool(getattr(c, "_donate_keep_for_breeding", False))
         slot.candidates.sort(key=lambda c: (int(_protected(c)),
+                                            int(_keeper(c)),
                                             _give_away_score(c)))
         slot.ranks = list(range(1, len(slot.candidates) + 1))
         slots.append(slot)
@@ -197,6 +256,9 @@ def recommendation_lines(cat) -> List[str]:
     if _injured_stat_count(cat) >= 1:
         lines.append("stat penalties suggest an injury — Baby Jack will take "
                      "them")
+    if getattr(cat, "_donate_keep_for_breeding", False):
+        lines.append("valuable for breeding (a top mate for someone) — "
+                     "donate only if you really need to")
     if not lines:
         lines.append(f"currently {display_location(cat)}")
     return lines
