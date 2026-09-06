@@ -88,31 +88,31 @@ class DonationsTab(QWidget):
         dead = getattr(session, "dead_cats", []) if session is not None else []
         flags = getattr(session, "npc_progress_flags", set()) \
             if session is not None else set()
-        self._slots = donation_report(
+        report = donation_report(
             cats, active=flags, dead=tuple(dead),
             current_day=getattr(session, "current_day", None)) \
             if (cats or dead) else []
+        # Spoiler guard: locked (or unsupported/undetectable) NPCs must never
+        # appear — that would give away who exists and what they want.
+        self._slots = [s for s in report if s.supported and s.active]
         self._rebuild_combo()
 
     def _rebuild_combo(self) -> None:
         self._combo.blockSignals(True)
         self._combo.clear()
         for slot in self._slots:
-            label = slot.npc
-            if slot.supported:
-                label += f"  ({slot.count} now)"
-                if not slot.active:
-                    label += " · locked"
-            else:
-                label += "  (unsupported)"
-            self._combo.addItem(label)
+            self._combo.addItem(f"{slot.npc}  ({slot.count} now)")
             self._combo.setItemData(self._combo.count() - 1, slot, 0x0100)
         self._combo.blockSignals(False)
         if self._slots:
             self._combo.setCurrentIndex(0)
             self._on_npc_selected(0)
         else:
-            self._summary.setText("No save loaded yet.")
+            self._summary.setText(
+                "No donation NPCs unlocked yet — the list fills in as you "
+                "meet them."
+            )
+            self._hint.setText("")
             self._table.setRowCount(0)
 
     def _current_slot(self):
@@ -127,11 +127,9 @@ class DonationsTab(QWidget):
             return
         if not slot.supported:
             self._table.setRowCount(0)
-            self._hint.setText(f"{slot.npc}: {slot.unlock_note}")
+            self._hint.setText("")
             return
-        status = "this NPC is active" if slot.active \
-            else "locked — not unlocked in your game yet"
-        self._summary.setText(f"{slot.wants} · {slot.count} qualifying · {status}")
+        self._summary.setText(f"{slot.wants} · {slot.count} qualifying")
         self._render_slot(slot)
 
     def _render_slot(self, slot) -> None:
