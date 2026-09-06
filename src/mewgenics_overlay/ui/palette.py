@@ -123,7 +123,7 @@ _COL_TIP_PARAS = [
         "a birth defect), as a percentage.",
         "Two strangers sit near the base ~2%.",
         "The closer the parents are related, the higher it climbs.",
-        "Colour key — dark ink: low (≤ 5%) · grey: medium (5–12%) · "
+        "Colour key — green: low (≤ 5%) · amber: medium (5–12%) · "
         "red: high (> 12%).",
     ],
     # Chance (Nightly)
@@ -132,7 +132,7 @@ _COL_TIP_PARAS = [
         "already folds in the game's two nightly rolls.",
         "A higher room Comfort nudges it up a little.",
         "Below 5% the game won't even attempt the pair.",
-        "Colour key — dark ink: above the line · grey: below it.",
+        "Colour key — green: above the line · amber: below it.",
     ],
     # Exp/stat
     [

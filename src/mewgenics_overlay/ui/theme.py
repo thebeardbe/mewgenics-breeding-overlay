@@ -18,55 +18,55 @@ _BRIGHT = {
     "name": "Noir · Bright",
     "C_TEXT": "#201f1c",
     "C_MUTED": "#6f6d68",
-    "C_FAMILY": "#55534e",
-    "C_GOOD": "#101010",     # strong ink (pass / 7s)
-    "C_WARN": "#7d7a74",     # mid grey (caution)
-    "C_STAT_LOW": "#a09d95",
+    "C_FAMILY": "#6a4fa3",
+    "C_GOOD": "#2e7d32",     # strong ink (pass / 7s)
+    "C_WARN": "#b26b0a",     # mid grey (caution)
+    "C_STAT_LOW": "#8f8675",
     "C_GRIP": "#6a6761",
     "C_STATUS": "#6f6c65",
-    "RISK_SAFE": "#3f3f3f",
-    "RISK_MID": "#8a8a8a",
-    "RISK_HIGH": "#b3261e",
+    "RISK_SAFE": "#2e7d32",
+    "RISK_MID": "#b26b0a",
+    "RISK_HIGH": "#c62828",
 }
 
 _DARK = {
     "name": "Noir · Dark",
     "C_TEXT": "#e6e3da",
     "C_MUTED": "#9d998e",
-    "C_FAMILY": "#b5afa1",
-    "C_GOOD": "#f4f1e8",     # pale silver (pass / 7s)
-    "C_WARN": "#a09b8f",     # grey (caution)
-    "C_STAT_LOW": "#7e7a70",
+    "C_FAMILY": "#b39ddb",
+    "C_GOOD": "#81c784",     # pale silver (pass / 7s)
+    "C_WARN": "#e0a458",     # grey (caution)
+    "C_STAT_LOW": "#9f9a8e",
     "C_GRIP": "#8d887b",
     "C_STATUS": "#a49f92",
-    "RISK_SAFE": "#d9d5cc",
-    "RISK_MID": "#a09b8f",
-    "RISK_HIGH": "#e5483c",
+    "RISK_SAFE": "#81c784",
+    "RISK_MID": "#e0a458",
+    "RISK_HIGH": "#ff5f52",
 }
 
 _STYLES = {}
 
 _STYLES["film"] = """
 * { font-family: 'Arial','Helvetica','DejaVu Sans','Segoe UI',sans-serif; }
-QWidget { background: #e7e5e0; color: #201f1c; }
-QDialog { background: #e7e5e0; }
+QWidget { background: #d8d3c7; color: #201f1c; }
+QDialog { background: #d8d3c7; }
 QLabel#muted { color: #6f6c65; }
 QLabel#headerName {
     font-size: 17px; font-weight: 800; color: #111;
     border-bottom: 3px solid #1a1a1a; padding-bottom: 2px;
 }
 QLineEdit, QComboBox {
-    background: #faf9f5;
+    background: #efece2;
     border: 2px solid #262626; border-radius: 5px; padding: 4px 9px;
     selection-background-color: #1a1a1a; selection-color: #f4f2ed;
 }
 QComboBox::drop-down { border: none; width: 24px; }
 QComboBox QAbstractItemView {
-    background: #faf9f5; color: #201f1c;
+    background: #efece2; color: #201f1c;
     selection-background-color: #1a1a1a; selection-color: #f4f2ed;
 }
 QListWidget, QTableWidget {
-    background: #f2f0ea; alternate-background-color: #e2dfd7;
+    background: #e6e2d6; alternate-background-color: #d6d2c5;
     border: 2px solid #262626; border-radius: 5px; outline: none;
     gridline-color: #c6c2b8;
 }
@@ -75,26 +75,26 @@ QListWidget::item:selected, QTableWidget::item:selected {
     background: #1a1a1a; color: #f4f2ed;
 }
 QHeaderView::section {
-    background: #d6d3cb; color: #141414;
+    background: #c2beb0; color: #141414;
     border: none; border-right: 1px solid #b5b1a6;
     border-bottom: 3px solid #262626;
     padding: 6px 8px; font-weight: 800; font-size: 13px;
 }
 QPushButton {
-    background: #dfdcd4; border: 2px solid #262626; border-radius: 6px;
+    background: #cbc7b9; border: 2px solid #262626; border-radius: 6px;
     padding: 5px 13px; color: #201f1c;
 }
-QPushButton:hover { background: #eae7de; }
-QPushButton:pressed { background: #c9c5bb; }
+QPushButton:hover { background: #d9d5c8; }
+QPushButton:pressed { background: #b8b3a5; }
 QPushButton:checked { background: #8f2b22; color: #f6f2ea; border-color: #3c0e0a; }
 QPushButton#best {
     text-align: left; font-weight: 800; padding: 7px 11px;
-    background: #dcd9d1; border: 3px solid #262626; border-radius: 7px;
+    background: #c7c3b5; border: 3px solid #262626; border-radius: 7px;
     color: #6b241d;
 }
-QPushButton#best:hover { background: #e6e3da; }
+QPushButton#best:hover { background: #d3cfc1; }
 QToolTip {
-    background: #f2f0ea; color: #201f1c;
+    background: #e6e2d6; color: #201f1c;
     border: 2px solid #262626; border-radius: 5px; padding: 6px;
 }
 QScrollBar:vertical { background: transparent; width: 12px; }
@@ -103,12 +103,12 @@ QScrollBar::handle:vertical:hover { background: #8b877d; }
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
 QTabWidget::pane { border: 2px solid #262626; border-radius: 5px; }
 QTabBar::tab {
-    background: #cfccc3; color: #201f1c;
+    background: #bbb7aa; color: #201f1c;
     border: 2px solid #262626; border-bottom: none;
     border-top-left-radius: 6px; border-top-right-radius: 6px;
     padding: 6px 18px; margin-right: 3px; font-weight: 700;
 }
-QTabBar::tab:selected { background: #f2f0ea; }
+QTabBar::tab:selected { background: #e6e2d6; }
 """
 
 _STYLES["noir"] = """
