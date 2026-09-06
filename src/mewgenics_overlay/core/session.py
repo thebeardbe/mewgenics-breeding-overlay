@@ -204,7 +204,7 @@ class Session:
         cat: Cat,
         max_partners: int = 30,
         include_adventure: bool = True,
-        show_blocked: int = 0,
+        show_blocked: Optional[int] = None,
         quality_floor: Optional[float] = None,
         order: str = "risk",
         stimulation: float = 50.0,
@@ -290,7 +290,9 @@ class Session:
         blocked.sort(key=lambda r: (r.direct_family, r.is_hater, r.reason))
 
         rows = good[:max_partners]
-        if show_blocked > 0:
+        if show_blocked is None:
+            rows = rows + blocked            # show every blocked cat
+        elif show_blocked > 0:
             rows = rows + blocked[:show_blocked]
         return rows
 

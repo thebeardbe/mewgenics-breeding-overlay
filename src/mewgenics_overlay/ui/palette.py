@@ -755,9 +755,7 @@ class PaletteWindow(QWidget):
             return
         cat_key = focus.db_key
         max_rows = int(self._settings.get("max_partners", 100))
-        show_blocked = 0 if self._btn_swap.isChecked() else int(
-            self._settings.get("show_blocked", 3)
-        )
+        show_blocked = 0 if self._btn_swap.isChecked() else None
         include_adv = bool(self._settings.get("include_adventure", True))
         order = str(self._settings.get("order", "risk"))
         stimulation = self._stim_value()

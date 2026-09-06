@@ -71,7 +71,7 @@ def cmd_partners(sess: Session, args) -> int:
         cat,
         max_partners=args.limit,
         include_adventure=not args.room,
-        show_blocked=3,
+        show_blocked=None,
         order=args.order,
         stimulation=args.stim,
     )
