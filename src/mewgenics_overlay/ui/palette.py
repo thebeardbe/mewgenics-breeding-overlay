@@ -1125,6 +1125,9 @@ class PaletteWindow(QWidget):
         )
         if chosen.row.risk_pct > 35:
             text += "   ⚠ high risk"
+        if _night_chance(chosen.row.game_compat,
+                         self._comfort_value()) < 0.10:
+            text += "   ⚠ breeds rarely"
         self._btn_best.setText(text)
         tool = "Why this pick:\n" + "\n".join(chosen.breakdown)
         malady = self._pair_malady_lines(chosen.row, self._stim_value())

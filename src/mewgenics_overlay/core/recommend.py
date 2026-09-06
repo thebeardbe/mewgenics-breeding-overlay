@@ -35,7 +35,7 @@ from mewgenics_overlay.core.maladies import defect_inheritance_rows
 W_SEVENS = 14.0           # per expected ≥7 stat (dominates the score)
 W_AVG = 2.0               # per point of expected stat average
 W_RISK = 0.3              # subtracted per risk % (safety tie-breaker)
-W_NIGHT = 8.0             # added per unit nightly-attempt probability
+W_NIGHT = 25.0            # per unit nightly-attempt probability (chance counts)
 
 W_STAT_EFFECT = 3.0       # per net stat point granted/cost by a defect
 UNQUANT_BOTH = 20.0       # flavour defect carried by both parents

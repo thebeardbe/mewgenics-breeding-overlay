@@ -91,6 +91,18 @@ def test_nightly_compat_chance_breaks_ties():
     assert any("nightly" in b for b in rec.breakdown)
 
 
+def test_breeding_chance_overrides_marginal_sevens():
+    focus = cat("Focus")
+    flashy = cat("Flashy")     # more 7s but almost never breeds
+    steady = cat("Steady")     # slightly fewer 7s, breeds reliably
+    rows = [
+        row(steady, focus, risk=2.0, sevens=5.5, exp_avg=6.0, game_compat=0.60),
+        row(flashy, focus, risk=2.0, sevens=6.0, exp_avg=6.0, game_compat=0.22),
+    ]
+    rec = recommend(rows, focus, effect_of=effect_of)
+    assert rec.row.partner is steady
+
+
 def test_incompatible_ignored_and_none_case():
     focus = cat("Focus")
     blocked = cat("Blocked")
