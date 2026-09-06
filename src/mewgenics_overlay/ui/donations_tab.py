@@ -22,17 +22,19 @@ import mewgenics_overlay.ui.theme as _theme
 from PySide6.QtGui import QColor
 from mewgenics_overlay.ui.theme import wrap_tooltip as _wt
 
-_COLS = ["Cat", "Status", "Age", "Stats", "Why donate"]
+_COLS = ["Cat", "Status", "Age", "Stats", "Donate?", "Why donate"]
 _COL_TIPS = [
     "The cat's name. Hover a row for the full story.",
     "kitten — born today, can't breed yet · retired — went on an adventure "
     "· normal — a regular adult.",
     "Age in days. Kittens (1) go to Tink; seniors (5+) to Tracy.",
-    "Sum of its 7 birth stats (0–49). Higher = stronger, and more likely to "
-    "be worth keeping as a breeder.",
-    "Why this cat qualifies for this NPC, weakest/expendable first. Cats "
-    "valuable for breeding (or pinned / must-breed) sink to the bottom — "
-    "donate them only if you must.",
+    "Just its strength: the sum of the 7 birth stats (0–49). It is NOT the "
+    "donation advice — use the 'Donate?' column for that.",
+    "Give-away order, weakest first: Donate = safe to part with · Maybe = "
+    "borderline · Keep = worth holding on to (breeding-valuable, pinned or "
+    "must-breed). Colours: green = donate · amber = maybe · grey = keep.",
+    "Why this cat qualifies for this NPC. Cats valuable for breeding (or "
+    "pinned / must-breed) sink to the bottom — donate them only if you must.",
 ]
 
 
@@ -83,7 +85,7 @@ class DonationsTab(QWidget):
         self._table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         hdr = self._table.horizontalHeader()
         hdr.setStretchLastSection(True)
-        for i, w in enumerate([140, 70, 46, 60, 380]):
+        for i, w in enumerate([130, 70, 44, 58, 96]):
             self._table.setColumnWidth(i, w)
         root.addWidget(self._table, 1)
 
@@ -151,32 +153,59 @@ class DonationsTab(QWidget):
         self._summary.setText(f"{slot.wants} · {slot.count} qualifying")
         self._render_slot(slot)
 
+    @staticmethod
+    def _donate_rating(cat, index: int, total: int) -> str:
+        """Donate? label: Donate / Maybe / Keep (weakest first ordering)."""
+        if getattr(cat, "must_breed", False) or getattr(cat, "is_pinned", False):
+            return "Keep"
+        if getattr(cat, "_donate_keep_for_breeding", False):
+            return "Keep"
+        if total <= 1:
+            return "Donate"
+        fraction = index / (total - 1)
+        if fraction < 0.4:
+            return "Donate"
+        if fraction < 0.75:
+            return "Maybe"
+        return "Keep"
+
     def _render_slot(self, slot) -> None:
         self._table.setRowCount(0)
         cats = slot.candidates
-        self._table.setRowCount(len(cats))
+        total = len(cats)
+        self._table.setRowCount(total)
+        rating_colour = {
+            "Donate": _theme.C_GOOD,
+            "Maybe": _theme.C_WARN,
+            "Keep": _theme.C_MUTED,
+        }
         for r_i, cat in enumerate(cats):
             base = sum(getattr(cat, "base_stats", {}).values())
             inj = sum(1 for s, v in (getattr(cat, "base_stats", {}) or {}).items()
                       if (getattr(cat, "total_stats", {}) or {}).get(s, v) < v)
             why = "\n".join("• " + line
                              for line in recommendation_lines(cat))
+            rating = self._donate_rating(cat, r_i, total)
             cells = [cat.name, cat_status(cat), str(getattr(cat, "age", "?")),
-                     str(base), why]
+                     str(base), rating, why]
             for c_i, text in enumerate(cells):
                 it = QTableWidgetItem(text)
-                it.setToolTip(self._row_tip(cat, slot, base, inj))
+                it.setToolTip(self._row_tip(cat, slot, base, inj, rating))
+                if c_i == 4:
+                    it.setForeground(QColor(rating_colour[rating]))
                 self._table.setItem(r_i, c_i, it)
         self._hint.setText(
             "Ordered weakest → strongest. Pinned, must-breed and breeding-"
-            "valuable cats sink to the bottom — donate them only if you must."
+            "valuable cats are marked Keep — donate them only if you must."
         )
 
     @staticmethod
-    def _row_tip(cat, slot, base, injured) -> str:
+    def _row_tip(cat, slot, base, injured, rating="") -> str:
         lines = [f"{cat.name}  ({getattr(cat, 'gender', '?')})",
-                 f"Stats: {base} · age {getattr(cat, 'age', '?')}",
-                 f"Suitable for: {slot.npc} ({slot.wants})"]
+                 f"Stats: {base} · age {getattr(cat, 'age', '?')}"]
+        if rating:
+            lines.append(f"Donate? → {rating}")
+        lines.append(f"Suitable for: {slot.npc} ({slot.wants})")
         why = recommendation_lines(cat)
         if why:
             lines.append("Why:")

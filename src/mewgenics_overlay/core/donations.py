@@ -95,6 +95,12 @@ def _has_any_mutation_or_condition(cat) -> bool:
     return bool(getattr(cat, "defects", None))
 
 
+def _visible_dead(cat) -> bool:
+    """Only dead cats that are still present count for the Organ Grinder.
+    'Gone' cats have already been donated/collected and are not visible."""
+    return (getattr(cat, "status", "") or "") != "Gone"
+
+
 def _recent_death(cat, current_day) -> bool:
     """True when a dead cat died within the last DEAD_RECENT_DAYS (or we have
     no current day to compare against, in which case we keep them all)."""
@@ -266,7 +272,8 @@ def donation_report(cats, active: Optional[set] = None,
         slot.candidates = [c for c in pool
                          if _qualifies(c, npc)
                          and (npc != "Organ Grinder"
-                              or _recent_death(c, current_day))]
+                              or _recent_death(c, current_day))
+                         and (npc != "Organ Grinder" or _visible_dead(c))]
         if npc != "Organ Grinder":
             for c in slot.candidates:
                 if id(c) in keepers:

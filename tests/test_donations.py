@@ -97,12 +97,15 @@ def test_baby_jack_takes_injured_cats():
 
 
 def test_organ_grinder_takes_only_recent_dead():
-    fresh = cat("Fresh RIP", age=40, death_day=99)
+    fresh = cat("Fresh RIP", age=40, death_day=99)   # status In House
     fresh.is_dead = True
+    gone = cat("Gone RIP", age=400, death_day=98, status="Gone")
+    gone.is_dead = True
     old = cat("Old RIP", age=400, death_day=10)
     old.is_dead = True
-    report = donation_report([], dead=(fresh, old), current_day=100)
+    report = donation_report([], dead=(fresh, gone, old), current_day=100)
     slot = _slot(report, "Organ Grinder")
+    # Gone (already collected/donated) and too-old deaths are excluded
     assert [c.name for c in slot.candidates] == ["Fresh RIP"]
     assert _slot(report, "Tracy").count == 0
     butch = _slot(report, "Butch")
