@@ -45,6 +45,11 @@ W_INBRED = 20.0
 W_AGE = 0.5
 W_CONDITION = 3.0
 W_LOVER_KEEP = 6.0
+# retired (Frank) detection: abilities gained + stat growth
+ADV_ABILITIES_MIN = 3
+# Organ Grinder: only list deaths recent enough to plausibly still
+# await collection (the game keeps tombstones for the whole history)
+DEAD_RECENT_DAYS = 3
 
 
 @dataclass(frozen=True)
@@ -90,14 +95,34 @@ def _has_any_mutation_or_condition(cat) -> bool:
     return bool(getattr(cat, "defects", None))
 
 
+def _recent_death(cat, current_day) -> bool:
+    """True when a dead cat died within the last DEAD_RECENT_DAYS (or we have
+    no current day to compare against, in which case we keep them all)."""
+    death = getattr(cat, "death_day", None)
+    if death is None or current_day is None:
+        return True
+    return 0 <= int(current_day) - int(death) <= DEAD_RECENT_DAYS
+
+
 def _is_retired(cat) -> bool:
+    """Likely went on an adventure: stat growth from level-ups PLUS enough
+    abilities. Explicit overrides win first; 4+ (MBM strict) OR the looser
+    3+ threshold both count so genuine veterans aren't missed."""
+    if getattr(cat, "not_adventured_override", False):
+        return False
     fn = getattr(cat, "has_adventured", None)
     if callable(fn):
         try:
-            return bool(fn())
+            if fn():
+                return True
         except Exception:
-            return False
-    return bool(getattr(cat, "has_adventured_override", False))
+            pass
+    elif fn is True:
+        return True
+    gains = [int(x) for x in (getattr(cat, "stat_mod", None) or [])]
+    if not any(g > 0 for g in gains):
+        return False
+    return len(getattr(cat, "abilities", None) or []) >= ADV_ABILITIES_MIN
 
 
 def _age(cat) -> Optional[int]:
@@ -219,7 +244,8 @@ def _give_away_score(cat) -> float:
 
 
 def donation_report(cats, active: Optional[set] = None,
-                    dead: tuple = ()) -> List[DonationSlot]:
+                    dead: tuple = (),
+                    current_day: Optional[int] = None) -> List[DonationSlot]:
     """Rank every donation NPC's qualifying cats for the current roster.
 
     ``cats`` are the alive cats; ``dead`` (optional) supplies the cats that
@@ -237,7 +263,10 @@ def donation_report(cats, active: Optional[set] = None,
                             unlock_note=profile.unlock_note,
                             active=any(flag.startswith(profile.slug)
                                        for flag in flags))
-        slot.candidates = [c for c in pool if _qualifies(c, npc)]
+        slot.candidates = [c for c in pool
+                         if _qualifies(c, npc)
+                         and (npc != "Organ Grinder"
+                              or _recent_death(c, current_day))]
         if npc != "Organ Grinder":
             for c in slot.candidates:
                 if id(c) in keepers:

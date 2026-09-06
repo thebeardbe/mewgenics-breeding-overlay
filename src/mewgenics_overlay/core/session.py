@@ -166,6 +166,7 @@ class Session:
         self._finish_cats(self.cats)
         self._parent_map, self._lover_map, self._hater_map = _build_key_maps(self.cats)
         self.npc_progress_flags = _read_npc_progress_flags(self.save_path)
+        self.current_day: Optional[int] = _read_current_day(self.save_path)
 
     @staticmethod
     def _finish_cats(cats: list[Cat]) -> None:
@@ -322,6 +323,20 @@ class Session:
         )
 
 _NPC_TOKEN_RE = None
+
+
+def _read_current_day(save_path: str) -> Optional[int]:
+    """The save's current in-game day (plain integer property)."""
+    import sqlite3
+
+    try:
+        conn = sqlite3.connect(f"file:{save_path}?mode=ro", uri=True)
+        row = conn.execute(
+            "SELECT data FROM properties WHERE key='current_day'").fetchone()
+        conn.close()
+        return int(row[0]) if row is not None else None
+    except Exception:
+        return None
 
 
 def _read_npc_progress_flags(save_path: str) -> set:

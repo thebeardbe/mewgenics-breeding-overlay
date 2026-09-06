@@ -88,7 +88,9 @@ class DonationsTab(QWidget):
         dead = getattr(session, "dead_cats", []) if session is not None else []
         flags = getattr(session, "npc_progress_flags", set()) \
             if session is not None else set()
-        self._slots = donation_report(cats, active=flags, dead=tuple(dead)) \
+        self._slots = donation_report(
+            cats, active=flags, dead=tuple(dead),
+            current_day=getattr(session, "current_day", None)) \
             if (cats or dead) else []
         self._rebuild_combo()
 

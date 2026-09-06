@@ -105,7 +105,8 @@ def cmd_partners(sess: Session, args) -> int:
 def cmd_donate(sess: Session, args) -> int:
     from mewgenics_overlay.core.donations import donation_report
 
-    report = donation_report(sess.alive, dead=tuple(sess.dead_cats))
+    report = donation_report(sess.alive, dead=tuple(sess.dead_cats),
+                             current_day=getattr(sess, "current_day", None))
     for slot in report:
         if not slot.supported:
             print(f"— {slot.npc}: not supported (no save data) · {slot.unlock_note}")

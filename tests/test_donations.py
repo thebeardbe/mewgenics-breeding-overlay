@@ -12,7 +12,8 @@ from mewgenics_overlay.core.donations import (
 
 def cat(name="c", age=None, defects=None, disorders=None, entries=None,
         adventured=False, must_breed=False, inbredness=0.0, lovers=None,
-        base=None, status="In House", room=""):
+        base=None, status="In House", room="", abilities=None, stat_mod=None,
+        death_day=None):
     return SimpleNamespace(
         name=name, age=age, defects=defects or [], disorders=disorders or [],
         visual_mutation_entries=entries or [], lovers=lovers or [],
@@ -20,6 +21,8 @@ def cat(name="c", age=None, defects=None, disorders=None, entries=None,
         base_stats=base if base is not None else
         {"STR": 5, "DEX": 5, "CON": 5, "INT": 5,
          "SPD": 5, "CHA": 5, "LCK": 5},
+        abilities=abilities or [], stat_mod=stat_mod or [],
+        death_day=death_day,
         has_adventured=lambda: adventured,
     )
 
@@ -93,17 +96,28 @@ def test_baby_jack_takes_injured_cats():
     assert [c.name for c in slot.candidates] == ["Hurt"]
 
 
-def test_organ_grinder_takes_the_dead():
-    dead = cat("RIP", age=40)
-    dead.is_dead = True
-    report = donation_report([], dead=(dead,))
+def test_organ_grinder_takes_only_recent_dead():
+    fresh = cat("Fresh RIP", age=40, death_day=99)
+    fresh.is_dead = True
+    old = cat("Old RIP", age=400, death_day=10)
+    old.is_dead = True
+    report = donation_report([], dead=(fresh, old), current_day=100)
     slot = _slot(report, "Organ Grinder")
-    assert [c.name for c in slot.candidates] == ["RIP"]
-    # dead cats must not leak into other NPCs' lists
+    assert [c.name for c in slot.candidates] == ["Fresh RIP"]
     assert _slot(report, "Tracy").count == 0
-    # Butch is still listed but unsupported
     butch = _slot(report, "Butch")
     assert not butch.supported and butch.count == 0
+
+
+def test_retired_loosened_threshold_catches_veterans():
+    # strict 4+ would miss these: 3 abilities but clear stat gains from runs
+    vet = cat("Vet", age=30, abilities=["a", "b", "c"],
+              stat_mod=[2, 0, 0, 0, 0, 0, 0])
+    weak = cat("Weak", age=30, abilities=["a", "b"],
+               stat_mod=[2, 0, 0, 0, 0, 0, 0])
+    report = donation_report([vet, weak])
+    slot = _slot(report, "Frank")
+    assert [c.name for c in slot.candidates] == ["Vet"]
 
 
 def test_unsupported_npcs_listed_but_empty():
