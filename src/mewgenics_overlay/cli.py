@@ -73,6 +73,7 @@ def cmd_partners(sess: Session, args) -> int:
         include_adventure=not args.room,
         show_blocked=3,
         order=args.order,
+        stimulation=args.stim,
     )
     for r in rows:
         if not r.compatible:
@@ -117,6 +118,9 @@ def main(argv=None) -> int:
                         help="only consider cats currently in the house")
     sp_part.add_argument("--order", choices=("risk", "quality"), default="risk",
                         help="partner sort: risk-first (default) or MBM quality")
+    sp_part.add_argument("--stim", type=float, default=50.0,
+                        help="breeding-room Stimulation used for inheritance "
+                             "math (default 50)")
 
     args = p.parse_args(argv)
     save_path = _resolve_save(args)

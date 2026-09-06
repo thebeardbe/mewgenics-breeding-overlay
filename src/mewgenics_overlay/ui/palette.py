@@ -26,6 +26,7 @@ from PySide6.QtCore import Qt, QEvent, QRect, QTimer
 from PySide6.QtGui import QColor, QGuiApplication
 from PySide6.QtWidgets import (
     QApplication,
+    QComboBox,
     QFileDialog,
     QHBoxLayout,
     QLabel,
@@ -54,6 +55,10 @@ from mewgenics_overlay.core.maladies import (
     disorder_summary,
 )
 from mewgenics_overlay.core.gameassets import GameAssets, locate_gpak
+from mewgenics_overlay.core.stimulation import (
+    STIMULATION_DEFAULT,
+    room_stimulation_map,
+)
 from mewgenics_overlay.core.recommend import recommend as recommend_best
 
 log = logging.getLogger("mewgenics_overlay.ui")
@@ -139,26 +144,28 @@ def _defect_short(name: str) -> str:
     return name.replace(" Birth Defect", "") or name
 
 
-def _defects_summary(row) -> str:
+def _defects_summary(row, stimulation: float = 50.0) -> str:
     """Compact Defects cell text: shared defects as '✓', single-carrier as %."""
     factors = row.pair_factors
     if factors is None:
         return ""
     parts = []
-    for d in defect_inheritance_rows(factors.cat_a, factors.cat_b, row.coi):
+    for d in defect_inheritance_rows(factors.cat_a, factors.cat_b, row.coi,
+                                     stimulation=stimulation):
         short = _defect_short(d.name)
         parts.append(short + (" ✓" if len(d.carriers) == 2
                               else f" ≈{d.chance_pct:.0f}%"))
     return "; ".join(parts)
 
 
-def _any_defect_guaranteed(row) -> bool:
+def _any_defect_guaranteed(row, stimulation: float = 50.0) -> bool:
     factors = row.pair_factors
     if factors is None:
         return False
     return any(len(d.carriers) == 2
                for d in defect_inheritance_rows(factors.cat_a, factors.cat_b,
-                                                row.coi))
+                                                row.coi,
+                                                stimulation=stimulation))
 
 
 class _DragLabel(QLabel):
@@ -224,6 +231,8 @@ class PaletteWindow(QWidget):
         self._ga: Optional[GameAssets] = None   # gpak effect tables (async)
         self._assets_started = False
         self._asset_result: Optional[GameAssets] = None
+        self._stim = STIMULATION_DEFAULT     # active breeding Stimulation
+        self._room_items: list = []          # combo entries (room, stimulation)
 
         self.setWindowTitle("Mewgenics Breeding Overlay")
         flags = Qt.WindowType.FramelessWindowHint
@@ -358,13 +367,27 @@ class PaletteWindow(QWidget):
             "partner to see each defect's pass chance for that pair."
         ))
         row2 = QHBoxLayout()
+        room_lbl = QLabel("Breed room:")
+        room_lbl.setToolTip(_wt(
+            "The room where you will breed. Its furniture Stimulation is "
+            "used for every pair calculation (stat inheritance, ≥7 odds, "
+            "single-carrier defect chances) instead of the default 50."
+        ))
+        self._room_combo = QComboBox()
+        self._room_combo.setToolTip(room_lbl.toolTip())
+        self._room_combo.setMinimumWidth(170)
+        self._room_combo.setEnabled(False)
+        self._room_combo.currentIndexChanged.connect(self._on_room_changed)
         self._btn_swap = QPushButton("Hide blocked rows")
         self._btn_swap.setCheckable(True)
         self._btn_swap.setToolTip(_wt(
             "When checked, pairs that cannot breed (direct family, hater, "
             "sexuality blocks) are hidden instead of listed below."
         ))
-        row2.addWidget(self._btn_swap, 0, Qt.AlignmentFlag.AlignRight)
+        row2.addWidget(room_lbl)
+        row2.addWidget(self._room_combo)
+        row2.addStretch(1)
+        row2.addWidget(self._btn_swap)
         cat_l.addWidget(self._cat_name)
         cat_l.addWidget(self._cat_meta)
         cat_l.addWidget(self._cat_stats)
@@ -652,6 +675,7 @@ class PaletteWindow(QWidget):
         )
         include_adv = bool(self._settings.get("include_adventure", True))
         order = str(self._settings.get("order", "risk"))
+        stimulation = self._stim_value()
 
         def work():
             try:
@@ -665,6 +689,7 @@ class PaletteWindow(QWidget):
                     include_adventure=include_adv,
                     show_blocked=show_blocked,
                     order=order,
+                    stimulation=stimulation,
                 )
                 enriched = []
                 for r in rows:
@@ -688,6 +713,7 @@ class PaletteWindow(QWidget):
             self._asset_result = None
         if assets is not None:
             self._ga = assets if assets.ok else None
+            self._refresh_room_combo()        # room Stimulation now available
             if self._rows:
                 self._redraw_table()          # effects now available in tooltips
             if self._focus is not None:
@@ -717,6 +743,75 @@ class PaletteWindow(QWidget):
         else:
             self._show_focus(self._focus)
             self._schedule_partners()
+        self._refresh_room_combo()
+
+    # ── breeding-room Stimulation ──────────────────────────────────────────
+    def _stim_value(self) -> float:
+        """Active Stimulation for pair math (selected room's furniture value
+        or the default 50 when no room is chosen)."""
+        try:
+            return float(self._stim)
+        except (TypeError, ValueError):
+            return STIMULATION_DEFAULT
+
+    def _selected_room(self):
+        idx = self._room_combo.currentIndex()
+        if 0 <= idx < len(self._room_items):
+            entry = self._room_items[idx]
+            return entry[0] if entry else None
+        return None
+
+    def _refresh_room_combo(self) -> None:
+        """Rebuild the room list from furniture (needs resources.gpak defs)."""
+        prev_room = self._selected_room()
+        rooms_stim: dict = {}
+        if self._session is not None and self._session.data is not None \
+                and self._ga is not None:
+            fb = self._session.data.furniture_by_room or {}
+            if fb and self._ga.furniture_data:
+                rooms_stim = room_stimulation_map(fb, self._ga.furniture_data)
+        self._room_combo.blockSignals(True)
+        self._room_combo.clear()
+        self._room_items = []
+        self._room_combo.addItem("— Stim 50 (no room)")
+        self._room_items.append(None)
+        for room in sorted(rooms_stim, key=lambda r: -rooms_stim[r]):
+            value = float(rooms_stim[room])
+            self._room_combo.addItem(f"{room} — Stim {value:g}")
+            self._room_items.append((room, value))
+        self._room_combo.setEnabled(bool(rooms_stim))
+        # prefer the previous pick, else the focused cat's room
+        target = None
+        if prev_room is not None and prev_room in rooms_stim:
+            target = prev_room
+        elif self._focus is not None and self._focus.room in rooms_stim:
+            target = self._focus.room
+        idx = 0
+        for i, entry in enumerate(self._room_items):
+            if entry is not None and entry[0] == target:
+                idx = i
+                break
+        old_stim = self._stim_value()
+        self._room_combo.setCurrentIndex(idx)
+        self._room_combo.blockSignals(False)
+        self._apply_room_selection()
+        if self._focus is not None and self._stim_value() != old_stim:
+            self._schedule_partners()   # numbers change with Stimulation
+
+    def _on_room_changed(self, index: int) -> None:
+        self._apply_room_selection()
+        if self._focus is not None:
+            self._schedule_partners()
+
+    def _apply_room_selection(self) -> None:
+        entry = None
+        idx = self._room_combo.currentIndex()
+        if 0 <= idx < len(self._room_items):
+            entry = self._room_items[idx]
+        if entry is None:
+            self._stim = STIMULATION_DEFAULT
+        else:
+            self._stim = float(entry[1])
 
     # ── selection & search ─────────────────────────────────────────────────
     def set_focus_key(self, db_key: int) -> None:
@@ -889,14 +984,16 @@ class PaletteWindow(QWidget):
             self._btn_safe.setVisible(False)
             return
         effect = self._effect_for_name
-        overall = recommend_best(compat, self._focus, effect_of=effect)
+        overall = recommend_best(compat, self._focus, effect_of=effect,
+                                 stimulation=self._stim_value())
         chosen = overall
         fallback = False
         if self._safe_mode:
             cap = float(self._settings.get("safe_risk_cap", 15.0))
             safe_rows = [r for r in compat if r.risk_pct <= cap]
             safe_rec = (recommend_best(safe_rows, self._focus,
-                                       effect_of=effect)
+                                       effect_of=effect,
+                                       stimulation=self._stim_value())
                         if safe_rows else recommend_best([], self._focus))
             if safe_rec.row is not None:
                 chosen = safe_rec
@@ -923,7 +1020,7 @@ class PaletteWindow(QWidget):
             text += "   ⚠ high risk"
         self._btn_best.setText(text)
         tool = "Why this pick:\n" + "\n".join(chosen.breakdown)
-        malady = self._pair_malady_lines(chosen.row)
+        malady = self._pair_malady_lines(chosen.row, self._stim_value())
         if malady:
             tool += "\n\n" + "\n".join(malady)
         tool += "\n\nClick to select this partner."
@@ -963,7 +1060,7 @@ class PaletteWindow(QWidget):
         if col == 7:
             return row.seven_plus_total
         if col == 8:
-            return _defects_summary(row).lower()
+            return _defects_summary(row, self._stim_value()).lower()
         return _note_text(row, kids).lower()
 
     def _order_rows(self) -> list:
@@ -1030,10 +1127,10 @@ class PaletteWindow(QWidget):
             it_comp = QTableWidgetItem(_fmt_compat(row.game_compat) if ok else "—")
             it_exp = QTableWidgetItem(f"{row.expected_avg:.2f}" if ok else "—")
             it_7 = QTableWidgetItem(f"{row.seven_plus_total:.1f}" if ok else "—")
-            defects_text = _defects_summary(row)
+            defects_text = _defects_summary(row, self._stim_value())
             it_defects = QTableWidgetItem(defects_text)
             it_defects.setToolTip(
-                _wt("\n".join(self._pair_malady_lines(row))
+                _wt("\n".join(self._pair_malady_lines(row, self._stim_value()))
                    or "Both parents clean.")
             )
             it_note = QTableWidgetItem(_note_text(row, kids))
@@ -1086,7 +1183,7 @@ class PaletteWindow(QWidget):
                 if ok and col == 5:
                     it.setForeground(QColor("#7fe08a" if row.game_compat > 0.05
                                            else "#e0a63a"))
-                if ok and col == 8 and _any_defect_guaranteed(row):
+                if ok and col == 8 and _any_defect_guaranteed(row, self._stim_value()):
                     it.setForeground(QColor("#e0a63a"))   # inherited defects
                 self._table.setItem(r_i, col, it)
         self._update_sort_indicator()
@@ -1130,7 +1227,7 @@ class PaletteWindow(QWidget):
             )
             lines.append(f"Expected kitten stats: {ranges}")
             lines.append(f"Expected ≥7 stats: {row.seven_plus_total:.1f}")
-        malady = self._pair_malady_lines(row)
+        malady = self._pair_malady_lines(row, self._stim_value())
         if malady:
             lines.append("")
             lines.extend(malady)
@@ -1141,7 +1238,8 @@ class PaletteWindow(QWidget):
         lines.append("Double-click to analyse breeding from this cat.")
         return _wt("\n".join(lines))
 
-    def _pair_malady_lines(self, row: PartnerRow) -> list[str]:
+    def _pair_malady_lines(self, row: PartnerRow,
+                           stimulation: float = 50.0) -> list[str]:
         """Inheritance of traits the parents ALREADY carry (disorders exact,
         visual birth defects per body part, effects when the gpak is present).
         Empty when both parents are clean."""
@@ -1161,7 +1259,8 @@ class PaletteWindow(QWidget):
             lines.append(f"→ Kitten inherits ≥1 parent disorder: "
                          f"{dis['any_pct']:.0f}% "
                          f"(15% per parent that carries one)")
-        rows = defect_inheritance_rows(a, b, row.coi)
+        rows = defect_inheritance_rows(a, b, row.coi,
+                                       stimulation=stimulation)
         for drow in rows:
             asym = drow.group in ASYMMETRIC_GROUPS
             if len(drow.carriers) == 2:
@@ -1191,7 +1290,8 @@ class PaletteWindow(QWidget):
                 loc = f", on {where}" if where else ""
                 lines.append(
                     f"→ {drow.name} (carried by {who} only{loc}): "
-                    f"≈{drow.chance_pct:.0f}% to pass at 50 Stimulation"
+                    f"≈{drow.chance_pct:.0f}% to pass at "
+                    f"{stimulation:g} Stimulation"
                 )
             effect = self._effect_for_name(a, b, drow.name)
             if effect:
@@ -1240,7 +1340,7 @@ class PaletteWindow(QWidget):
                 text += f"   ·   existing kittens: {', '.join(kids)}"
         else:
             text = head + f"\nCan't breed: {row.reason or 'blocked'}"
-        malady = self._pair_malady_lines(row)
+        malady = self._pair_malady_lines(row, self._stim_value())
         if malady:
             text += "\n" + "\n".join(malady)
         self._detail.setText(text)

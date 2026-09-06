@@ -95,11 +95,16 @@ def _defect_contribution(d, partner_side: str, effect_of, a, b):
     return pts, label
 
 
-def recommend(rows, focused, effect_of: Optional[Callable] = None) -> Recommendation:
+def recommend(
+    rows, focused, effect_of: Optional[Callable] = None,
+    stimulation: float = 50.0,
+) -> Recommendation:
     """Return the best compatible partner (empty Recommendation when none).
 
     ``effect_of(a, b, defect_name) -> str`` supplies each defect's in-game
     effect text ('' when unknown); the palette feeds it from resources.gpak.
+    ``stimulation`` is the breeding room's Stimulation (single-carrier defect
+    odds depend on it).
     """
     best = None
     best_score = float("-inf")
@@ -114,7 +119,7 @@ def recommend(rows, focused, effect_of: Optional[Callable] = None) -> Recommenda
         partner = row.partner
         partner_side = "b" if factors.cat_b is partner else "a"
         defect_rows = defect_inheritance_rows(
-            factors.cat_a, factors.cat_b, row.coi)
+            factors.cat_a, factors.cat_b, row.coi, stimulation=stimulation)
 
         sevens = float(row.seven_plus_total)
         exp_avg = float(row.expected_avg)

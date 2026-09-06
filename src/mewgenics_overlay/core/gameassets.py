@@ -59,11 +59,13 @@ class GameAssets:
     def __init__(self, gpak_path: Optional[str] = None):
         self.gpak_path = gpak_path
         self._mutation_data: dict = {}
+        self.furniture_data: dict = {}
         self.ok = False
         if gpak_path and os.path.exists(gpak_path):
             gd = GameData.from_gpak(gpak_path)
             self._mutation_data = getattr(gd, "visual_mutation_data", {}) or {}
-            self.ok = bool(self._mutation_data)
+            self.furniture_data = getattr(gd, "furniture_data", {}) or {}
+            self.ok = bool(self._mutation_data or self.furniture_data)
 
     # The game keeps limb mutations (incl. arms) in legs.gon and fur/texture
     # mutations in texture.gon; slot groups use different names.

@@ -165,6 +165,7 @@ class Session:
         show_blocked: int = 0,
         quality_floor: Optional[float] = None,
         order: str = "risk",
+        stimulation: float = 50.0,
     ) -> list[PartnerRow]:
         """Rank breeding partners for *cat* using MBM's exact pair math.
 
@@ -179,6 +180,9 @@ class Session:
             "which pair should I actually use now" question.
           * ``"quality"`` — MBM's full quality score (expected stats minus
             risk/variance penalties, plus lover bonuses).
+
+        ``stimulation`` is the breeding room's furniture Stimulation value
+        (default 50) and feeds the inheritance math via ``score_pair``.
         """
         pool = self.alive if include_adventure else self.in_house
         lover_map, hater_map = self._lover_map, self._hater_map
@@ -196,6 +200,7 @@ class Session:
                 lover_key_map=lover_map,
                 avoid_lovers=False,   # lover exclusivity is not a hard block in-game
                 parent_key_map=parent_map,
+                stimulation=stimulation,
             )
             family = is_direct_family_pair(cat, b, parent_map)
             proj = factors.projection
