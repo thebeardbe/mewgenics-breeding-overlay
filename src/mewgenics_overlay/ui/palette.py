@@ -137,7 +137,8 @@ _COL_TIP_PARAS = [
         "Below 5% the game won't even attempt the pair.",
         "Very high Comfort saturates the per-roll odds — the tool shows those "
         "as ≥95% instead of promising a 100% chance.",
-        "Colour key — green: above the line · amber: below it.",
+        "Colour key — green: ≈5%+ chance per night · amber: below that "
+        "(the game may still attempt pairs above its own 0.05 compat line).",
     ],
     # Exp/stat
     [
@@ -1512,9 +1513,11 @@ class PaletteWindow(QWidget):
                     f"{_fmt_chance(row.game_compat, _comfort)}.\n"
                     "That's the answer to 'will they breed tonight?' — the "
                     "game's two rolls are already folded in."
-                    + ("\nThe pair is above the 5% line, so the game will "
-                       "try it." if row.game_compat > 0.05
-                       else "\nBelow the 5% line — the game won't attempt it.")
+                    + ("\nAbove the game's compat line (0.05) so the game "
+                       "will try it — but amber below means under 5% per "
+                       "night despite that." if row.game_compat > 0.05
+                       else "\nBelow the game's compat line (0.05) — the "
+                            "game won't attempt it.")
                 ))
                 proj = row.pair_factors.projection
                 it_exp.setToolTip(
@@ -1548,7 +1551,13 @@ class PaletteWindow(QWidget):
                 if rel.is_family:
                     specials[COL_FAMILY] = _theme.C_FAMILY      # related, breedable
                 specials[COL_RISK] = risk_color(row.risk_pct)
-                specials[COL_CHANCE] = (_theme.C_GOOD if row.game_compat > 0.05
+                # Colour tracks the chance actually shown: green ≈ ≥5% per
+                # night, amber below it (the game's own 0.05 *compat* gate is
+                # separate — it only decides whether attempts happen at all).
+                specials[COL_CHANCE] = (_theme.C_GOOD
+                                        if _night_chance(
+                                            row.game_compat,
+                                            self._comfort_value()) >= 0.05
                                         else _theme.C_WARN)
                 if _any_defect_guaranteed(row, self._stim_value()):
                     specials[COL_DEFECTS] = _theme.C_WARN       # inherited defects
