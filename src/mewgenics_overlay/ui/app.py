@@ -95,6 +95,24 @@ def main(argv=None) -> int:
     for noisy in ("mewgenics.parser", "mewgenics.breeding"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
+    # The frozen Windows build has no console: also log to a file so a crash
+    # or uncaught exception is never invisible.
+    try:
+        from mewgenics_overlay.ui import config as ui_cfg
+        _log_dir = ui_cfg.config_dir()
+        _fh = logging.FileHandler(str(_log_dir / "overlay.log"),
+                                  encoding="utf-8")
+        _fh.setFormatter(logging.Formatter(
+            "%(asctime)s %(levelname)s %(name)s: %(message)s"))
+        logging.getLogger().addHandler(_fh)
+
+        def _excepthook(exc_type, exc, tb):
+            logging.getLogger("mewgenics_overlay.crash").critical(
+                "Unhandled exception", exc_info=(exc_type, exc, tb))
+        sys.excepthook = _excepthook
+    except Exception:
+        pass
+
     # On Hyprland run under XWayland: the always-on-top flag is honoured
     # reliably there, and Hyprland window rules (pin/float) can keep the
     # palette above a fullscreen game. Wayland-native can't guarantee that.

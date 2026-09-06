@@ -219,6 +219,7 @@ class PaletteWindow(QWidget):
         self._ui_busy = False
         self._pinned = True               # mirror of the 📌 button state
         self._click_through = False       # mouse passes through to the game
+        self._dialog_open = False         # modal dialog (file picker) open
         self._flag_applied = False        # non-Windows fallback guard
         self._ga: Optional[GameAssets] = None   # gpak effect tables (async)
         self._assets_started = False
@@ -515,8 +516,9 @@ class PaletteWindow(QWidget):
         """The moment the palette loses focus (user clicks the game), stop
         intercepting mouse input: switch to click-through automatically so the
         game always receives clicks in this area. Summon it again with
-        Ctrl+Shift+B / tray to interact."""
+        Ctrl+Shift+B / tray to interact. Skipped while a modal dialog is open."""
         if (event.type() == QEvent.Type.WindowDeactivate
+                and not self._dialog_open
                 and self.isVisible() and not self._click_through):
             self.set_click_through(True)
         super().changeEvent(event)
@@ -562,9 +564,23 @@ class PaletteWindow(QWidget):
         return bool(path) and os.path.exists(path)
 
     def _pick_save(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Locate Mewgenics save", "", "Mewgenics saves (*.sav)"
-        )
+        """Open a file picker and load the chosen save.
+
+        Uses Qt's own dialog (not the OS-native one) — the native dialog is
+        the usual suspect for platform crashes here. The dialog is modal, so
+        auto click-through is suspended while it is open.
+        """
+        self._dialog_open = True
+        try:
+            path, _ = QFileDialog.getOpenFileName(
+                self,
+                "Locate Mewgenics save",
+                os.path.dirname(self._settings.get("save_path") or ""),
+                "Mewgenics saves (*.sav)",
+                options=QFileDialog.Option.DontUseNativeDialog,
+            )
+        finally:
+            self._dialog_open = False
         if path:
             self.open_save(path)
 
