@@ -35,6 +35,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QMenu,
     QPushButton,
     QSystemTrayIcon,
     QTableWidget,
@@ -585,6 +586,8 @@ class PaletteWindow(QWidget):
         self._results.itemActivated.connect(self._on_result_clicked)
         self._table.itemSelectionChanged.connect(self._on_partner_selected)
         self._table.itemDoubleClicked.connect(self._on_partner_double)
+        self._table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._table.customContextMenuRequested.connect(self._show_breeding_menu)
         self._table.horizontalHeader().sectionClicked.connect(self._on_header_clicked)
         self._btn_swap.toggled.connect(self._recompute_partners)
         self._btn_best.clicked.connect(self._on_best_clicked)
@@ -1668,6 +1671,24 @@ class PaletteWindow(QWidget):
         if malady:
             text += "\n" + "\n".join(malady)
         self._detail.setText(text)
+
+    def _show_breeding_menu(self, pos) -> None:
+        """Right-click a partner row to pin/unpin them as a keeper."""
+        item = self._table.itemAt(pos)
+        if item is None:
+            return
+        name_item = self._table.item(item.row(), 0)
+        data = name_item.data(Qt.ItemDataRole.UserRole) if name_item else None
+        if not data:
+            return
+        partner = data[0].partner
+        menu = QMenu(self)
+        label = ("Unpin — allow donation" if getattr(partner, "is_pinned", False)
+                 else "Pin for breeding")
+        action = menu.addAction(label)
+        chosen = menu.exec(self._table.viewport().mapToGlobal(pos))
+        if chosen is action:
+            self.set_pinned(partner, not getattr(partner, "is_pinned", False))
 
     def _on_partner_double(self, item: QTableWidgetItem) -> None:
         data = item.data(Qt.ItemDataRole.UserRole)
