@@ -44,6 +44,12 @@ QPushButton:hover { background: #413865; }
 QPushButton:pressed { background: #2a2440; }
 QPushButton:checked { background: #6d5bd0; }
 QPushButton:disabled { color: #6d6890; }
+QPushButton#best {
+    text-align: left; font-weight: 600; padding: 6px 10px;
+    background: #241f38; border: 1px solid #7a6bd0; border-radius: 6px;
+    color: #c5b8ff;
+}
+QPushButton#best:hover { background: #332b52; }
 QLabel#headerName { font-size: 15px; font-weight: 700; }
 QLabel#muted { color: #9a94b8; }
 QScrollBar:vertical { background: transparent; width: 8px; }

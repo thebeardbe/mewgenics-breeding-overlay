@@ -54,6 +54,7 @@ from mewgenics_overlay.core.maladies import (
     disorder_summary,
 )
 from mewgenics_overlay.core.gameassets import GameAssets, locate_gpak
+from mewgenics_overlay.core.recommend import recommend as recommend_best
 
 log = logging.getLogger("mewgenics_overlay.ui")
 
@@ -371,6 +372,14 @@ class PaletteWindow(QWidget):
         cat_l.addLayout(row2)
         root.addWidget(self._cat_box)
 
+        # best-match banner
+        self._btn_best = QPushButton("⭐ Best match")
+        self._btn_best.setObjectName("best")
+        self._btn_best.setToolTip("")
+        self._btn_best.setVisible(False)
+        self._best_row = None
+        root.addWidget(self._btn_best)
+
         # partners
         self._table = QTableWidget(0, len(_COLS))
         self._table.setHorizontalHeaderLabels(_COLS)
@@ -416,6 +425,7 @@ class PaletteWindow(QWidget):
         self._table.itemDoubleClicked.connect(self._on_partner_double)
         self._table.horizontalHeader().sectionClicked.connect(self._on_header_clicked)
         self._btn_swap.toggled.connect(self._recompute_partners)
+        self._btn_best.clicked.connect(self._on_best_clicked)
 
     # ── window behaviour: pin, click-through, summoning ────────────────────
     def _toggle_pin(self, checked: bool) -> None:
@@ -702,6 +712,8 @@ class PaletteWindow(QWidget):
         self._cat_stats.setText("")
         self._cat_lovers.setText("")
         self._cat_health.setText("")
+        self._best_row = None
+        self._btn_best.setVisible(False)
         self._table.setRowCount(0)
         self._detail.setText("Select a partner row for inheritance detail.")
 
@@ -825,8 +837,47 @@ class PaletteWindow(QWidget):
         self._rows = list(rows)
         self._sort_col = None        # new data -> back to engine's safe-first order
         self._redraw_table()
+        self._update_best()
 
     # ── sorting ────────────────────────────────────────────────────────────
+    def _update_best(self) -> None:
+        """Recompute and show the ⭐ best-match banner for the focused cat."""
+        if not self._rows or self._focus is None:
+            self._best_row = None
+            self._btn_best.setVisible(False)
+            return
+        rec = recommend_best([r for r, _ in self._rows], self._focus)
+        self._best_row = rec.row
+        if rec.row is None:
+            self._btn_best.setVisible(False)
+            return
+        partner = rec.row.partner
+        self._btn_best.setText(
+            f"⭐ Best match: {partner.name} — Risk {rec.row.risk_pct:.1f}% · "
+            f"≥7 ≈{rec.row.seven_plus_total:.1f} · "
+            f"COI {rec.row.coi * 100:.1f}%"
+        )
+        tool = "Why this pick:\n" + "\n".join(rec.breakdown)
+        malady = self._pair_malady_lines(rec.row)
+        if malady:
+            tool += "\n\n" + "\n".join(malady)
+        tool += "\n\nClick to select this partner."
+        self._btn_best.setToolTip(tool)
+        self._btn_best.setVisible(True)
+
+    def _on_best_clicked(self) -> None:
+        if self._best_row is None:
+            return
+        target = self._best_row.partner.db_key
+        for ri in range(self._table.rowCount()):
+            it = self._table.item(ri, 0)
+            data = it.data(Qt.ItemDataRole.UserRole) if it else None
+            if data and data[0].partner.db_key == target:
+                self._table.setCurrentCell(ri, 0)
+                self._table.scrollToItem(it)
+                self._on_partner_selected()
+                return
+
     def _col_key(self, col: int, row: PartnerRow, kids: list[str]):
         """Sort key for a column (text columns sort as strings, rest numeric)."""
         p = row.partner
