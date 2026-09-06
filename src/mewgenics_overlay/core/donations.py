@@ -25,22 +25,55 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Callable, List, Optional
 
+from mewgenics_overlay.core.recommend import W_AVG, W_RISK, W_SEVENS
 from mewgenics_overlay.core.session import display_location
+from mewgenics_overlay.core.stimulation import STIMULATION_DEFAULT
 from mewgenics_overlay.vendor.breeding import pair_projection
 
 # Adult/breedable threshold: 1-day-olds (and younger) can't breed yet.
 KITTEN_MAX_AGE = 1
+TINK_MAX_AGE = 1          # 1-day-old kittens (Tink)
+TRACY_MIN_AGE = 5         # minimum age Tracy accepts
 
-NPC_ORDER = ["Tink", "Dr. Beanies", "Frank", "Tracy", "Baby Jack"]
+
+# breeding-value signal: a cat is a 'keeper' when its best pairing score
+# beats this percentile of the whole roster
+KEEPER_PERCENTILE = 0.75
+
+# give-away ranking weights (higher score = donate later)
+W_INBRED = 20.0
+W_AGE = 0.5
+W_CONDITION = 3.0
+W_LOVER_KEEP = 6.0
+
+
+@dataclass(frozen=True)
+class NpcProfile:
+    """What a donation NPC wants, when they unlock, and their save-token stem."""
+    wants: str
+    unlock_note: str
+    slug: str
+
+
+NPC_PROFILES: dict = {
+    "Tink": NpcProfile("1-day-old kittens",
+                       "unlocked after the tutorial", "tink"),
+    "Dr. Beanies": NpcProfile("cats with mutations, birth defects, disorders",
+                              "unlocked after Caves + Boneyard", "beanies"),
+    "Frank": NpcProfile("cats that survived an adventure",
+                        "unlocked after Alley + next day", "frank"),
+    "Tracy": NpcProfile("cats aged 5 or older",
+                        "unlocked after Sewers + next day", "tracy"),
+    "Baby Jack": NpcProfile("cats with an injury",
+                            "unlocked after getting a piece of furniture",
+                            "jack"),
+}
+NPC_ORDER = list(NPC_PROFILES)
 # NPCs whose requirements the save format can't express yet.
 UNSUPPORTED = [
     ("Butch", "cats far from home", "chapter progress is not in the save data"),
     ("Organ Grinder", "dead cats", "collected automatically in-game"),
 ]
-
-TRACY_MIN_AGE = 5     # days/years of age before Tracy will take a cat
-TINK_MAX_AGE = 1
-
 
 def _has_any_mutation_or_condition(cat) -> bool:
     entries = getattr(cat, "visual_mutation_entries", None) or []
@@ -84,15 +117,16 @@ def _pair_value(a, b) -> float:
     """Breeding value of pairing a with b: 7s + stats, minus a safety
     penalty for the pair's birth-defect risk (low-risk pairings are worth
     more)."""
-    proj = pair_projection(a, b, stimulation=50.0)
+    proj = pair_projection(a, b, stimulation=STIMULATION_DEFAULT)
     risk = 0.0
     try:
         from mewgenics_overlay.vendor.save_parser import risk_percent
         risk = float(risk_percent(a, b))
     except Exception:
         risk = 0.0
-    return 14.0 * proj.seven_plus_total + 2.0 * proj.avg_expected \
-        - 0.3 * risk
+    return (W_SEVENS * proj.seven_plus_total
+            + W_AVG * proj.avg_expected
+            - W_RISK * risk)
 
 
 def _breeding_keepers(cats) -> set:
@@ -113,7 +147,7 @@ def _breeding_keepers(cats) -> set:
     if len(scores) < 4:
         return set()
     ordered = sorted(v for _, v in scores)
-    threshold = ordered[int(0.75 * (len(ordered) - 1))]
+    threshold = ordered[int(KEEPER_PERCENTILE * (len(ordered) - 1))]
     return {id(a) for a, v in scores if v > threshold}
 
 
@@ -165,12 +199,12 @@ def _give_away_score(cat) -> float:
     weak stats, inbred, older, carrying conditions, no lover ties."""
     base = float(sum(getattr(cat, "base_stats", {}).values()))
     score = base
-    score += (getattr(cat, "inbredness", 0.0) or 0.0) * 20.0
-    score += float(_age(cat) or 0) * 0.5
+    score += (getattr(cat, "inbredness", 0.0) or 0.0) * W_INBRED
+    score += float(_age(cat) or 0) * W_AGE
     if getattr(cat, "defects", None) or getattr(cat, "disorders", None):
-        score += 3.0
+        score += W_CONDITION
     if getattr(cat, "lovers", None):
-        score -= 6.0          # keep cats who are in love
+        score -= W_LOVER_KEEP      # keep cats who are in love
     if getattr(cat, "must_breed", False):
         score -= 100.0        # never recommend a marked must-breed
     if getattr(cat, "is_pinned", False):
@@ -188,26 +222,11 @@ def donation_report(cats, active: Optional[set] = None) -> List[DonationSlot]:
     slots: List[DonationSlot] = []
     keepers = _breeding_keepers(cats)
 
-    def info(npc):
-        return {
-            "Tink": ("1-day-old kittens", "unlocked after the tutorial"),
-            "Dr. Beanies": ("cats with mutations, birth defects, disorders",
-                            "unlocked after Caves + Boneyard"),
-            "Frank": ("cats that survived an adventure",
-                      "unlocked after Alley + next day"),
-            "Tracy": ("cats aged 5 or older",
-                      "unlocked after Sewers + next day"),
-            "Baby Jack": ("cats with an injury",
-                          "unlocked after getting a piece of furniture"),
-        }[npc]
-
     for npc in NPC_ORDER:
-        wants, unlock = info(npc)
-        slug = {"Tink": "tink", "Dr. Beanies": "beanies",
-                "Frank": "frank", "Tracy": "tracy",
-                "Baby Jack": "jack"}[npc]
-        slot = DonationSlot(npc=npc, wants=wants, unlock_note=unlock,
-                            active=any(flag.startswith(slug)
+        profile = NPC_PROFILES[npc]
+        slot = DonationSlot(npc=npc, wants=profile.wants,
+                            unlock_note=profile.unlock_note,
+                            active=any(flag.startswith(profile.slug)
                                        for flag in flags))
         slot.candidates = [c for c in cats if _qualifies(c, npc)]
         for c in slot.candidates:

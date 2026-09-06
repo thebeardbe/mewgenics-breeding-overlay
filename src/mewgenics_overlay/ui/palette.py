@@ -53,7 +53,20 @@ from mewgenics_overlay.core.watcher import SaveWatcher, safe_read_save
 from mewgenics_overlay.vendor.breeding import tracked_offspring
 
 from . import config as cfg
-from .theme import STYLESHEET, gender_badge, risk_color, wrap_tooltip as _wt
+from .theme import (
+    C_FAMILY,
+    C_GOOD,
+    C_GRIP,
+    C_MUTED,
+    C_STAT_LOW,
+    C_STATUS,
+    C_TEXT,
+    C_WARN,
+    STYLESHEET,
+    gender_badge,
+    risk_color,
+    wrap_tooltip as _wt,
+)
 from mewgenics_overlay.core.maladies import (
     ASYMMETRIC_GROUPS,
     _side_text,
@@ -173,15 +186,6 @@ _COL_TIPS = ["\n".join(paras) for paras in _COL_TIP_PARAS]
  COL_EXP, COL_SEVEN, COL_DEFECTS, COL_NOTE) = range(10)
 assert len(_COLS) == 10
 
-# ── palette colours (single source of truth) ─────────────────────
-C_TEXT = "#e8e6ee"        # normal text
-C_MUTED = "#8a849f"       # blocked rows / low emphasis
-C_FAMILY = "#c9a0e8"      # related but breedable
-C_GOOD = "#7fe08a"        # pass / high stat
-C_WARN = "#e0a63a"        # caution / inherited defect
-C_STAT_LOW = "#c0b9d8"    # low-ish stat chip
-C_GRIP = "#6a6390"        # drag grip
-C_STATUS = "#9a94b8"      # header status text
 
 def _note_text(row, kids: list[str]) -> str:
     """The human-readable Note cell contents for a partner row."""

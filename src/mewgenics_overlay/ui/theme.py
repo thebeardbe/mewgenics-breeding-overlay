@@ -29,6 +29,16 @@ def wrap_tooltip(text: str, width: int = 84) -> str:
     return "\n".join(out)
 
 
+# Shared UI colours (single source of truth for widgets)
+C_TEXT = "#e8e6ee"        # normal text
+C_MUTED = "#8a849f"       # blocked rows / low emphasis
+C_FAMILY = "#c9a0e8"      # related but breedable
+C_GOOD = "#7fe08a"        # pass / high stat
+C_WARN = "#e0a63a"        # caution / inherited defect
+C_STAT_LOW = "#c0b9d8"    # low-ish stat chip
+C_GRIP = "#6a6390"        # drag grip
+C_STATUS = "#9a94b8"      # header status text
+
 def risk_color(risk_pct: float) -> str:
     """Semantic color for a pair's combined birth-defect risk %."""
     if risk_pct <= 5.0:
