@@ -47,6 +47,20 @@ def disorders_of(cat) -> List[str]:
     return list(getattr(cat, "disorders", None) or [])
 
 
+def sexuality_label(raw) -> str:
+    """Game categories from the hidden sexuality value 0..1: <10 % straight,
+    10–90 % bi, >90 % gay. Unknown/None -> 'straight' (game default)."""
+    try:
+        v = float(raw)
+    except (TypeError, ValueError):
+        return "straight"
+    if v < 0.1:
+        return "straight"
+    if v > 0.9:
+        return "gay"
+    return "bi"
+
+
 def defects_of(cat) -> List[str]:
     return list(getattr(cat, "defects", None) or [])
 

@@ -9,6 +9,7 @@ from mewgenics_overlay.core.maladies import (
     defect_lines,
     disorder_summary,
     has_maladies,
+    sexuality_label,
 )
 
 
@@ -41,6 +42,13 @@ def test_defect_lines_deduplicates_and_order():
     c = cat(defects=["Leg Birth Defect", "Leg Birth Defect", "Head Birth Defect"])
     assert defect_lines(c) == ["Leg Birth Defect", "Head Birth Defect"]
     assert defect_lines(cat()) == []
+
+
+def test_sexuality_label_thresholds():
+    assert sexuality_label(0.05) == "straight"
+    assert sexuality_label(0.5) == "bi"
+    assert sexuality_label(0.95) == "gay"
+    assert sexuality_label(None) == "straight"
 
 
 def test_has_maladies():
