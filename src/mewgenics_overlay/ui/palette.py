@@ -72,7 +72,7 @@ log = logging.getLogger("mewgenics_overlay.ui")
 
 STAT_NAMES = ["STR", "DEX", "CON", "INT", "SPD", "CHA", "LCK"]
 
-_COLS = ["Cat", "Family", "GenΔ", "Room", "Risk", "Chance", "Exp/stat", "≥7", "Defects", "Note"]
+_COLS = ["Cat", "Family", "GenΔ", "Room", "Risk", "Night", "Exp/stat", "≥7", "Defects", "Note"]
 
 # Column explanations shown as tooltips when hovering each header.
 # Column explanation tooltips, written as short human paragraphs so each
@@ -122,14 +122,11 @@ _COL_TIP_PARAS = [
         "Colour key — green: low (≤ 5%) · orange: medium (5–12%) · "
         "red: high (> 12%).",
     ],
-    # Chance
+    # Chance (Nightly)
     [
-        "How often a single breeding roll succeeds — the game rolls twice "
-        "each night, and both rolls need to pass before the pair tries.",
-        "Each roll's % = compatibility × √(1 + 0.1 × Comfort), using the "
-        "breeding room you selected.",
-        "Compatibility comes from charisma, libido, lover bonus and "
-        "sexuality — it never changes with Stimulation.",
+        "How likely the pair is to breed on a given night — one number that "
+        "already folds in the game's two nightly rolls.",
+        "A higher room Comfort nudges it up a little.",
         "Below 5% the game won't even attempt the pair.",
         "Colour key — green: above the line · orange: below it.",
     ],
@@ -264,8 +261,8 @@ def _fmt_compat(v: float) -> str:
 
 
 def _fmt_chance(v: float, comfort: float = 0.0) -> str:
-    """Per-roll breeding chance % — compat × √(1+0.1×Comfort), capped."""
-    return f"{max(0.0, min(100.0, _roll_chance(v, comfort) * 100.0)):.0f}%"
+    """Nightly breeding chance % — both of the game's rolls folded into one."""
+    return f"{max(0.0, min(100.0, _night_chance(v, comfort) * 100.0)):.0f}%"
 
 
 def _roll_chance(v: float, comfort: float = 0.0) -> float:
@@ -275,8 +272,8 @@ def _roll_chance(v: float, comfort: float = 0.0) -> float:
 
 
 def _night_chance(v: float, comfort: float = 0.0) -> float:
-    """Chance the pair attempts breeding on a given night (both rolls must
-    succeed, so it is the per-roll chance squared)."""
+    """Chance the pair breeds on a given night: both of the game's two nightly
+    rolls must succeed, so it is the per-roll chance squared."""
     roll = _roll_chance(v, comfort)
     return roll * roll
 
@@ -950,7 +947,12 @@ class PaletteWindow(QWidget):
 
     def _show_focus(self, cat: Cat) -> None:
         gen = "stray" if cat.generation == 0 else f"gen {cat.generation}"
-        meta = f"{gender_badge(cat.gender)} {cat.gender} · {display_location(cat)} · {gen}"
+        _gender = (cat.gender or "?").lower()
+        _sex = sexuality_label(getattr(cat, "sexuality_raw", None)) \
+            if _gender in ("male", "female") else None
+        meta = f"{gender_badge(cat.gender)} {cat.gender}" + \
+            (f" · {_sex}" if _sex else "") + \
+            f" · {display_location(cat)} · {gen}"
         if cat.age is not None:
             meta += f" · {cat.age}d"
         if cat.inbredness > 0.03:
@@ -966,6 +968,8 @@ class PaletteWindow(QWidget):
             f"{cat.gender} · {display_location(cat)} · "
             f"generation {cat.generation} (0 = stray, each generation adds "
             f"depth and shared ancestry)"
+            + (f"\nSexuality: {_sex}. "
+               "Bi/gay cats can breed with the same sex." if _sex else "")
             + (f" · age {cat.age} days" if cat.age is not None else "")
             + (f"\nInbreeding coefficient {cat.inbredness * 100:.1f}% = kinship "
                "of this cat's parents — flagged above 3%."
@@ -1253,17 +1257,15 @@ class PaletteWindow(QWidget):
                     f"Birth-defect risk for this pair: {row.risk_pct:.1f}%."
                 )
                 _comfort = self._comfort_value()
-                it_comp.setToolTip(
-                    f"Per-roll breeding chance: "
-                    f"{_fmt_chance(row.game_compat, _comfort)} "
-                    f"(two rolls per night ⇒ attempt chance "
-                    f"{_night_chance(row.game_compat, _comfort) * 100:.0f}%).\n"
-                    f"Raw compat {row.game_compat:.3f} at room Comfort "
-                    f"{_comfort:g}. "
-                    + ("Above the 5% line — the game will attempt this pair."
-                       if row.game_compat > 0.05
-                       else "Below the 5% line — the game won't attempt it.")
-                )
+                it_comp.setToolTip(_wt(
+                    f"Nightly breeding chance: "
+                    f"{_fmt_chance(row.game_compat, _comfort)}.\n"
+                    "That's the answer to 'will they breed tonight?' — the "
+                    "game's two rolls are already folded in."
+                    + ("\nThe pair is above the 5% line, so the game will "
+                       "try it." if row.game_compat > 0.05
+                       else "\nBelow the 5% line — the game won't attempt it.")
+                ))
                 proj = row.pair_factors.projection
                 it_exp.setToolTip(
                     f"Expected offspring stat average: {row.expected_avg:.2f} / 7.\n"
@@ -1355,7 +1357,13 @@ class PaletteWindow(QWidget):
         return _wt("\n".join(lines))
 
     def _partner_tooltip(self, row: PartnerRow, kids: list[str]) -> str:
-        lines = [f"{row.partner.name}  ({row.partner.gender}, {display_location(row.partner)})"]
+        p = row.partner
+        _pg = (p.gender or "?").lower()
+        _pl = sexuality_label(getattr(p, "sexuality_raw", None)) \
+            if _pg in ("male", "female") else None
+        lines = [f"{p.name}  ({p.gender}"
+                 + (f" · {_pl}" if _pl else "")
+                 + f", {display_location(p)})"]
         rel = row.relation
         lines.append(f"Family: {rel.label} · Δgen {rel.gen_gap:+d} "
                      f"· COI {row.coi * 100:.1f}%")
