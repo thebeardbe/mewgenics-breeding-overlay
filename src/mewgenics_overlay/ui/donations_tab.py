@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QComboBox,
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QMenu,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -94,9 +96,14 @@ class DonationsTab(QWidget):
         self._hint.setObjectName("muted")
         self._hint.setWordWrap(True)
         root.addWidget(self._hint)
+        self._table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._table.customContextMenuRequested.connect(self._show_row_menu)
 
     # ── data ───────────────────────────────────────────────────────────────
     def refresh(self, session) -> None:
+        palette = getattr(self, "_palette", None)
+        self._effect_of_cat = getattr(palette, "defect_text_of", None) \
+            if palette is not None else None
         cats = session.alive if session is not None else []
         dead = getattr(session, "dead_cats", []) if session is not None else []
         flags = getattr(session, "npc_progress_flags", set()) \
@@ -112,7 +119,8 @@ class DonationsTab(QWidget):
             self._butch_note.setVisible(False)
         report = donation_report(
             cats, active=flags, dead=tuple(dead),
-            current_day=getattr(session, "current_day", None)) \
+            current_day=getattr(session, "current_day", None),
+            effect_of_cat=getattr(self, "_effect_of_cat", None)) \
             if (cats or dead) else []
         # Spoiler guard: locked (or unsupported/undetectable) NPCs must never
         # appear — that would give away who exists and what they want.
@@ -188,6 +196,25 @@ class DonationsTab(QWidget):
                     "need the space."]
         return ["One of the weakest / least useful here — a fine donation."]
 
+    def _show_row_menu(self, pos) -> None:
+        index = self._table.indexAt(pos)
+        slot = self._current_slot()
+        palette = getattr(self, "_palette", None)
+        if not index.isValid() or slot is None or palette is None:
+            return
+        cats = slot.candidates
+        if index.row() >= len(cats):
+            return
+        cat = cats[index.row()]
+        menu = QMenu(self)
+        label = ("Unpin — allow donation" if getattr(cat, "is_pinned", False)
+                 else "Pin for breeding")
+        action = menu.addAction(label)
+        chosen = menu.exec(self._table.viewport().mapToGlobal(pos))
+        if chosen is action:
+            palette.set_pinned(cat, not getattr(cat, "is_pinned", False))
+            self.refresh(palette._session)
+
     def _render_slot(self, slot) -> None:
         self._table.setRowCount(0)
         cats = slot.candidates
@@ -203,7 +230,10 @@ class DonationsTab(QWidget):
             inj = sum(1 for s, v in (getattr(cat, "base_stats", {}) or {}).items()
                       if (getattr(cat, "total_stats", {}) or {}).get(s, v) < v)
             rating = self._donate_rating(cat, r_i, total)
-            why_lines = ["• " + line for line in self._advice_lines(cat, rating)]
+            notes = list(getattr(cat, "_donate_notes", None) or [])
+            if not notes:
+                notes = self._advice_lines(cat, rating)
+            why_lines = ["• " + line for line in notes]
             why_lines += ["• " + line for line in recommendation_lines(cat)]
             why = "\n".join(why_lines)
             cells = [cat.name, cat_status(cat), str(getattr(cat, "age", "?")),
@@ -227,6 +257,14 @@ class DonationsTab(QWidget):
             lines.append(f"Donate? → {rating}")
             lines += ["  • " + line
                       for line in DonationsTab._advice_lines(cat, rating)]
+        aggression = getattr(cat, "aggression", None)
+        if aggression is not None:
+            lines.append(f"Aggression: {float(aggression) * 100:.0f}% "
+                         "(marked for fighters — not a donation factor)")
+        notes = list(getattr(cat, "_donate_notes", None) or [])
+        if notes:
+            lines.append("Matrix:")
+            lines += [f"  • {line}" for line in notes[:5]]
         lines.append(f"Suitable for: {slot.npc} ({slot.wants})")
         why = recommendation_lines(cat)
         if why:

@@ -13,10 +13,11 @@ from mewgenics_overlay.core.donations import (
 def cat(name="c", age=None, defects=None, disorders=None, entries=None,
         adventured=False, must_breed=False, inbredness=0.0, lovers=None,
         base=None, status="In House", room="", abilities=None, stat_mod=None,
-        death_day=None):
+        death_day=None, children=None):
     return SimpleNamespace(
         name=name, age=age, defects=defects or [], disorders=disorders or [],
         visual_mutation_entries=entries or [], lovers=lovers or [],
+        children=children or [], parent_a=None, parent_b=None,
         must_breed=must_breed, inbredness=inbredness, status=status, room=room,
         base_stats=base if base is not None else
         {"STR": 5, "DEX": 5, "CON": 5, "INT": 5,
@@ -121,6 +122,42 @@ def test_retired_loosened_threshold_catches_veterans():
     report = donation_report([vet, weak])
     slot = _slot(report, "Frank")
     assert [c.name for c in slot.candidates] == ["Vet"]
+
+
+def _defect_cat(name, defect_name, effect):
+    return cat(name=name,
+               defects=[defect_name],
+               entries=[{"is_defect": True, "name": defect_name}])
+
+
+def test_negative_defect_donated_before_positive():
+    bad = _defect_cat("Bad", "Arm Birth Defect", "-2 DEX")
+    good = _defect_cat("Good", "Leg Birth Defect", "+2 CON")
+    effects = {"Arm Birth Defect": "-2 DEX",
+               "Leg Birth Defect": "+2 CON"}
+    report = donation_report([bad, good],
+                             effect_of_cat=lambda c, nm: effects.get(nm, ""))
+    names = [c.name for c in _slot(report, "Dr. Beanies").candidates]
+    assert names[0] == "Bad" and names[-1] == "Good"
+
+
+def test_inbred_donated_before_clean():
+    inbred = cat("Inbred", age=20, inbredness=0.6)
+    clean = cat("Clean", age=20, inbredness=0.02)
+    report = donation_report([clean, inbred])
+    names = [c.name for c in _slot(report, "Tracy").candidates]
+    assert names[0] == "Inbred" and names[-1] == "Clean"
+
+
+def test_living_offspring_makes_more_donatable():
+    parent = cat("Parent", age=20)
+    kid = cat("Kid", age=1, status="In House")
+    parent.children = [kid]
+    lonely = cat("Lonely", age=20)
+    report = donation_report([lonely, parent])
+    names = [c.name for c in _slot(report, "Tracy").candidates]
+    assert names[0] == "Parent"   # line continues -> donate first
+    assert names[-1] == "Lonely"  # no offspring -> keep
 
 
 def test_unsupported_npcs_listed_but_empty():

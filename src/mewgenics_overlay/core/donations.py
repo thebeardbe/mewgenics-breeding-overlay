@@ -23,9 +23,17 @@ with "unsupported" so the tab stays honest about coverage.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import bisect
+
 from typing import Callable, List, Optional
 
-from mewgenics_overlay.core.recommend import W_AVG, W_RISK, W_SEVENS
+from mewgenics_overlay.core.recommend import (
+    W_AVG,
+    W_RISK,
+    W_SEVENS,
+    effect_stat_net,
+)
+from mewgenics_overlay.vendor.save_parser import get_all_ancestors
 from mewgenics_overlay.core.session import display_location
 from mewgenics_overlay.core.stimulation import STIMULATION_DEFAULT
 from mewgenics_overlay.vendor.breeding import pair_projection
@@ -40,11 +48,15 @@ TRACY_MIN_AGE = 5         # minimum age Tracy accepts
 # beats this percentile of the whole roster
 KEEPER_PERCENTILE = 0.75
 
-# give-away ranking weights (higher score = donate later)
-W_INBRED = 20.0
-W_AGE = 0.5
-W_CONDITION = 3.0
-W_LOVER_KEEP = 6.0
+# donation matrix weights (positive = keep, negative = donate)
+W_STRENGTH = 2.0      # roster-relative strength (bell curve)
+W_INBRED = 2.0        # per COI point -> donate
+W_OFFSPRING = 0.35    # per living offspring -> donate (line continues)
+W_NO_OFFSPRING = 0.3  # no living offspring -> keep (line would end)
+W_LINE = 1.2          # roster-relative recent-line strength -> keep
+W_DEFECT_SIGN = 0.8   # per signed defect (positive = keep)
+W_LOVER_KEEP = 0.5
+ALIVE_STATUSES = ("In House", "Adventure")
 # retired (Frank) detection: abilities gained + stat growth
 ADV_ABILITIES_MIN = 3
 # Organ Grinder: only list deaths recent enough to plausibly still
@@ -231,27 +243,138 @@ def _qualifies(cat, npc: str) -> bool:
     return False
 
 
-def _give_away_score(cat) -> float:
-    """Lower = give away first. We want to donate cats we'd least miss:
-    weak stats, inbred, older, carrying conditions, no lover ties."""
-    base = float(sum(getattr(cat, "base_stats", {}).values()))
-    score = base
-    score += (getattr(cat, "inbredness", 0.0) or 0.0) * W_INBRED
-    score += float(_age(cat) or 0) * W_AGE
-    if getattr(cat, "defects", None) or getattr(cat, "disorders", None):
-        score += W_CONDITION
+def _base_sum(cat) -> float:
+    return float(sum(getattr(cat, "base_stats", {}).values()))
+
+
+def _roster_ctx(cats) -> list:
+    """Ascending base-stat sums of the living roster (for percentiles)."""
+    return sorted(_base_sum(c) for c in cats)
+
+
+def _rank_fraction(base_sum: float, sums: list) -> float:
+    """0..1 rank of a base-sum within the living roster (1 = strongest)."""
+    if not sums:
+        return 0.5
+    return bisect.bisect_right(sums, base_sum) / len(sums)
+
+
+def _living_children(cat) -> list:
+    out = []
+    for child in getattr(cat, "children", None) or []:
+        if getattr(child, "status", "") in ALIVE_STATUSES:
+            out.append(child)
+    return out
+
+
+def _line_pool(cat) -> list:
+    """Self + living offspring + recent ancestors (<=2 gens)."""
+    pool = [cat]
+    pool += _living_children(cat)
+    seen = {id(cat)}
+    for anc in get_all_ancestors(cat, depth=3):
+        if id(anc) not in seen:
+            seen.add(id(anc))
+            pool.append(anc)
+    return pool
+
+
+def _line_strength(cat, sums) -> float:
+    pool = _line_pool(cat)
+    if not pool:
+        return 0.5
+    return sum(_rank_fraction(_base_sum(c), sums) for c in pool) / len(pool)
+
+
+def _defect_bias(cat, effect_of_cat) -> float:
+    """Signed defect influence: +stats => keep, -stats => donate, neutral => 0."""
+    if effect_of_cat is None:
+        return 0.0
+    bias = 0.0
+    seen = set()
+    for entry in (getattr(cat, "visual_mutation_entries", None) or []):
+        if not entry or not entry.get("is_defect"):
+            continue
+        name = entry.get("name")
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        net = effect_stat_net(effect_of_cat(cat, name))
+        if net > 0:
+            bias += 1.0
+        elif net < 0:
+            bias -= 1.0
+    return bias
+
+
+def _give_away_score(cat, sums, effect_of_cat=None) -> float:
+    """Donation keep-score: LOWER = give away first. Based on how the cat
+    compares with the CURRENT living roster + genealogy + defect signs."""
+    base = _base_sum(cat)
+    rel = _rank_fraction(base, sums)
+    coi = max(0.0, min(1.0, float(getattr(cat, "inbredness", 0.0) or 0.0)))
+    living = len(_living_children(cat))
+    line = _line_strength(cat, sums)
+    bias = _defect_bias(cat, effect_of_cat)
+
+    score = 0.0
+    score += (rel - 0.5) * W_STRENGTH          # vs. living average (bell)
+    score -= coi * W_INBRED                    # inbred -> donate
+    score += (line - 0.5) * W_LINE             # good line -> keep
+    if living:
+        score -= min(1.5, living) * W_OFFSPRING   # line continues -> donate
+    else:
+        score += W_NO_OFFSPRING                   # line would end -> keep
+    score += bias * W_DEFECT_SIGN
     if getattr(cat, "lovers", None):
-        score -= W_LOVER_KEEP      # keep cats who are in love
-    if getattr(cat, "must_breed", False):
-        score -= 100.0        # never recommend a marked must-breed
-    if getattr(cat, "is_pinned", False):
+        score += W_LOVER_KEEP
+    if getattr(cat, "must_breed", False) or getattr(cat, "is_pinned", False):
         score -= 100.0
     return score
 
 
+def _donation_notes(cat, sums, effect_of_cat=None) -> list:
+    """Human reasons that shaped the score (shown above the Why lines)."""
+    base = _base_sum(cat)
+    rel = _rank_fraction(base, sums)
+    coi = max(0.0, min(1.0, float(getattr(cat, "inbredness", 0.0) or 0.0)))
+    living = len(_living_children(cat))
+    line = _line_strength(cat, sums)
+    bias = _defect_bias(cat, effect_of_cat)
+    notes = []
+    if rel >= 0.8:
+        notes.append(f"Stronger than ~{rel * 100:.0f}% of your living cats")
+    elif rel < 0.5:
+        notes.append(f"Weaker than ~{(1 - rel) * 100:.0f}% of your living cats")
+    if coi > 0.1:
+        notes.append(f"Inbred (COI {coi * 100:.0f}%)")
+    if living:
+        notes.append(f"Has {living} living offspring — line already continues")
+    else:
+        notes.append("No living offspring — donating would end its line")
+    if line >= 0.6:
+        notes.append("Comes from a strong recent line")
+    elif line <= 0.4:
+        notes.append("Weak recent line")
+    if bias > 0:
+        notes.append("Carries positive-stats defects (worth keeping)")
+    elif bias < 0:
+        notes.append("Carries negative-stats defects (safer to donate)")
+    if getattr(cat, "lovers", None):
+        notes.append("Is in love — keep with their partner")
+    if getattr(cat, "must_breed", False):
+        notes.append("Marked must-breed")
+    if getattr(cat, "is_pinned", False):
+        notes.append("Pinned by you — keep")
+    if getattr(cat, "_donate_keep_for_breeding", False):
+        notes.append("Top breeding mate for another cat")
+    return notes
+
+
+
 def donation_report(cats, active: Optional[set] = None,
-                    dead: tuple = (),
-                    current_day: Optional[int] = None) -> List[DonationSlot]:
+                    dead: tuple = (), current_day: Optional[int] = None,
+                    effect_of_cat=None) -> List[DonationSlot]:
     """Rank every donation NPC's qualifying cats for the current roster.
 
     ``cats`` are the alive cats; ``dead`` (optional) supplies the cats that
@@ -261,6 +384,7 @@ def donation_report(cats, active: Optional[set] = None,
     flags = set(active or ())
     slots: List[DonationSlot] = []
     keepers = _breeding_keepers(cats)
+    sums = _roster_ctx(cats)
 
     for npc in NPC_ORDER:
         profile = NPC_PROFILES[npc]
@@ -286,9 +410,11 @@ def donation_report(cats, active: Optional[set] = None,
 
         def _keeper(c):
             return bool(getattr(c, "_donate_keep_for_breeding", False))
-        slot.candidates.sort(key=lambda c: (int(_protected(c)),
-                                            int(_keeper(c)),
-                                            _give_away_score(c)))
+        slot.candidates.sort(
+            key=lambda c: (int(_protected(c)) * 2 + int(_keeper(c)),
+                           _give_away_score(c, sums, effect_of_cat)))
+        for c in slot.candidates:
+            c._donate_notes = _donation_notes(c, sums, effect_of_cat)
         slot.ranks = list(range(1, len(slot.candidates) + 1))
         slots.append(slot)
 

@@ -725,6 +725,50 @@ class PaletteWindow(QWidget):
         if donations is not None:
             donations.refresh(self._session)
 
+    # ── pinning (keep-list) ────────────────────────────────────────────────
+    def _pinned_store(self) -> list:
+        store = self._settings.setdefault("pinned", {})
+        key = self._settings.get("save_path") or ""
+        return store.setdefault(key, [])
+
+    def _sync_pins(self) -> None:
+        """Apply saved pins and forget any cat that is gone from the save."""
+        if self._session is None:
+            return
+        store = self._pinned_store()
+        present = {c.unique_id for c in self._session.cats
+                   if getattr(c, "status", "") != "Gone"}
+        fresh = [uid for uid in store if uid in present]
+        if len(fresh) != len(store):
+            store[:] = fresh
+            cfg.save(self._settings)
+        for c in self._session.cats:
+            c.is_pinned = c.unique_id in store
+
+    def set_pinned(self, cat, on: bool) -> None:
+        """Pin/unpin a cat (kept as a breeder; Gone cats are pruned)."""
+        store = self._pinned_store()
+        uid = cat.unique_id
+        if on and uid not in store:
+            store.append(uid)
+        elif not on and uid in store:
+            store.remove(uid)
+        cfg.save(self._settings)
+        cat.is_pinned = on
+        self._refresh_theme()
+
+    def defect_text_of(self, cat, name: str) -> str:
+        """Effect text for one of *cat*'s defects (for the donation matrix)."""
+        if self._ga is None:
+            return ""
+        for entry in (getattr(cat, "visual_mutation_entries", None) or []):
+            if entry.get("is_defect") and entry.get("name") == name:
+                text = self._ga.effect_for(entry.get("group_key"),
+                                           entry.get("mutation_id"))
+                if text:
+                    return text
+        return ""
+
     def _show_about(self) -> None:
         """Credits dialog: who built it and whose research it stands on."""
         text = (
@@ -940,6 +984,7 @@ class PaletteWindow(QWidget):
             self._show_focus(self._focus)
             self._schedule_partners()
         self._refresh_room_combo()
+        self._sync_pins()
         self._donations_tab.refresh(self._session)
 
     # ── breeding-room Stimulation ──────────────────────────────────────────
