@@ -1,183 +1,184 @@
 """Theme registry for the overlay.
 
-Two looks, same flat flash-cartoon logic:
+Two film-noir looks — high-key ("bright") and low-key ("dark") monochrome:
 
-  * ``film``  — "Bleached Film": cool bone/sepia stock, thick ink outlines.
-  * ``noir``  — "Noir Ink": deep charcoal film stock, lighter vector edges.
+  * ``film``  — Noir · Bright: silver/ivory stock, ink-black lines.
+  * ``noir``  — Noir · Dark: deep charcoal stock, pale silver lines.
+
+The only chroma allowed is a restrained noir-red (danger, selected). Risk is
+otherwise graded by ink weight: dark = low, mid-grey = medium, red = high.
 
 Module globals (``C_TEXT`` etc., ``STYLESHEET``, ``risk_color``) track the
-active theme, so widgets that read them at render time switch live.
+active theme, so render-time code follows live switches.
 """
 
 from __future__ import annotations
 
-_LIGHT = {
-    "name": "Bleached Film",
-    "C_TEXT": "#221d18",
-    "C_MUTED": "#716c5d",
-    "C_FAMILY": "#6d5f8d",
-    "C_GOOD": "#4d7247",
-    "C_WARN": "#a06f2f",
-    "C_STAT_LOW": "#8f866f",
-    "C_GRIP": "#5a5244",
-    "C_STATUS": "#6d6752",
-    "RISK_SAFE": "#4d7247",
-    "RISK_MID": "#a06f2f",
-    "RISK_HIGH": "#9e3b2b",
+_BRIGHT = {
+    "name": "Noir · Bright",
+    "C_TEXT": "#201f1c",
+    "C_MUTED": "#6f6d68",
+    "C_FAMILY": "#55534e",
+    "C_GOOD": "#101010",     # strong ink (pass / 7s)
+    "C_WARN": "#7d7a74",     # mid grey (caution)
+    "C_STAT_LOW": "#a09d95",
+    "C_GRIP": "#6a6761",
+    "C_STATUS": "#6f6c65",
+    "RISK_SAFE": "#3f3f3f",
+    "RISK_MID": "#8a8a8a",
+    "RISK_HIGH": "#b3261e",
 }
 
 _DARK = {
-    "name": "Noir Ink",
-    "C_TEXT": "#e6dfc8",
-    "C_MUTED": "#9b917c",
-    "C_FAMILY": "#9c82c6",
-    "C_GOOD": "#7fb271",
-    "C_WARN": "#cf9a4e",
-    "C_STAT_LOW": "#a79c81",
-    "C_GRIP": "#8a8166",
-    "C_STATUS": "#a89d84",
-    "RISK_SAFE": "#7fb271",
-    "RISK_MID": "#cf9a4e",
-    "RISK_HIGH": "#d45543",
+    "name": "Noir · Dark",
+    "C_TEXT": "#e6e3da",
+    "C_MUTED": "#9d998e",
+    "C_FAMILY": "#b5afa1",
+    "C_GOOD": "#f4f1e8",     # pale silver (pass / 7s)
+    "C_WARN": "#a09b8f",     # grey (caution)
+    "C_STAT_LOW": "#7e7a70",
+    "C_GRIP": "#8d887b",
+    "C_STATUS": "#a49f92",
+    "RISK_SAFE": "#d9d5cc",
+    "RISK_MID": "#a09b8f",
+    "RISK_HIGH": "#e5483c",
 }
 
-# Pure-QSS stylesheet per theme. Kept flat + heavy-outline; only base tones,
-# fills and outline colours change between the two stocks.
 _STYLES = {}
 
 _STYLES["film"] = """
 * { font-family: 'Arial','Helvetica','DejaVu Sans','Segoe UI',sans-serif; }
-QWidget { background: #d9d2c0; color: #221d18; }
-QDialog { background: #d9d2c0; }
-QLabel#muted { color: #716c5d; }
+QWidget { background: #e7e5e0; color: #201f1c; }
+QDialog { background: #e7e5e0; }
+QLabel#muted { color: #6f6c65; }
 QLabel#headerName {
-    font-size: 17px; font-weight: 800; color: #17130c;
-    border-bottom: 3px solid #9e3b2b; padding-bottom: 2px;
+    font-size: 17px; font-weight: 800; color: #111;
+    border-bottom: 3px solid #1a1a1a; padding-bottom: 2px;
 }
 QLineEdit, QComboBox {
-    background: #f0e9d8;
-    border: 2px solid #262016; border-radius: 6px; padding: 4px 9px;
-    selection-background-color: #2b2721; selection-color: #efe9dc;
+    background: #faf9f5;
+    border: 2px solid #262626; border-radius: 5px; padding: 4px 9px;
+    selection-background-color: #1a1a1a; selection-color: #f4f2ed;
 }
 QComboBox::drop-down { border: none; width: 24px; }
 QComboBox QAbstractItemView {
-    background: #f0e9d8; color: #221d18;
-    selection-background-color: #2b2721; selection-color: #efe9dc;
+    background: #faf9f5; color: #201f1c;
+    selection-background-color: #1a1a1a; selection-color: #f4f2ed;
 }
 QListWidget, QTableWidget {
-    background: #eee7d4; alternate-background-color: #ded5bf;
-    border: 2px solid #262016; border-radius: 6px; outline: none;
-    gridline-color: #c7bd9f;
+    background: #f2f0ea; alternate-background-color: #e2dfd7;
+    border: 2px solid #262626; border-radius: 5px; outline: none;
+    gridline-color: #c6c2b8;
 }
 QListWidget::item { padding: 4px 7px; }
 QListWidget::item:selected, QTableWidget::item:selected {
-    background: #2b2721; color: #efe9dc;
+    background: #1a1a1a; color: #f4f2ed;
 }
 QHeaderView::section {
-    background: #c4b998; color: #17130c;
-    border: none; border-right: 1px solid #aca078;
-    border-bottom: 3px solid #262016;
+    background: #d6d3cb; color: #141414;
+    border: none; border-right: 1px solid #b5b1a6;
+    border-bottom: 3px solid #262626;
     padding: 6px 8px; font-weight: 800; font-size: 13px;
 }
 QPushButton {
-    background: #d3c8ad; border: 2px solid #262016; border-radius: 7px;
-    padding: 5px 13px; color: #221d18;
+    background: #dfdcd4; border: 2px solid #262626; border-radius: 6px;
+    padding: 5px 13px; color: #201f1c;
 }
-QPushButton:hover { background: #ddd2b8; }
-QPushButton:pressed { background: #bdb088; }
-QPushButton:checked { background: #8e3426; color: #f2ecdc; border-color: #3c150d; }
+QPushButton:hover { background: #eae7de; }
+QPushButton:pressed { background: #c9c5bb; }
+QPushButton:checked { background: #8f2b22; color: #f6f2ea; border-color: #3c0e0a; }
 QPushButton#best {
     text-align: left; font-weight: 800; padding: 7px 11px;
-    background: #d2c49f; border: 3px solid #262016; border-radius: 8px;
-    color: #6b2a1c;
+    background: #dcd9d1; border: 3px solid #262626; border-radius: 7px;
+    color: #6b241d;
 }
-QPushButton#best:hover { background: #ded0ab; }
+QPushButton#best:hover { background: #e6e3da; }
 QToolTip {
-    background: #ece5d1; color: #221d18;
-    border: 2px solid #262016; border-radius: 6px; padding: 6px;
+    background: #f2f0ea; color: #201f1c;
+    border: 2px solid #262626; border-radius: 5px; padding: 6px;
 }
 QScrollBar:vertical { background: transparent; width: 12px; }
-QScrollBar::handle:vertical { background: #948763; border-radius: 6px; min-height: 24px; }
-QScrollBar::handle:vertical:hover { background: #7f7453; }
+QScrollBar::handle:vertical { background: #a3a096; border-radius: 6px; min-height: 24px; }
+QScrollBar::handle:vertical:hover { background: #8b877d; }
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
-QTabWidget::pane { border: 2px solid #262016; border-radius: 6px; }
+QTabWidget::pane { border: 2px solid #262626; border-radius: 5px; }
 QTabBar::tab {
-    background: #c7ba96; color: #221d18;
-    border: 2px solid #262016; border-bottom: none;
-    border-top-left-radius: 7px; border-top-right-radius: 7px;
+    background: #cfccc3; color: #201f1c;
+    border: 2px solid #262626; border-bottom: none;
+    border-top-left-radius: 6px; border-top-right-radius: 6px;
     padding: 6px 18px; margin-right: 3px; font-weight: 700;
 }
-QTabBar::tab:selected { background: #efe7d3; }
+QTabBar::tab:selected { background: #f2f0ea; }
 """
 
 _STYLES["noir"] = """
 * { font-family: 'Arial','Helvetica','DejaVu Sans','Segoe UI',sans-serif; }
-QWidget { background: #16130e; color: #e6dfc8; }
-QDialog { background: #16130e; }
-QLabel#muted { color: #9b917c; }
+QWidget { background: #141311; color: #e6e3da; }
+QDialog { background: #141311; }
+QLabel#muted { color: #a49f92; }
 QLabel#headerName {
-    font-size: 17px; font-weight: 800; color: #efe8d2;
-    border-bottom: 3px solid #d45543; padding-bottom: 2px;
+    font-size: 17px; font-weight: 800; color: #f0ede4;
+    border-bottom: 3px solid #8a857a; padding-bottom: 2px;
 }
 QLineEdit, QComboBox {
-    background: #211c14; color: #e6dfc8;
-    border: 2px solid #6a5f45; border-radius: 6px; padding: 4px 9px;
-    selection-background-color: #7a2f24; selection-color: #f6efda;
+    background: #211f1b; color: #e6e3da;
+    border: 2px solid #6a665e; border-radius: 5px; padding: 4px 9px;
+    selection-background-color: #e5483c; selection-color: #17130f;
 }
 QComboBox::drop-down { border: none; width: 24px; }
 QComboBox QAbstractItemView {
-    background: #211c14; color: #e6dfc8;
-    selection-background-color: #7a2f24; selection-color: #f6efda;
+    background: #211f1b; color: #e6e3da;
+    selection-background-color: #e5483c; selection-color: #17130f;
 }
 QListWidget, QTableWidget {
-    background: #1d1812; alternate-background-color: #282217;
-    border: 2px solid #6a5f45; border-radius: 6px; outline: none;
-    gridline-color: #4c4431;
+    background: #1a1814; alternate-background-color: #26231d;
+    border: 2px solid #6a665e; border-radius: 5px; outline: none;
+    gridline-color: #4a473f;
 }
 QListWidget::item { padding: 4px 7px; }
 QListWidget::item:selected, QTableWidget::item:selected {
-    background: #7a2f24; color: #f6efda;
+    background: #e5483c; color: #17130f;
 }
 QHeaderView::section {
-    background: #241f16; color: #cfc49f;
-    border: none; border-right: 1px solid #453d2b;
-    border-bottom: 3px solid #6a5f45;
+    background: #26231d; color: #d9d5cb;
+    border: none; border-right: 1px solid #403c34;
+    border-bottom: 3px solid #8a857a;
     padding: 6px 8px; font-weight: 800; font-size: 13px;
 }
 QPushButton {
-    background: #2c2619; color: #e6dfc8;
-    border: 2px solid #6a5f45; border-radius: 7px; padding: 5px 13px;
+    background: #2c2923; color: #e6e3da;
+    border: 2px solid #6a665e; border-radius: 6px; padding: 5px 13px;
 }
-QPushButton:hover { background: #3a3222; }
-QPushButton:pressed { background: #221d12; }
-QPushButton:checked { background: #7a2f24; color: #f6efda; border-color: #a03c2c; }
+QPushButton:hover { background: #37332c; }
+QPushButton:pressed { background: #221f19; }
+QPushButton:checked { background: #8f2b22; color: #f6f2ea; border-color: #d33; }
 QPushButton#best {
     text-align: left; font-weight: 800; padding: 7px 11px;
-    background: #2a241a; border: 3px solid #8a7a55; border-radius: 8px;
-    color: #e8a79b;
+    background: #26231d; border: 3px solid #8a857a; border-radius: 7px;
+    color: #e8a9a1;
 }
-QPushButton#best:hover { background: #38301f; }
+QPushButton#best:hover { background: #312d26; }
 QToolTip {
-    background: #2a241a; color: #e6dfc8;
-    border: 2px solid #6a5f45; border-radius: 6px; padding: 6px;
+    background: #2b2822; color: #e6e3da;
+    border: 2px solid #6a665e; border-radius: 5px; padding: 6px;
 }
 QScrollBar:vertical { background: transparent; width: 12px; }
-QScrollBar::handle:vertical { background: #6a5f45; border-radius: 6px; min-height: 24px; }
-QScrollBar::handle:vertical:hover { background: #7c7053; }
+QScrollBar::handle:vertical { background: #6a665e; border-radius: 6px; min-height: 24px; }
+QScrollBar::handle:vertical:hover { background: #7d786e; }
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
-QTabWidget::pane { border: 2px solid #6a5f45; border-radius: 6px; }
+QTabWidget::pane { border: 2px solid #6a665e; border-radius: 5px; }
 QTabBar::tab {
-    background: #2c2619; color: #cfc49f;
-    border: 2px solid #6a5f45; border-bottom: none;
-    border-top-left-radius: 7px; border-top-right-radius: 7px;
+    background: #2c2923; color: #cfccc3;
+    border: 2px solid #6a665e; border-bottom: none;
+    border-top-left-radius: 6px; border-top-right-radius: 6px;
     padding: 6px 18px; margin-right: 3px; font-weight: 700;
 }
-QTabBar::tab:selected { background: #3a3222; color: #efe8d2; }
+QTabBar::tab:selected { background: #37332c; color: #f0ede4; }
 """
 
 THEMES = {
-    "film": {"title": "Bleached Film", "colors": _LIGHT, "css": _STYLES["film"]},
-    "noir": {"title": "Noir Ink", "colors": _DARK, "css": _STYLES["noir"]},
+    "film": {"title": "Noir · Bright", "colors": _BRIGHT, "css": _STYLES["film"]},
+    "noir": {"title": "Noir · Dark", "colors": _DARK, "css": _STYLES["noir"]},
 }
 DEFAULT_THEME = "film"
 _ACTIVE = "film"
@@ -192,14 +193,11 @@ def theme_titles() -> list[tuple[str, str]]:
 
 
 def set_theme(key: str) -> None:
-    """Make *key* the active theme and refresh module-level colour constants
-    and the stylesheet so existing render code follows automatically."""
     global _ACTIVE
     info = THEMES[key]
     _ACTIVE = key
-    colours = info["colors"]
     _globals = globals()
-    for name, value in colours.items():
+    for name, value in info["colors"].items():
         _globals[name] = value
     _globals["STYLESHEET"] = info["css"]
 
@@ -209,7 +207,8 @@ def stylesheet() -> str:
 
 
 def risk_color(risk_pct: float) -> str:
-    """Semantic colour for a pair's combined birth-defect risk %."""
+    """Risk grading in film-noir ink weight: dark = low, grey = medium,
+    red = high."""
     c = THEMES[_ACTIVE]["colors"]
     if risk_pct <= 5.0:
         return c["RISK_SAFE"]
@@ -249,5 +248,4 @@ def apply_casual_font(app) -> None:
     """No custom font — the bold vector look comes from the stylesheet."""
 
 
-# Apply the default theme at import time so bare imports behave as before.
 set_theme(DEFAULT_THEME)
