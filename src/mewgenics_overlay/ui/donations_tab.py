@@ -25,7 +25,7 @@ from mewgenics_overlay.ui.theme import wrap_tooltip as _wt
 
 _COLS = ["Cat", "Status", "Age", "Stats", "Donate?", "Why donate"]
 _COL_TIPS = [
-    "The cat's name. Hover a row for the full story.",
+    "The cat's name. 📌 = pinned (kept for breeding). Hover a row for the full story.",
     "kitten — born today, can't breed yet · retired — went on an adventure "
     "· normal — a regular adult.",
     "Age in days. Kittens (1) go to Tink; seniors (5+) to Tracy.",
@@ -253,7 +253,8 @@ class DonationsTab(QWidget):
                 else:
                     give = advice
             why = "\n".join(self._group_reasons(give, keep))
-            cells = [cat.name, cat_status(cat), str(getattr(cat, "age", "?")),
+            _pin = "📌 " if getattr(cat, "is_pinned", False) else ""
+            cells = [f"{_pin}{cat.name}", cat_status(cat), str(getattr(cat, "age", "?")),
                      str(base), rating, why]
             for c_i, text in enumerate(cells):
                 it = QTableWidgetItem(text)

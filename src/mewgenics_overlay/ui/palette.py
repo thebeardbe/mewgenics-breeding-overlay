@@ -85,7 +85,7 @@ _COLS = ["Cat", "Family", "GenΔ", "Room", "Risk", "Night", "Exp/stat", "≥7", 
 _COL_TIP_PARAS = [
     # Cat
     [
-        "The partner cat being compared.",
+        "The partner cat being compared. 📌 = pinned (kept for breeding).",
         "Rows marked ✗ can't breed with the cat you picked — the Note "
         "column says why.",
         "Double-click a row to look at things from that cat's side instead.",
@@ -1114,7 +1114,8 @@ class PaletteWindow(QWidget):
             meta += f" · {cat.age}d"
         if cat.inbredness > 0.03:
             meta += f" · inbred {cat.inbredness * 100:.0f}%"
-        self._cat_name.setText(cat.name)
+        _pin = "📌 " if getattr(cat, "is_pinned", False) else ""
+        self._cat_name.setText(f"{_pin}{cat.name}")
         self._cat_name.setToolTip(_wt(
             f"{cat.name}  (save id {cat.db_key})\n"
             "The cat you are analysing. Double-click a partner to switch "
@@ -1386,7 +1387,8 @@ class PaletteWindow(QWidget):
         for r_i, (row, kids) in enumerate(ordered):
             p = row.partner
             ok = row.compatible
-            name = p.name if ok else f"{p.name}  (✗)"
+            _pin = "📌 " if getattr(p, "is_pinned", False) else ""
+            name = f"{_pin}{p.name}" if ok else f"{_pin}{p.name}  (✗)"
             rel = row.relation
 
             it_name = QTableWidgetItem(name)
