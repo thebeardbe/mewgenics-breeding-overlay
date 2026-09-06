@@ -37,6 +37,7 @@ from PySide6.QtWidgets import (
     QSystemTrayIcon,
     QTableWidget,
     QTableWidgetItem,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -373,9 +374,19 @@ class PaletteWindow(QWidget):
 
     # ── UI construction ───────────────────────────────────────────────────
     def _build_ui(self) -> None:
-        root = QVBoxLayout(self)
+        # tabbed layout: Breeding (main) + Donations
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+        tabs = QTabWidget()
+        tabs.setDocumentMode(True)
+        outer.addWidget(tabs)
+
+        self._page_main = QWidget()
+        root = QVBoxLayout(self._page_main)
         root.setContentsMargins(10, 8, 10, 10)
         root.setSpacing(6)
+        tabs.addTab(self._page_main, "Breeding")
 
         # header
         head = QHBoxLayout()
@@ -552,6 +563,12 @@ class PaletteWindow(QWidget):
             "• Kittens this pair has already produced together."
         ))
         root.addWidget(self._detail)
+
+        # Donations tab (last, so it exists before sessions arrive)
+        from mewgenics_overlay.ui.donations_tab import DonationsTab
+        self._donations_tab = DonationsTab(palette=self)
+        tabs.addTab(self._donations_tab, "Donations")
+        self._tabs = tabs
 
     def _wire_ui(self) -> None:
         self._search.textChanged.connect(self._on_search_text)
@@ -846,6 +863,7 @@ class PaletteWindow(QWidget):
             self._show_focus(self._focus)
             self._schedule_partners()
         self._refresh_room_combo()
+        self._donations_tab.refresh(self._session)
 
     # ── breeding-room Stimulation ──────────────────────────────────────────
     @staticmethod

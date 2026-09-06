@@ -102,6 +102,21 @@ def cmd_partners(sess: Session, args) -> int:
     return 0
 
 
+def cmd_donate(sess: Session, args) -> int:
+    from mewgenics_overlay.core.donations import donation_report
+
+    report = donation_report(sess.alive)
+    for slot in report:
+        if not slot.supported:
+            print(f"— {slot.npc}: not supported (no save data) · {slot.unlock_note}")
+            continue
+        print(f"{slot.npc} ({slot.wants}): {slot.count} qualifying")
+        for cat in slot.candidates[: args.limit]:
+            base = sum(getattr(cat, "base_stats", {}).values())
+            print(f"    • {cat.name:<18} stats {base:<4} age {cat.age}")
+    return 0
+
+
 def main(argv=None) -> int:
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--save", help="path to a .sav file")
@@ -123,10 +138,13 @@ def main(argv=None) -> int:
                         help="breeding-room Stimulation used for inheritance "
                              "math (default 50)")
 
+    sp_donate = sub.add_parser("donate", help="show donation candidates per NPC")
+
     args = p.parse_args(argv)
     save_path = _resolve_save(args)
     sess = Session(save_path)
-    cmd = {"list": cmd_list, "pick": cmd_pick, "partners": cmd_partners}[args.cmd]
+    cmd = {"list": cmd_list, "pick": cmd_pick,
+           "partners": cmd_partners, "donate": cmd_donate}[args.cmd]
     return cmd(sess, args)
 
 
