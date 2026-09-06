@@ -3,6 +3,34 @@
 from __future__ import annotations
 
 
+def wrap_tooltip(text: str, width: int = 84) -> str:
+    """Hard-wrap every line at *width* characters so tooltips stay compact
+    instead of stretching across the screen on one line.
+
+    Preserves blank lines and leading indentation; long single words are
+    left unbroken rather than mangled.
+    """
+    out: list[str] = []
+    for para in (text or "").split("\n"):
+        if not para.strip():
+            out.append("")
+            continue
+        indent = para[: len(para) - len(para.lstrip())]
+        words = para.split()
+        line = indent
+        for word in words:
+            candidate = word if not line else f"{line} {word}"
+            if len(candidate) > width and len(line) > len(indent):
+                out.append(line)
+                line = indent + word
+            else:
+                line = candidate
+        out.append(line)
+    return "\n".join(out)
+
+from __future__ import annotations
+
+
 def risk_color(risk_pct: float) -> str:
     """Semantic color for a pair's combined birth-defect risk %."""
     if risk_pct <= 5.0:

@@ -45,7 +45,7 @@ from mewgenics_overlay.core.watcher import SaveWatcher, safe_read_save
 from mewgenics_overlay.vendor.breeding import tracked_offspring
 
 from . import config as cfg
-from .theme import STYLESHEET, gender_badge, risk_color
+from .theme import STYLESHEET, gender_badge, risk_color, wrap_tooltip as _wt
 from mewgenics_overlay.core.maladies import (
     ASYMMETRIC_GROUPS,
     _side_text,
@@ -322,11 +322,11 @@ class PaletteWindow(QWidget):
         self._search = QLineEdit()
         self._search.setPlaceholderText("Click a cat in-game, then type its name here…")
         self._search.setClearButtonEnabled(True)
-        self._search.setToolTip(
+        self._search.setToolTip(_wt(
             "Type part of a cat's name to pick who to analyse. All alive cats "
             "come from the live save; the roster refreshes automatically when "
             "the game saves."
-        )
+        ))
         self._results = QListWidget()
         self._results.setVisible(False)
         self._results.setMaximumHeight(170)
@@ -349,20 +349,20 @@ class PaletteWindow(QWidget):
         self._cat_health = QLabel("")
         self._cat_health.setWordWrap(True)
         self._cat_health.setStyleSheet("color:#e0a63a; font-size:11px;")
-        self._cat_health.setToolTip(
+        self._cat_health.setToolTip(_wt(
             "Traits this cat already carries that can pass to kittens:\n"
             "• Disorders: 15% per parent that carries one — the kitten rolls "
             "once per parent and inherits one random disorder from it.\n"
             "• Birth defects: inherited as appearance per body part. Select a "
             "partner to see each defect's pass chance for that pair."
-        )
+        ))
         row2 = QHBoxLayout()
         self._btn_swap = QPushButton("Hide blocked rows")
         self._btn_swap.setCheckable(True)
-        self._btn_swap.setToolTip(
+        self._btn_swap.setToolTip(_wt(
             "When checked, pairs that cannot breed (direct family, hater, "
             "sexuality blocks) are hidden instead of listed below."
-        )
+        ))
         row2.addWidget(self._btn_swap, 0, Qt.AlignmentFlag.AlignRight)
         cat_l.addWidget(self._cat_name)
         cat_l.addWidget(self._cat_meta)
@@ -372,13 +372,26 @@ class PaletteWindow(QWidget):
         cat_l.addLayout(row2)
         root.addWidget(self._cat_box)
 
-        # best-match banner
+        # best-match banner (+ safe-mode switch)
+        best_row = QHBoxLayout()
         self._btn_best = QPushButton("⭐ Best match")
         self._btn_best.setObjectName("best")
         self._btn_best.setToolTip("")
         self._btn_best.setVisible(False)
         self._best_row = None
-        root.addWidget(self._btn_best)
+        self._safe_mode = False
+        self._btn_safe = QPushButton("🛡 Safe ≤ 15% risk")
+        self._btn_safe.setCheckable(True)
+        self._btn_safe.setToolTip(
+            _wt("When on, only partners with birth-defect risk ≤ 15% compete "
+                "for the ⭐ Best match (highest ≥7 stats wins among them). "
+                "The risky 7s-first pick is shown instead when no safe "
+                "partner exists.")
+        )
+        self._btn_safe.setVisible(False)
+        best_row.addWidget(self._btn_best, 1)
+        best_row.addWidget(self._btn_safe)
+        root.addLayout(best_row)
 
         # partners
         self._table = QTableWidget(0, len(_COLS))
@@ -388,7 +401,7 @@ class PaletteWindow(QWidget):
         for i, tip in enumerate(_COL_TIPS):
             item = self._table.horizontalHeaderItem(i)
             if item is not None:
-                item.setToolTip(tip)
+                item.setToolTip(_wt(tip))
         self._table.verticalHeader().setVisible(False)
         self._table.setAlternatingRowColors(True)
         self._table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -409,11 +422,11 @@ class PaletteWindow(QWidget):
         self._detail = QLabel("Select a partner row for inheritance detail.")
         self._detail.setWordWrap(True)
         self._detail.setObjectName("muted")
-        self._detail.setToolTip(
+        self._detail.setToolTip(_wt(
             "Details for the highlighted partner: per-stat inheritance ranges "
             "for the kitten (min of the parents → max of the parents per stat), "
             "and any kittens this pair has already produced."
-        )
+        ))
         root.addWidget(self._detail)
 
     def _wire_ui(self) -> None:
@@ -426,6 +439,7 @@ class PaletteWindow(QWidget):
         self._table.horizontalHeader().sectionClicked.connect(self._on_header_clicked)
         self._btn_swap.toggled.connect(self._recompute_partners)
         self._btn_best.clicked.connect(self._on_best_clicked)
+        self._btn_safe.toggled.connect(self._on_safe_toggled)
 
     # ── window behaviour: pin, click-through, summoning ────────────────────
     def _toggle_pin(self, checked: bool) -> None:
@@ -714,6 +728,7 @@ class PaletteWindow(QWidget):
         self._cat_health.setText("")
         self._best_row = None
         self._btn_best.setVisible(False)
+        self._btn_safe.setVisible(False)
         self._table.setRowCount(0)
         self._detail.setText("Select a partner row for inheritance detail.")
 
@@ -725,37 +740,37 @@ class PaletteWindow(QWidget):
         if cat.inbredness > 0.03:
             meta += f" · inbred {cat.inbredness * 100:.0f}%"
         self._cat_name.setText(cat.name)
-        self._cat_name.setToolTip(
+        self._cat_name.setToolTip(_wt(
             f"{cat.name}  (save id {cat.db_key})\n"
             "The cat you are analysing. Double-click a partner to switch "
             "the analysis to them."
-        )
+        ))
         self._cat_meta.setText(meta)
-        self._cat_meta.setToolTip(
+        self._cat_meta.setToolTip(_wt(
             f"{cat.gender} · {cat.room or cat.status} · "
-            f"generation {cat.generation} (0 = stray, each generation adds depth "
-            "and shared ancestry)"
+            f"generation {cat.generation} (0 = stray, each generation adds "
+            f"depth and shared ancestry)"
             + (f" · age {cat.age} days" if cat.age is not None else "")
             + (f"\nInbreeding coefficient {cat.inbredness * 100:.1f}% = kinship "
                "of this cat's parents — flagged above 3%."
                if cat.inbredness > 0.03 else "")
-        )
+        ))
         self._cat_stats.setText(_stats_html(cat))
-        self._cat_stats.setToolTip(
+        self._cat_stats.setToolTip(_wt(
             "Base stats (STR DEX CON INT SPD CHA LCK, 0–7) — the birth stats "
             "kittens inherit from. Green = 7. These drive breeding math; "
             "gear/mod bonuses are not shown here."
-        )
+        ))
         lover_txt = ", ".join(l.name for l in getattr(cat, "lovers", []))
         self._cat_lovers.setText(
             f"♥ in love with: {lover_txt}" if lover_txt else "no lovers"
         )
-        self._cat_lovers.setToolTip(
+        self._cat_lovers.setToolTip(_wt(
             "Current in-game love relationships. Lovers get a compatibility "
             "bonus; lover conflicts are handled at room-assignment level, "
             "not as a hard pair block." if lover_txt
             else "This cat has no in-game lovers right now."
-        )
+        ))
         # traits this cat already carries (defects / disorders)
         disorders = list(getattr(cat, "disorders", None) or [])
         own_defects = defect_lines(cat)
@@ -767,8 +782,8 @@ class PaletteWindow(QWidget):
         self._cat_health.setText(
             "⚠ " + " · ".join(health_bits) if health_bits else ""
         )
-        self._cat_health.setToolTip(self._health_tooltip(cat, disorders,
-                                                         own_defects))
+        self._cat_health.setToolTip(_wt(self._health_tooltip(
+            cat, disorders, own_defects)))
 
     def _health_tooltip(self, cat, disorders, own_defects) -> str:
         """Hover text for the ⚠ health line: carried traits + in-game effects
@@ -840,33 +855,63 @@ class PaletteWindow(QWidget):
         self._update_best()
 
     # ── sorting ────────────────────────────────────────────────────────────
+    def _on_safe_toggled(self, checked: bool) -> None:
+        self._safe_mode = bool(checked)
+        self._update_best()
+
     def _update_best(self) -> None:
         """Recompute and show the ⭐ best-match banner for the focused cat."""
         if not self._rows or self._focus is None:
             self._best_row = None
             self._btn_best.setVisible(False)
+            self._btn_safe.setVisible(False)
             return
-        rec = recommend_best([r for r, _ in self._rows], self._focus,
-                             effect_of=self._effect_for_name)
-        self._best_row = rec.row
-        if rec.row is None:
+        compat = [r for r, _ in self._rows if r.compatible]
+        if not compat:
+            self._best_row = None
+            self._btn_best.setVisible(False)
+            self._btn_safe.setVisible(False)
+            return
+        effect = self._effect_for_name
+        overall = recommend_best(compat, self._focus, effect_of=effect)
+        chosen = overall
+        fallback = False
+        if self._safe_mode:
+            cap = float(self._settings.get("safe_risk_cap", 15.0))
+            safe_rows = [r for r in compat if r.risk_pct <= cap]
+            safe_rec = (recommend_best(safe_rows, self._focus,
+                                       effect_of=effect)
+                        if safe_rows else recommend_best([], self._focus))
+            if safe_rec.row is not None:
+                chosen = safe_rec
+            elif overall.row is not None:
+                chosen = overall            # fall back to the 7s-first pick
+                fallback = True
+        self._best_row = chosen.row
+        self._btn_safe.setVisible(True)
+        if chosen.row is None:
             self._btn_best.setVisible(False)
             return
-        partner = rec.row.partner
+        partner = chosen.row.partner
+        prefix = "⭐ Best match"
+        if self._safe_mode and not fallback:
+            prefix = "🛡 Safe best"
+        elif fallback:
+            prefix = "⭐ Best (no ≤15% risk partner)"
         text = (
-            f"⭐ Best match: {partner.name} — Risk {rec.row.risk_pct:.1f}% · "
-            f"≥7 ≈{rec.row.seven_plus_total:.1f} · "
-            f"COI {rec.row.coi * 100:.1f}%"
+            f"{prefix}: {partner.name} — Risk {chosen.row.risk_pct:.1f}% · "
+            f"≥7 ≈{chosen.row.seven_plus_total:.1f} · "
+            f"COI {chosen.row.coi * 100:.1f}%"
         )
-        if rec.row.risk_pct > 35:
+        if chosen.row.risk_pct > 35:
             text += "   ⚠ high risk"
         self._btn_best.setText(text)
-        tool = "Why this pick:\n" + "\n".join(rec.breakdown)
-        malady = self._pair_malady_lines(rec.row)
+        tool = "Why this pick:\n" + "\n".join(chosen.breakdown)
+        malady = self._pair_malady_lines(chosen.row)
         if malady:
             tool += "\n\n" + "\n".join(malady)
         tool += "\n\nClick to select this partner."
-        self._btn_best.setToolTip(tool)
+        self._btn_best.setToolTip(_wt(tool))
         self._btn_best.setVisible(True)
 
     def _on_best_clicked(self) -> None:
@@ -972,7 +1017,8 @@ class PaletteWindow(QWidget):
             defects_text = _defects_summary(row)
             it_defects = QTableWidgetItem(defects_text)
             it_defects.setToolTip(
-                "\n".join(self._pair_malady_lines(row)) or "Both parents clean."
+                _wt("\n".join(self._pair_malady_lines(row))
+                   or "Both parents clean.")
             )
             it_note = QTableWidgetItem(_note_text(row, kids))
 
@@ -1050,7 +1096,7 @@ class PaletteWindow(QWidget):
         else:
             lines.append("No shared ancestry within the range that matters — "
                          "the safest kind of pairing.")
-        return "\n".join(lines)
+        return _wt("\n".join(lines))
 
     def _partner_tooltip(self, row: PartnerRow, kids: list[str]) -> str:
         lines = [f"{row.partner.name}  ({row.partner.gender}, {row.partner.room})"]
@@ -1077,7 +1123,7 @@ class PaletteWindow(QWidget):
         if kids:
             lines.append("Existing kittens together: " + ", ".join(kids))
         lines.append("Double-click to analyse breeding from this cat.")
-        return "\n".join(lines)
+        return _wt("\n".join(lines))
 
     def _pair_malady_lines(self, row: PartnerRow) -> list[str]:
         """Inheritance of traits the parents ALREADY carry (disorders exact,
