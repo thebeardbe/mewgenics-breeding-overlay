@@ -92,6 +92,26 @@ jobs:
         with:
           generate_release_notes: true
           fail_on_unmatched_files: true
+          body: |
+            ## 📦 Which file do I download?
+
+            **I play on Windows →** grab **`MewgenicsOverlay.exe`** (double-click to run).
+            Windows may show a “Windows protected your PC” warning — click **More info → Run anyway**
+            (the app is not code-signed; see the [README security note](https://github.com/thebeardbe/mewgenics-breeding-overlay#windows)).
+
+            **I play on Linux (Ubuntu / Arch / Fedora / …) →** grab **`MewgenicsOverlay`** (no file extension).
+            Then make it executable and run it:
+            ```bash
+            chmod +x MewgenicsOverlay
+            ./MewgenicsOverlay
+            ```
+
+            **I use NixOS →** you don't need a download at all:
+            ```bash
+            nix run github:thebeardbe/mewgenics-breeding-overlay
+            ```
+
+            Full install & usage instructions: [README](https://github.com/thebeardbe/mewgenics-breeding-overlay#readme)
           files: |
             artifacts/MewgenicsOverlay-windows-x64/*
             artifacts/MewgenicsOverlay-linux-x64/*
