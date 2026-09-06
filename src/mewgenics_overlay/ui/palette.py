@@ -167,6 +167,21 @@ _COL_TIP_PARAS = [
 _COL_TIPS = ["\n".join(paras) for paras in _COL_TIP_PARAS]
 
 
+# ── column indexes (keep in sync with _COLS) ─────────────────────
+(COL_CAT, COL_FAMILY, COL_GEN_DELTA, COL_ROOM, COL_RISK, COL_CHANCE,
+ COL_EXP, COL_SEVEN, COL_DEFECTS, COL_NOTE) = range(10)
+assert len(_COLS) == 10
+
+# ── palette colours (single source of truth) ─────────────────────
+C_TEXT = "#e8e6ee"        # normal text
+C_MUTED = "#8a849f"       # blocked rows / low emphasis
+C_FAMILY = "#c9a0e8"      # related but breedable
+C_GOOD = "#7fe08a"        # pass / high stat
+C_WARN = "#e0a63a"        # caution / inherited defect
+C_STAT_LOW = "#c0b9d8"    # low-ish stat chip
+C_GRIP = "#6a6390"        # drag grip
+C_STATUS = "#9a94b8"      # header status text
+
 def _note_text(row, kids: list[str]) -> str:
     """The human-readable Note cell contents for a partner row."""
     parts = []
@@ -282,7 +297,7 @@ def _stats_html(cat: Cat) -> str:
     parts = []
     for s in STAT_NAMES:
         v = cat.base_stats[s]
-        color = "#7fe08a" if v >= 7 else ("#e8e6ee" if v >= 4 else "#c0b9d8")
+        color = C_GOOD if v >= 7 else (C_TEXT if v >= 4 else C_STAT_LOW)
         parts.append(f'<span style="color:{color}"><b>{s}</b> {v}</span>')
     return "   ".join(parts)
 
@@ -365,14 +380,14 @@ class PaletteWindow(QWidget):
         # header
         head = QHBoxLayout()
         grip = _DragLabel("⠿")
-        grip.setStyleSheet("color:#6a6390; font-size:13px;")
+        grip.setStyleSheet(f"color:{C_GRIP}; font-size:13px;")
         grip.setToolTip("Drag to move the overlay")
         self._title = _DragLabel("🐈 Breeding Overlay")
         self._title.setStyleSheet("font-weight:700; font-size:14px;")
         self._title.setCursor(Qt.CursorShape.OpenHandCursor)
         self._status = QLabel("")
         self._status.setObjectName("muted")
-        self._status.setStyleSheet("color:#9a94b8; font-size:11px;")
+        self._status.setStyleSheet(f"color:{C_STATUS}; font-size:11px;")
         pin = QPushButton("📌")
         pin.setCheckable(True)
         pin.setChecked(self._pinned)
@@ -437,7 +452,7 @@ class PaletteWindow(QWidget):
         self._cat_lovers.setObjectName("muted")
         self._cat_health = QLabel("")
         self._cat_health.setWordWrap(True)
-        self._cat_health.setStyleSheet("color:#e0a63a; font-size:11px;")
+        self._cat_health.setStyleSheet(f"color:{C_WARN}; font-size:11px;")
         self._cat_health.setToolTip(_wt(
             "Things this cat carries that can be passed on to kittens.\n"
             "• Disorders — a 15% chance per parent that carries one of "
@@ -833,13 +848,21 @@ class PaletteWindow(QWidget):
         self._refresh_room_combo()
 
     # ── breeding-room Stimulation ──────────────────────────────────────────
+    @staticmethod
+    def _to_float(raw, default: float, floor: Optional[float] = None) -> float:
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            value = default
+        return max(value, floor) if floor is not None else value
+
     def _stim_value(self) -> float:
         """Active Stimulation for pair math (selected room's furniture value
         or the default 50 when no room is chosen)."""
-        try:
-            return float(self._stim)
-        except (TypeError, ValueError):
-            return STIMULATION_DEFAULT
+        return self._to_float(self._stim, STIMULATION_DEFAULT)
+
+    def _comfort_value(self) -> float:
+        return self._to_float(self._comfort, 0.0, floor=0.0)
 
     def _selected_room(self):
         idx = self._room_combo.currentIndex()
@@ -907,13 +930,6 @@ class PaletteWindow(QWidget):
             self._stim = float(entry[1])
             self._comfort = float(entry[2])
 
-    def _comfort_value(self) -> float:
-        try:
-            return max(0.0, float(self._comfort))
-        except (TypeError, ValueError):
-            return 0.0
-
-    # ── selection & search ─────────────────────────────────────────────────
     def set_focus_key(self, db_key: int) -> None:
         """Programmatic focus (used by the future in-game bridge)."""
         if self._session is None:
@@ -1163,23 +1179,23 @@ class PaletteWindow(QWidget):
     def _col_key(self, col: int, row: PartnerRow, kids: list[str]):
         """Sort key for a column (text columns sort as strings, rest numeric)."""
         p = row.partner
-        if col == 0:
+        if col == COL_CAT:
             return p.name.lower()
-        if col == 1:
+        if col == COL_FAMILY:
             return row.relation.label.lower()
-        if col == 2:
+        if col == COL_GEN_DELTA:
             return row.relation.gen_gap
-        if col == 3:
+        if col == COL_ROOM:
             return display_location(p).lower()
-        if col == 4:
+        if col == COL_RISK:
             return row.risk_pct
-        if col == 5:
+        if col == COL_CHANCE:
             return row.game_compat
-        if col == 6:
+        if col == COL_EXP:
             return row.expected_avg
-        if col == 7:
+        if col == COL_SEVEN:
             return row.seven_plus_total
-        if col == 8:
+        if col == COL_DEFECTS:
             return _defects_summary(row, self._stim_value()).lower()
         return _note_text(row, kids).lower()
 
@@ -1192,7 +1208,7 @@ class PaletteWindow(QWidget):
         blocked = [e for e in self._rows if not e[0].compatible]
         good.sort(key=lambda e: self._col_key(self._sort_col, e[0], e[1]), reverse=rev)
         # blocked rows keep a readable fixed order (text columns only)
-        if self._sort_col in (0, 1, 8, 9):
+        if self._sort_col in (COL_CAT, COL_FAMILY, COL_DEFECTS, COL_NOTE):
             blocked.sort(key=lambda e: self._col_key(self._sort_col, e[0], e[1]),
                          reverse=rev)
         return good + blocked
@@ -1296,20 +1312,20 @@ class PaletteWindow(QWidget):
                 + (f"Existing kittens: {_kittens_label(row)}" if kids else "")
             )
 
-            color = "#8a849f" if not ok else "#e8e6ee"
             cells = [it_name, it_family, it_gap, it_room, it_risk, it_comp,
                      it_exp, it_7, it_defects, it_note]
+            specials: dict = {}
+            if ok:
+                if rel.is_family:
+                    specials[COL_FAMILY] = C_FAMILY      # related, breedable
+                specials[COL_RISK] = risk_color(row.risk_pct)
+                specials[COL_CHANCE] = (C_GOOD if row.game_compat > 0.05
+                                        else C_WARN)
+                if _any_defect_guaranteed(row, self._stim_value()):
+                    specials[COL_DEFECTS] = C_WARN       # inherited defects
+            base_color = C_MUTED if not ok else C_TEXT
             for col, it in enumerate(cells):
-                it.setForeground(QColor(color))
-                if ok and col == 1 and rel.is_family:
-                    it.setForeground(QColor("#c9a0e8"))   # related, breedable
-                if ok and col == 4:
-                    it.setForeground(QColor(risk_color(row.risk_pct)))
-                if ok and col == 5:
-                    it.setForeground(QColor("#7fe08a" if row.game_compat > 0.05
-                                           else "#e0a63a"))
-                if ok and col == 8 and _any_defect_guaranteed(row, self._stim_value()):
-                    it.setForeground(QColor("#e0a63a"))   # inherited defects
+                it.setForeground(QColor(specials.get(col, base_color)))
                 self._table.setItem(r_i, col, it)
         self._update_sort_indicator()
 
