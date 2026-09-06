@@ -85,7 +85,9 @@ _COLS = ["Cat", "Family", "GenΔ", "Room", "Risk", "Night", "Exp/stat", "≥7", 
 _COL_TIP_PARAS = [
     # Cat
     [
-        "The partner cat being compared. 📌 = pinned (kept for breeding).",
+        "The partner cat being compared. 📌 = pinned (kept for breeding). "
+        "Icons right after the name: ♂/♀/? = gender · ❤️ straight · 💗 bi · 🌈 "
+        "gay (orientation).",
         "Rows marked ✗ can't breed with the cat you picked — the Note "
         "column says why.",
         "Double-click a row to look at things from that cat's side instead.",
@@ -176,6 +178,23 @@ _COL_TIPS = ["\n".join(paras) for paras in _COL_TIP_PARAS]
 (COL_CAT, COL_FAMILY, COL_GEN_DELTA, COL_ROOM, COL_RISK, COL_CHANCE,
  COL_EXP, COL_SEVEN, COL_DEFECTS, COL_NOTE) = range(10)
 assert len(_COLS) == 10
+
+
+_ORIENT_ICONS = {"straight": "❤️", "bi": "💗", "gay": "🌈"}
+
+
+def _cat_glyphs(cat) -> str:
+    """Compact gender + orientation icons shown beside a partner's name.
+
+    Gender: ♂ male · ♀ female · ? neutral. Orientation (only for male /
+    female cats): ❤️ straight · 💗 bi · 🌈 gay — see the Cat column header
+    tooltip for the legend. Purely cosmetic; sorting ignores the glyphs.
+    """
+    g = gender_badge(getattr(cat, "gender", "?"))
+    if g == "?":
+        return g
+    label = sexuality_label(getattr(cat, "sexuality_raw", None))
+    return g + _ORIENT_ICONS.get(label, _ORIENT_ICONS["straight"])
 
 
 def _note_text(row, kids: list[str]) -> str:
@@ -1439,7 +1458,9 @@ class PaletteWindow(QWidget):
             p = row.partner
             ok = row.compatible
             _pin = "📌 " if getattr(p, "is_pinned", False) else ""
-            name = f"{_pin}{p.name}" if ok else f"{_pin}{p.name}  (✗)"
+            glyphs = _cat_glyphs(p)
+            nm = f"{_pin}{p.name} {glyphs}"
+            name = nm if ok else f"{nm}  (✗)"
             rel = row.relation
 
             it_name = QTableWidgetItem(name)
