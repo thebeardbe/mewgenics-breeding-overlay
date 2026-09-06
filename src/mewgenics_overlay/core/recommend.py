@@ -17,9 +17,10 @@ signals:
 
 Additive and transparent:
 
-    score = 6×≥7stats + 2×expected_avg − risk% ± defects(stat effects)
+    score = W_SEVENS×≥7stats + W_AVG×expected_avg − W_RISK×risk% ± defects
 
-Only compatible (non-family, breedable) partners are considered.
+≥7 stats dominate the score; risk and inherited defects act as
+safety/quality tie-breakers so that equal-7 candidates are decided by them.
 """
 
 from __future__ import annotations
@@ -30,14 +31,14 @@ from typing import Callable, List, Optional
 
 from mewgenics_overlay.core.maladies import defect_inheritance_rows
 
-W_SEVENS = 6.0            # per expected ≥7 stat
+W_SEVENS = 14.0           # per expected ≥7 stat (dominates the score)
 W_AVG = 2.0               # per point of expected stat average
-W_RISK = 1.0              # subtracted per risk %
+W_RISK = 0.3              # subtracted per risk % (safety tie-breaker)
 
-W_STAT_EFFECT = 2.0       # per net stat point granted/cost by a defect
-UNQUANT_BOTH = 12.0       # flavour defect carried by both parents
-UNQUANT_PARTNER = 5.0     # flavour defect only on the partner
-UNQUANT_FOCUS = 2.0       # flavour defect only on the focused cat
+W_STAT_EFFECT = 3.0       # per net stat point granted/cost by a defect
+UNQUANT_BOTH = 20.0       # flavour defect carried by both parents
+UNQUANT_PARTNER = 8.0     # flavour defect only on the partner
+UNQUANT_FOCUS = 4.0       # flavour defect only on the focused cat
 
 _STAT_TOKEN = re.compile(r"([+-]?\d+)\s+(STR|DEX|CON|INT|SPD|CHA|LCK)",
                          re.IGNORECASE)

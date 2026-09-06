@@ -853,11 +853,14 @@ class PaletteWindow(QWidget):
             self._btn_best.setVisible(False)
             return
         partner = rec.row.partner
-        self._btn_best.setText(
+        text = (
             f"⭐ Best match: {partner.name} — Risk {rec.row.risk_pct:.1f}% · "
             f"≥7 ≈{rec.row.seven_plus_total:.1f} · "
             f"COI {rec.row.coi * 100:.1f}%"
         )
+        if rec.row.risk_pct > 35:
+            text += "   ⚠ high risk"
+        self._btn_best.setText(text)
         tool = "Why this pick:\n" + "\n".join(rec.breakdown)
         malady = self._pair_malady_lines(rec.row)
         if malady:
