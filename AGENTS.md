@@ -6,6 +6,12 @@ otherwise cost you a debugging session.
 
 ## 1. What this is
 
+> **Mandatory reading: this repo ships `CODING_GUIDELINES.md` (PEP 8 / Google
+> Python style + Qt discipline + project invariants). All agents and
+> contributors **must respect it** on every change. It contains the audit
+> checklist (§8) that guards releases; treat a failed audit item as a blocker,
+> not a suggestion.**
+
 A cross-platform companion overlay for **Mewgenics** (Steam, custom C++
 engine). It watches the game's live save file and answers, without leaving the
 game: *who should this cat breed with, how risky is it, which cats to donate
@@ -41,7 +47,8 @@ nix-build default.nix -o /tmp/mg-overlay && /tmp/mg-overlay/bin/mewgenics-overla
 ```
 
 Release = bump version in **three files** (`pyproject.toml`,
-`default.nix`, `src/mewgenics_overlay/__init__.py`), commit, then
+`default.nix`, `src/mewgenics_overlay/__init__.py`), run the audit checklist
+in `CODING_GUIDELINES.md` §8, commit, then
 `git tag vX.Y.Z && git push origin vX.Y.Z` — CI builds Windows/Linux binaries
 and publishes a GitHub Release.
 
