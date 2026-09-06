@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QMessageBox,
     QPushButton,
     QSystemTrayIcon,
     QTableWidget,
@@ -75,6 +76,7 @@ from mewgenics_overlay.core.maladies import (
     disorder_summary,
     sexuality_label,
 )
+from mewgenics_overlay import __version__
 from mewgenics_overlay.core.gameassets import GameAssets, locate_gpak
 from mewgenics_overlay.core.stimulation import (
     STIMULATION_DEFAULT,
@@ -423,6 +425,10 @@ class PaletteWindow(QWidget):
         open_save.setFixedWidth(34)
         open_save.setToolTip("Choose a different save file")
         open_save.clicked.connect(self._pick_save)
+        about = QPushButton("ℹ️")
+        about.setFixedWidth(34)
+        about.setToolTip("About — version and credits")
+        about.clicked.connect(self._show_about)
         close = QPushButton("✕")
         close.setFixedWidth(34)
         close.setToolTip("Hide (Ctrl+Shift+B / tray) — quits when no tray is available")
@@ -433,6 +439,7 @@ class PaletteWindow(QWidget):
         head.addWidget(pin)
         head.addWidget(ct)
         head.addWidget(open_save)
+        head.addWidget(about)
         head.addWidget(close)
         root.addLayout(head)
 
@@ -689,6 +696,37 @@ class PaletteWindow(QWidget):
         else:
             self.shutdown()
             QApplication.instance().quit()
+
+    def _show_about(self) -> None:
+        """Credits dialog: who built it and whose research it stands on."""
+        text = (
+            f"<h3>Mewgenics Breeding Overlay</h3>"
+            f"<p>Version {__version__}</p>"
+            f"<p>Built by <b>TheBeardBE</b>, with help from an LLM "
+            f"through <b>pi.dev</b>.</p>"
+            f"<p><b>Credits</b></p>"
+            f"<ul>"
+            f"<li>Save parser &amp; genetics engine: "
+            f"<a href='https://github.com/frankieg33/MewgenicsBreedingManager'>"
+            f"MewgenicsBreedingManager</a> (MIT, © 2026 frankieg33) — "
+            f"vendored; provenance in <code>vendor/_VENDORED.md</code></li>"
+            f"<li>Save-format research: "
+            f"<a href='https://github.com/pzx521521/mewgenics-save-editor'>"
+            f"pzx521521/mewgenics-save-editor</a> and the community</li>"
+            f"<li>Game mechanics reference: "
+            f"<a href='https://mewgenics.wiki.gg/wiki/Mewgenics'>"
+            f"Mewgenics Wiki</a></li>"
+            f"</ul>"
+            f"<p>Licensed MIT. Saves are read-only — this tool never "
+            f"modifies them.</p>"
+        )
+        box = QMessageBox(self)
+        box.setWindowTitle("About")
+        box.setTextFormat(Qt.TextFormat.RichText)
+        box.setText(text)
+        box.setOpenExternalLinks(True)
+        box.setStandardButtons(QMessageBox.StandardButton.Ok)
+        box.exec()
 
     # ── save loading ───────────────────────────────────────────────────────
     def _load_last_save(self) -> None:
