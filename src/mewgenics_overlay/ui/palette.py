@@ -73,62 +73,98 @@ STAT_NAMES = ["STR", "DEX", "CON", "INT", "SPD", "CHA", "LCK"]
 _COLS = ["Cat", "Family", "GenΔ", "Room", "Risk", "Chance", "Exp/stat", "≥7", "Defects", "Note"]
 
 # Column explanations shown as tooltips when hovering each header.
-_COL_TIPS = [
+# Column explanation tooltips, written as short human paragraphs so each
+# idea, legend line or note starts on its own line.
+_COL_TIP_PARAS = [
     # Cat
-    "Candidate partner. Rows marked ✗ cannot breed with the selected cat "
-    "(the reason is in the Note column). Double-click a name to analyse "
-    "breeding from that cat instead. Click a header to sort; click again "
-    "to reverse; a third click returns to the default safe-first order.",
+    [
+        "The partner cat being compared.",
+        "Rows marked ✗ can't breed with the cat you picked — the Note "
+        "column says why.",
+        "Double-click a row to look at things from that cat's side instead.",
+        "Tip: click any header to sort, click again to reverse, and a third "
+        "click brings back the default order.",
+    ],
     # Family
-    "Family link: how the partner is related to the focused cat, traced "
-    "through shared ancestry up to 9 generations — parent/child, "
-    "grandparent/grandchild, full/half sibling, aunt/uncle ↔ niece/nephew, "
-    "cousins ('once removed' when generations differ), or 'unrelated'.\n\n"
-    "The tooltip on each cell adds this pair's inbreeding coefficient (COI): "
-    "the distance-weighted shared ancestry that actually drives extra birth "
-    "defects. Each shared ancestor contributes 0.5^(gens_a + gens_b + 1), so "
-    "a shared ancestor ~5 generations back on both sides adds only ~0.05% — "
-    "effectively nothing. COI 0% means no shared ancestry that matters.",
+    [
+        "How the two cats are related, found by tracing shared ancestors "
+        "up to 9 generations back.",
+        "Shown as simple names: parent/child, sibling, aunt/uncle, "
+        "1st cousin, … or 'unrelated'.",
+        "Shared family history is what drives inbreeding (the Risk column).",
+        "Very distant shared ancestors barely count — each generation back "
+        "halves the effect, so ~5 generations back is effectively nothing.",
+    ],
     # Gen delta
-    "Generation gap = focused cat's generation minus this partner's. "
-    "Negative means the partner is from a deeper line, positive the reverse. "
-    "Useful alongside Family: a big gap with 'unrelated' is often the "
-    "safest kind of pairing in a deep colony.",
+    [
+        "How far apart the cats sit in the family tree: the generation of "
+        "the cat you picked minus theirs.",
+        "A positive gap means the partner comes from an older line, a "
+        "negative one a younger line.",
+        "Read it together with Family: a big gap with 'unrelated' is often "
+        "the safest pairing in a deep colony.",
+    ],
     # Room
-    "Where the cat currently is: a house room (breeding happens in-house) "
-    "or Adventure (away until the next day).",
+    [
+        "Where this cat is right now.",
+        "In a house room: can take part in overnight breeding.",
+        "On Adventure: away from the house until the next day.",
+    ],
     # Risk
-    "Birth-defect risk for a kitten from this pair (0–100%), derived from "
-    "the pair's inbreeding coefficient (COI — see the Family header). "
-    "COI 0% leaves only the ~2% baseline. "
-    "Green ≤ 5% (safe), amber 5–12% (caution), red > 12% (likely defect).",
+    [
+        "How likely the kitten is to be born with a problem (a disorder or "
+        "a birth defect), as a percentage.",
+        "Two strangers sit near the base ~2%.",
+        "The closer the parents are related, the higher it climbs.",
+        "Colour key — green: low (≤ 5%) · orange: medium (5–12%) · "
+        "red: high (> 12%).",
+    ],
     # Chance
-    "Per-roll breeding chance, as a percentage (two rolls per night): "
-    "compat × √(1 + 0.1×Comfort), using the selected breeding room's "
-    "Comfort. Compat = 0.15 × charisma × libido × lover bonus × sexuality "
-    "(Stimulation does NOT affect it). A raw compat below 0.05 (= 5%) means "
-    "the game won't attempt the pair. Green = above the 5% line.",
+    [
+        "How often a single breeding roll succeeds — the game rolls twice "
+        "each night, and both rolls need to pass before the pair tries.",
+        "Each roll's % = compatibility × √(1 + 0.1 × Comfort), using the "
+        "breeding room you selected.",
+        "Compatibility comes from charisma, libido, lover bonus and "
+        "sexuality — it never changes with Stimulation.",
+        "Below 5% the game won't even attempt the pair.",
+        "Colour key — green: above the line · orange: below it.",
+    ],
     # Exp/stat
-    "Expected value of each of the kitten's 7 base stats (0–7 scale), "
-    "using the better parent's stat with ~50% inheritance weight. "
-    "Per-stat ranges show in the strip below when you select the row.",
+    [
+        "The size each kitten stat is likely to end up at, on a 0–7 scale "
+        "(the average across all seven stats).",
+        "Higher room Stimulation makes kittens inherit the better parent's "
+        "stat more often.",
+        "Click a row to see each stat's possible range in detail below.",
+    ],
     # >=7
-    "Expected number of the kitten's stats that land on 7 or higher "
-    "(Perfect-7 planning). A stat both parents have at 7 counts 1.0; "
-    "a stat that can reach 7 counts fractionally.",
+    [
+        "How many of the kitten's stats should come out as a perfect 7.",
+        "A stat where both parents are already 7 is a guaranteed one and "
+        "counts fully; others count by how reachable they are.",
+    ],
     # Defects
-    "Birth defects the parents carry and what the kitten inherits. ✓ = both "
-    "parents carry it (the kitten gets it; '1 line' means it descends from a "
-    "single shared ancestor — same part/side). Percentages are single-carrier "
-    "odds at 50 Stimulation. Hover the cell for sides, lineage and each "
-    "defect's in-game effect.",
+    [
+        "The birth defects these parents already carry, and whether the "
+        "kitten will inherit them.",
+        "✓ = both parents carry it — the kitten will get it.",
+        "A % = one parent carries it — that's the kitten's chance at the "
+        "selected room's Stimulation.",
+        "Hover a cell to see which side/part it affects, whether it comes "
+        "from one shared family line, and what the defect actually does.",
+    ],
     # Note
-    "Relationship flags and blockers. ♥ = the focused cat is in love "
-    "with them, ♥♥ = mutual lovers, 'hates you' = hater conflict. "
-    "Blocked rows show the rejection reason (direct family, straight "
-    "same-sex, …). 'n kittens' = how many this pair produced (and how many "
-    "are still available, i.e. not dead or donated).",
+    [
+        "Extra notes per row.",
+        "♥ = in love with the cat you picked · ♥♥ = mutual lovers.",
+        "'hates you' = the two dislike each other.",
+        "Blocked rows explain why breeding can't happen.",
+        "'kittens' = how many this pair has produced, and how many are "
+        "still around (not dead or donated).",
+    ],
 ]
+_COL_TIPS = ["\n".join(paras) for paras in _COL_TIP_PARAS]
 
 
 def _note_text(row, kids: list[str]) -> str:
@@ -375,9 +411,10 @@ class PaletteWindow(QWidget):
         self._search.setPlaceholderText("Click a cat in-game, then type its name here…")
         self._search.setClearButtonEnabled(True)
         self._search.setToolTip(_wt(
-            "Type part of a cat's name to pick who to analyse. All alive cats "
-            "come from the live save; the roster refreshes automatically when "
-            "the game saves."
+            "Find a cat by typing part of its name — the list comes from "
+            "your latest save and refreshes on its own whenever the game "
+            "saves.\n"
+            "Then pick who to analyse for breeding."
         ))
         self._results = QListWidget()
         self._results.setVisible(False)
@@ -402,18 +439,22 @@ class PaletteWindow(QWidget):
         self._cat_health.setWordWrap(True)
         self._cat_health.setStyleSheet("color:#e0a63a; font-size:11px;")
         self._cat_health.setToolTip(_wt(
-            "Traits this cat already carries that can pass to kittens:\n"
-            "• Disorders: 15% per parent that carries one — the kitten rolls "
-            "once per parent and inherits one random disorder from it.\n"
-            "• Birth defects: inherited as appearance per body part. Select a "
-            "partner to see each defect's pass chance for that pair."
+            "Things this cat carries that can be passed on to kittens.\n"
+            "• Disorders — a 15% chance per parent that carries one of "
+            "passing a random disorder to the kitten.\n"
+            "• Birth defects — kittens inherit these per body part; pick a "
+            "partner to see the exact odds for that pairing."
         ))
         row2 = QHBoxLayout()
         room_lbl = QLabel("Breed room:")
         room_lbl.setToolTip(_wt(
-            "The room where you will breed. Its furniture Stimulation is "
-            "used for every pair calculation (stat inheritance, ≥7 odds, "
-            "single-carrier defect chances) instead of the default 50."
+            "The room where you plan to breed.\n"
+            "Its furniture changes two things in the numbers:\n"
+            "• Stimulation — decides how often kittens inherit the better "
+            "stat, and how likely a lone defect is to pass.\n"
+            "• Comfort — decides how often a breeding attempt actually "
+            "succeeds each night.\n"
+            "Until a room is chosen, a neutral Stimulation of 50 is assumed."
         ))
         self._room_combo = QComboBox()
         self._room_combo.setToolTip(room_lbl.toolTip())
@@ -448,12 +489,13 @@ class PaletteWindow(QWidget):
         self._safe_mode = False
         self._btn_safe = QPushButton("🛡 Safe ≤ 15% risk")
         self._btn_safe.setCheckable(True)
-        self._btn_safe.setToolTip(
-            _wt("When on, only partners with birth-defect risk ≤ 15% compete "
-                "for the ⭐ Best match (highest ≥7 stats wins among them). "
-                "The risky 7s-first pick is shown instead when no safe "
-                "partner exists.")
-        )
+        self._btn_safe.setToolTip(_wt(
+            "Limit the ⭐ Best match to partners that are low risk (15% or "
+            "less), so you only breed pairs that are unlikely to produce a "
+            "defective kitten.\n"
+            "If no partner is that safe, the normal 7s-first pick is shown "
+            "instead — clearly labelled."
+        ))
         self._btn_safe.setVisible(False)
         best_row.addWidget(self._btn_best, 1)
         best_row.addWidget(self._btn_safe)
@@ -489,9 +531,10 @@ class PaletteWindow(QWidget):
         self._detail.setWordWrap(True)
         self._detail.setObjectName("muted")
         self._detail.setToolTip(_wt(
-            "Details for the highlighted partner: per-stat inheritance ranges "
-            "for the kitten (min of the parents → max of the parents per stat), "
-            "and any kittens this pair has already produced."
+            "Information about the row you have highlighted:\n"
+            "• What each kitten stat could come out as (the possible range "
+            "per parent).\n"
+            "• Kittens this pair has already produced together."
         ))
         root.addWidget(self._detail)
 
@@ -936,10 +979,11 @@ class PaletteWindow(QWidget):
             f"♥ in love with: {lover_txt}" if lover_txt else "no lovers"
         )
         self._cat_lovers.setToolTip(_wt(
-            "Current in-game love relationships. Lovers get a compatibility "
-            "bonus; lover conflicts are handled at room-assignment level, "
-            "not as a hard pair block." if lover_txt
-            else "This cat has no in-game lovers right now."
+            "In-game relationships.\n"
+            "Being lovers gives the pair a bonus when breeding.\n"
+            "If a cat already loves someone else, picking a different "
+            "partner can complicate things later." if lover_txt
+            else "This cat is not in love with anyone right now."
         ))
         # traits this cat already carries (defects / disorders)
         disorders = list(getattr(cat, "disorders", None) or [])
@@ -1261,22 +1305,23 @@ class PaletteWindow(QWidget):
         """Row-specific facts only; the COI weighting explanation lives in the
         Family column header tooltip."""
         rel = row.relation
-        lines = [f"{rel.label} · COI {row.coi * 100:.1f}%"]
+        lines = [f"Relationship: {rel.label}",
+                 f"Shared family history (COI): {row.coi * 100:.1f}%"]
         if rel.is_family:
-            lines.append(
-                f"{rel.shared_recent} shared ancestor(s) within 4 generations "
-                "of both cats"
-                + (f" (of {rel.shared_ancestors} total within 9)"
-                   if rel.shared_ancestors > rel.shared_recent else "")
-            )
+            close = f"{rel.shared_recent} shared ancestor(s) close enough " \
+                    "to matter"
+            if rel.shared_ancestors > rel.shared_recent:
+                close += f" (of {rel.shared_ancestors} in total)"
+            lines.append(close)
             if row.direct_family:
-                lines.append("Direct family — breeding is blocked (see Note).")
+                lines.append("Direct family — the game stops this pairing.")
             else:
-                lines.append("Related but breedable — this shared ancestry is "
-                             "what pushes the Risk % up.")
+                lines.append("Related, but allowed — this shared history "
+                             "is what raises the Risk %.")
         else:
-            lines.append("No shared ancestry within the range that matters — "
-                         "the safest kind of pairing.")
+            lines.append("No shared family history that matters — the "
+                         "safest kind of pairing.")
+        lines.append("Longer explanation: hover the Family heading above.")
         return _wt("\n".join(lines))
 
     def _partner_tooltip(self, row: PartnerRow, kids: list[str]) -> str:
