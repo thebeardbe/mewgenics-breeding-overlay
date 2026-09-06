@@ -706,6 +706,9 @@ class PaletteWindow(QWidget):
         app = QApplication.instance()
         if app is not None:
             app.setStyleSheet(_theme.stylesheet())
+        # The palette carries its own stylesheet (it shadows the app-wide
+        # one), so it must be refreshed too or nothing visually changes.
+        self.setStyleSheet(_theme.stylesheet())
         self._refresh_theme()
 
     def _refresh_theme(self) -> None:
