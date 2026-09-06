@@ -1,35 +1,58 @@
 """Best-partner recommendation.
 
-Picks the single strongest breeding candidate for the focused cat by
-combining the three signals that matter:
+Picks the single strongest breeding candidate for the focused cat from three
+signals:
 
-  * Risk — the pair's birth-defect risk % (new-defect roll from inbreeding;
-    lower is better).
-  * Existing birth defects — a penalty whenever the kitten would inherit a
-    defect the parents already carry. Shared defects (both parents carry the
-    same one → guaranteed) cost the most, a defect carried only by the
-    partner costs less, one carried only by the focused cat costs least.
-  * ≥7 stats — how many of the kitten's stats are expected to land on 7
-    (higher is better), with the expected stat average as a tie-breaker.
+  * ≥7 stats — the *highest-weighted* factor: how many kitten stats are
+    expected to land on 7 (each counts 6 points, so a full litter of 7s
+    dominates everything else).
+  * Existing birth defects — each defect's in-game effect is read from
+    resources.gpak and parsed for stat deltas. Defects that grant **+stats
+    are a positive effect** and add to the score; defects that cost stats
+    subtract. Defects with no numeric effect (pure appearance/flavour) get a
+    small penalty, and shared (both parents carry it → guaranteed) defects
+    weigh more than single-carrier ones.
+  * Risk — the pair's birth-defect risk % (new-defect roll from inbreeding),
+    subtracted.
 
-Additive score, shown in the breakdown so the user can see *why* a candidate
-won or lost:
+Additive and transparent:
 
-    score = 4×≥7stats + 2×expected_avg − risk% − defect_points
+    score = 6×≥7stats + 2×expected_avg − risk% ± defects(stat effects)
 
 Only compatible (non-family, breedable) partners are considered.
 """
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
-from typing import List
+from typing import Callable, List, Optional
 
 from mewgenics_overlay.core.maladies import defect_inheritance_rows
 
-_BOTH_CARRY_PENALTY = 35.0   # points per shared (guaranteed) defect
-_PARTNER_FACTOR = 0.5        # × chance% for a partner-only defect (~20–29)
-_FOCUS_FACTOR = 0.25         # × chance% for a focused-only defect (~10–15)
+W_SEVENS = 6.0            # per expected ≥7 stat
+W_AVG = 2.0               # per point of expected stat average
+W_RISK = 1.0              # subtracted per risk %
+
+W_STAT_EFFECT = 2.0       # per net stat point granted/cost by a defect
+UNQUANT_BOTH = 12.0       # flavour defect carried by both parents
+UNQUANT_PARTNER = 5.0     # flavour defect only on the partner
+UNQUANT_FOCUS = 2.0       # flavour defect only on the focused cat
+
+_STAT_TOKEN = re.compile(r"([+-]?\d+)\s+(STR|DEX|CON|INT|SPD|CHA|LCK)",
+                         re.IGNORECASE)
+_STAT_CODES = {"STR", "DEX", "CON", "INT", "SPD", "CHA", "LCK"}
+
+
+def effect_stat_net(effect: str) -> int:
+    """Net stat change implied by an effect string, e.g. '+1 CON, -2 INT' -> -1.
+    Only the seven core stats count; flavour text without stat deltas -> 0."""
+    total = 0
+    for match in _STAT_TOKEN.finditer(effect or ""):
+        value = int(match.group(1))
+        if match.group(2).upper() in _STAT_CODES:
+            total += value
+    return total
 
 
 def _short(name: str) -> str:
@@ -43,8 +66,40 @@ class Recommendation:
     breakdown: List[str] = field(default_factory=list)
 
 
-def recommend(rows, focused) -> Recommendation:
-    """Return the best compatible partner (empty Recommendation when none)."""
+def _defect_contribution(d, partner_side: str, effect_of, a, b):
+    """Signed score contribution for one inherited defect, plus a short label."""
+    both = len(d.carriers) == 2
+    partner_only = not both and partner_side in d.carriers
+    factor = 1.0 if both else d.chance_pct / 100.0
+    effect = effect_of(a, b, d.name) if effect_of else ""
+    net = effect_stat_net(effect)
+
+    if net > 0:
+        pts = W_STAT_EFFECT * net * factor
+        label = f"[{effect or f'+{net} stats'}] bonus"
+        return pts, label
+    if net < 0:
+        pts = -W_STAT_EFFECT * abs(net) * factor
+        label = f"[{effect or f'{net} stats'}] penalty"
+        return pts, label
+
+    # no numeric stat effect -> appearance/flavour; modest penalty
+    if both:
+        pts = -UNQUANT_BOTH
+    elif partner_only:
+        pts = -UNQUANT_PARTNER
+    else:
+        pts = -UNQUANT_FOCUS
+    label = f"[{effect or 'no stat effect'}] appearance"
+    return pts, label
+
+
+def recommend(rows, focused, effect_of: Optional[Callable] = None) -> Recommendation:
+    """Return the best compatible partner (empty Recommendation when none).
+
+    ``effect_of(a, b, defect_name) -> str`` supplies each defect's in-game
+    effect text ('' when unknown); the palette feeds it from resources.gpak.
+    """
     best = None
     best_score = float("-inf")
     best_breakdown: List[str] = []
@@ -60,44 +115,33 @@ def recommend(rows, focused) -> Recommendation:
         defect_rows = defect_inheritance_rows(
             factors.cat_a, factors.cat_b, row.coi)
 
-        risk = float(row.risk_pct)
         sevens = float(row.seven_plus_total)
         exp_avg = float(row.expected_avg)
+        risk = float(row.risk_pct)
 
         defect_pts = 0.0
+        defect_lines: List[str] = []
         for d in defect_rows:
-            if len(d.carriers) == 2:
-                defect_pts += _BOTH_CARRY_PENALTY * d.chance_pct / 100.0
-            elif partner_side in d.carriers:
-                defect_pts += _PARTNER_FACTOR * d.chance_pct
-            else:
-                defect_pts += _FOCUS_FACTOR * d.chance_pct
+            pts, label = _defect_contribution(d, partner_side, effect_of,
+                                              factors.cat_a, factors.cat_b)
+            defect_pts += pts
+            if pts:
+                defect_lines.append(
+                    f"  {_short(d.name)}: {label} → {pts:+.0f}")
 
-        score = 4.0 * sevens + 2.0 * exp_avg - risk - defect_pts
+        score = (W_SEVENS * sevens + W_AVG * exp_avg - W_RISK * risk
+                 + defect_pts)
         if score <= best_score:
             continue
 
         best, best_score = row, score
-        shared = [d for d in defect_rows if len(d.carriers) == 2]
-        partner_only = [d for d in defect_rows
-                        if partner_side in d.carriers and len(d.carriers) == 1]
-        focused_only = [d for d in defect_rows
-                        if partner_side not in d.carriers
-                        and len(d.carriers) == 1]
-        bits = []
-        if shared:
-            bits.append(f"{len(shared)} shared → guaranteed")
-        if partner_only:
-            bits.append("partner: " + ", ".join(_short(d.name)
-                                               for d in partner_only))
-        if focused_only:
-            bits.append("focused: " + ", ".join(_short(d.name)
-                                                for d in focused_only))
+        bits = defect_lines if defect_lines else ["  none"]
         best_breakdown = [
-            f"≥7 stats: {sevens:.1f} (+{4 * sevens:.0f})",
-            f"expected avg: {exp_avg:.2f} (+{2 * exp_avg:.1f})",
-            f"risk: {risk:.1f}% (−{risk:.1f})",
-            f"defects: {', '.join(bits) or 'none'} (−{defect_pts:.0f})",
+            f"≥7 stats: {sevens:.1f} ×{W_SEVENS:.0f} (+{W_SEVENS * sevens:.1f})",
+            f"expected avg: {exp_avg:.2f} ×{W_AVG:.0f} (+{W_AVG * exp_avg:.1f})",
+            f"risk: {risk:.1f}% (−{W_RISK * risk:.1f})",
+            "defect effects:",
+            *bits,
             f"score: {score:.1f}",
         ]
 

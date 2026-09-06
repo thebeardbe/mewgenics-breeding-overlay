@@ -846,7 +846,8 @@ class PaletteWindow(QWidget):
             self._best_row = None
             self._btn_best.setVisible(False)
             return
-        rec = recommend_best([r for r, _ in self._rows], self._focus)
+        rec = recommend_best([r for r, _ in self._rows], self._focus,
+                             effect_of=self._effect_for_name)
         self._best_row = rec.row
         if rec.row is None:
             self._btn_best.setVisible(False)

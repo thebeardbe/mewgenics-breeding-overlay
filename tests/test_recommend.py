@@ -1,10 +1,8 @@
-"""Unit tests for the best-partner recommender."""
+"""Unit tests for the best-partner recommender (stat-effect aware)."""
 
 from types import SimpleNamespace
 
-import pytest
-
-from mewgenics_overlay.core.recommend import recommend
+from mewgenics_overlay.core.recommend import recommend, effect_stat_net
 
 
 def cat(name, defects=None):
@@ -23,45 +21,67 @@ def row(partner, focused, *, risk=2.0, sevens=2.0, exp_avg=5.0, coi=0.0,
     )
 
 
-def test_prefers_clean_low_risk_partner():
-    focus = cat("Focus", defects=["Arm Birth Defect"])
-    clean = cat("Clean")
-    shared = cat("Shared", defects=["Arm Birth Defect"])  # both carry -> guaranteed
-    rows = [
-        row(shared, focus, risk=5.0, sevens=4.0, exp_avg=5.5),
-        row(clean, focus, risk=2.0, sevens=2.5, exp_avg=5.0),
-    ]
-    rec = recommend(rows, focus)
-    assert rec.row.partner is clean
-    assert rec.breakdown and any("defects" in b for b in rec.breakdown)
+# defect-name -> effect text (what resources.gpak would supply)
+EFFECTS = {
+    "Arm Birth Defect": "-2 DEX",
+    "Leg Birth Defect": "+2 CON",      # positive-stats defect
+}
 
 
-def test_risk_beats_extra_sevens():
+def effect_of(a, b, name):
+    return EFFECTS.get(name, "")
+
+
+def test_sevens_weigh_highest():
     focus = cat("Focus")
-    safe = cat("Safe")
-    risky = cat("Risky")
+    many_sevens = cat("Sevens")     # slightly riskier but far more 7s
+    few_sevens = cat("Few")
     rows = [
-        row(risky, focus, risk=60.0, sevens=6.0, exp_avg=6.2),
-        row(safe, focus, risk=2.0, sevens=2.0, exp_avg=5.0),
+        row(few_sevens, focus, risk=2.0, sevens=2.0, exp_avg=5.0),
+        row(many_sevens, focus, risk=10.0, sevens=6.0, exp_avg=6.0),
     ]
-    assert recommend(rows, focus).row.partner is safe
+    rec = recommend(rows, focus, effect_of=effect_of)
+    assert rec.row.partner is many_sevens  # 6×6 −10 ≫ 6×2 −2
 
 
-def test_shared_defect_drops_candidate():
-    focus = cat("Focus", defects=["Leg Birth Defect"])
-    other = cat("Other", defects=["Leg Birth Defect"])
-    stranger = cat("Stranger")
+def test_positive_stat_defect_helps_candidate():
+    focus = cat("Focus")
+    bonus = cat("Bonus", defects=["Leg Birth Defect"])   # +2 CON effect
+    clean = cat("Clean")
     rows = [
-        row(other, focus, risk=2.0, sevens=3.0),
-        row(stranger, focus, risk=2.0, sevens=1.0),
+        row(clean, focus, risk=2.0, sevens=2.0, exp_avg=5.0),
+        # identical stats, but this partner passes a +stat defect → wins
+        row(bonus, focus, risk=2.0, sevens=2.0, exp_avg=5.0),
     ]
-    assert recommend(rows, focus).row.partner is stranger
+    rec = recommend(rows, focus, effect_of=effect_of)
+    assert rec.row.partner is bonus
+    assert any("bonus" in b for b in rec.breakdown)
+
+
+def test_negative_stat_defect_drops_candidate():
+    focus = cat("Focus")
+    harmed = cat("Harmed", defects=["Arm Birth Defect"])  # -2 DEX effect
+    clean = cat("Clean")
+    rows = [
+        row(clean, focus, risk=2.0, sevens=2.0, exp_avg=5.0),
+        # identical stats, but this partner passes a −stat defect → loses
+        row(harmed, focus, risk=2.0, sevens=2.0, exp_avg=5.0),
+    ]
+    assert recommend(rows, focus, effect_of=effect_of).row.partner is clean
+
+
+def test_stat_parser():
+    assert effect_stat_net("+1 CON, -2 INT") == -1
+    assert effect_stat_net("-2 SPD") == -2
+    assert effect_stat_net("+2 CON") == 2
+    assert effect_stat_net("Start each battle with Immobilize") == 0
+    assert effect_stat_net("") == 0
 
 
 def test_incompatible_ignored_and_none_case():
     focus = cat("Focus")
     blocked = cat("Blocked")
-    rows = [row(blocked, focus, compatible=False)]
-    rec = recommend(rows, focus)
+    rec = recommend([row(blocked, focus, compatible=False)], focus,
+                    effect_of=effect_of)
     assert rec.row is None
-    assert recommend([], focus).row is None
+    assert recommend([], focus, effect_of=effect_of).row is None
