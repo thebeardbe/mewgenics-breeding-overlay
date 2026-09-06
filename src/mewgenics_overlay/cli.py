@@ -16,7 +16,7 @@ import os
 import sys
 
 from mewgenics_overlay.core.discovery import newest_save
-from mewgenics_overlay.core.session import Session
+from mewgenics_overlay.core.session import Session, display_location
 
 ALIVE = ("In House", "Adventure")
 
@@ -40,7 +40,7 @@ def cmd_list(sess: Session, args) -> int:
     print(f"{len(sess.cats)} total cats, {len(cats)} alive in {sess.save_path}")
     cats.sort(key=lambda c: c.name.lower())
     for c in cats[: args.limit]:
-        print(f"  {c.name:<24} {c.gender:<7} {c.room or c.status:<14} "
+        print(f"  {c.name:<24} {c.gender:<7} {display_location(c):<14} "
               f"gen={c.generation} sum={sum(c.base_stats.values())}")
     return 0
 
@@ -66,7 +66,7 @@ def cmd_partners(sess: Session, args) -> int:
         print(f"no cat matching {args.name!r}")
         return 1
     cat = hits[0]
-    print(f"Best breeding partners for {cat.name} [{cat.gender}, {cat.room or cat.status}]")
+    print(f"Best breeding partners for {cat.name} [{cat.gender}, {display_location(cat)}]")
     rows = sess.rank_partners(
         cat,
         max_partners=args.limit,

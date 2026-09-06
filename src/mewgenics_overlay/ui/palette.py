@@ -46,6 +46,7 @@ from mewgenics_overlay.core.session import (
     Cat,
     PartnerRow,
     Session,
+    display_location,
 )
 from mewgenics_overlay.core.watcher import SaveWatcher, safe_read_save
 from mewgenics_overlay.vendor.breeding import tracked_offspring
@@ -107,8 +108,9 @@ _COL_TIP_PARAS = [
     # Room
     [
         "Where this cat is right now.",
-        "In a house room: can take part in overnight breeding.",
+        "In a named room: can take part in overnight breeding.",
         "On Adventure: away from the house until the next day.",
+        "Outside house: standing on screen, not in a room or adventure box.",
     ],
     # Risk
     [
@@ -947,7 +949,7 @@ class PaletteWindow(QWidget):
 
     def _show_focus(self, cat: Cat) -> None:
         gen = "stray" if cat.generation == 0 else f"gen {cat.generation}"
-        meta = f"{gender_badge(cat.gender)} {cat.gender} · {cat.room or cat.status} · {gen}"
+        meta = f"{gender_badge(cat.gender)} {cat.gender} · {display_location(cat)} · {gen}"
         if cat.age is not None:
             meta += f" · {cat.age}d"
         if cat.inbredness > 0.03:
@@ -960,7 +962,7 @@ class PaletteWindow(QWidget):
         ))
         self._cat_meta.setText(meta)
         self._cat_meta.setToolTip(_wt(
-            f"{cat.gender} · {cat.room or cat.status} · "
+            f"{cat.gender} · {display_location(cat)} · "
             f"generation {cat.generation} (0 = stray, each generation adds "
             f"depth and shared ancestry)"
             + (f" · age {cat.age} days" if cat.age is not None else "")
@@ -1037,7 +1039,7 @@ class PaletteWindow(QWidget):
         self._results.clear()
         for c in hits:
             item = QListWidgetItem(
-                f"{c.name}   · {c.room or c.status}   · {c.gender}   · "
+                f"{c.name}   · {display_location(c)}   · {c.gender}   · "
                 f"sum {sum(c.base_stats.values())}"
             )
             item.setData(Qt.ItemDataRole.UserRole, c.db_key)
@@ -1155,7 +1157,7 @@ class PaletteWindow(QWidget):
         if col == 2:
             return row.relation.gen_gap
         if col == 3:
-            return (p.room or p.status).lower()
+            return display_location(p).lower()
         if col == 4:
             return row.risk_pct
         if col == 5:
@@ -1227,7 +1229,7 @@ class PaletteWindow(QWidget):
                 f"= {rel.gen_gap:+d}."
             )
 
-            it_room = QTableWidgetItem(p.room or p.status)
+            it_room = QTableWidgetItem(display_location(p))
             it_risk = QTableWidgetItem(f"{row.risk_pct:.1f}%" if ok else "—")
             it_comp = QTableWidgetItem(
                 _fmt_chance(row.game_compat, self._comfort_value())
@@ -1325,7 +1327,7 @@ class PaletteWindow(QWidget):
         return _wt("\n".join(lines))
 
     def _partner_tooltip(self, row: PartnerRow, kids: list[str]) -> str:
-        lines = [f"{row.partner.name}  ({row.partner.gender}, {row.partner.room})"]
+        lines = [f"{row.partner.name}  ({row.partner.gender}, {display_location(row.partner)})"]
         rel = row.relation
         lines.append(f"Family: {rel.label} · Δgen {rel.gen_gap:+d} "
                      f"· COI {row.coi * 100:.1f}%")

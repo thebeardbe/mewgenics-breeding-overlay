@@ -39,6 +39,22 @@ log = logging.getLogger("mewgenics_overlay.session")
 ALIVE_STATUSES = ("In House", "Adventure")
 
 
+def display_location(cat) -> str:
+    """Human-friendly location label.
+
+    Cats with status 'In House' but no assigned room/adventure box are simply
+    standing on screen — they are NOT inside a room, so label them
+    'Outside house' rather than implying they can breed from a room.
+    """
+    status = getattr(cat, "status", "") or ""
+    room = (getattr(cat, "room", "") or "").strip()
+    if status == "Adventure":
+        return "Adventure"
+    if status == "In House":
+        return room if room else "Outside house"
+    return status or "Gone"
+
+
 def _build_key_maps(cats: list[Cat]) -> tuple[dict, dict, dict]:
     parent_map: dict[int, set[int]] = {}
     lover_map: dict[int, set[int]] = {}
