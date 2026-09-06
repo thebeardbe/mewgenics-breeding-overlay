@@ -119,8 +119,17 @@ def main(argv=None) -> int:
     if os.environ.get("HYPRLAND_INSTANCE_SIGNATURE") and \
             "QT_QPA_PLATFORM" not in os.environ:
         os.environ["QT_QPA_PLATFORM"] = "xcb"
-        logging.info("Hyprland detected — using xcb platform for overlay "
-                     "above game windows")
+
+    # QT_QPA_PLATFORMTHEME=gtk3 (common on NixOS/Hyprland) makes Qt's file
+    # dialog initialise GTK/GIO, which aborts with 'No GSettings schemas are
+    # installed on the system' when the schemas aren't in XDG_DATA_DIRS — a
+    # hard crash the moment the 📁 picker opens. Fall back to the generic
+    # theme for this app so dialogs stay pure Qt.
+    if sys.platform.startswith("linux") and os.environ.get(
+            "QT_QPA_PLATFORMTHEME", "").lower() == "gtk3":
+        os.environ["QT_QPA_PLATFORMTHEME"] = "generic"
+        logging.info("QT_QPA_PLATFORMTHEME=gtk3 would crash file dialogs "
+                     "without GSettings schemas — using generic")
 
     app = QApplication(sys.argv[:1])
     app.setApplicationName("mewgenics-overlay")
