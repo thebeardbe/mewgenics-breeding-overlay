@@ -69,6 +69,8 @@ class PartnerRow:
     is_lover: bool
     is_hater: bool
     generation: int
+    kitty_total: int = 0        # kittens this pair has already produced
+    kitty_available: int = 0    # ... still in house/on adventures (not dead/gone)
     quality: float = 0.0
     pair_factors: PairFactors = field(repr=False, default=None)
 

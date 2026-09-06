@@ -91,9 +91,10 @@ def cmd_partners(sess: Session, args) -> int:
             tags.append(f"gen{r.generation}")
         tag = (" " + " ".join(tags)) if tags else ""
         rel = r.relation
+        chance = max(0.0, min(100.0, r.game_compat * 100.0))
         print(
             f"  ✓ {r.partner.name:<24} risk={r.risk_pct:4.1f}%  "
-            f"compat={r.game_compat:.3f}  exp={r.expected_avg:.2f}/stat "
+            f"breed={chance:.0f}%  exp={r.expected_avg:.2f}/stat "
             f"(sum {r.stat_sum_range[0]}–{r.stat_sum_range[1]})  "
             f"7s≈{r.seven_plus_total:.1f}  q={r.quality:.0f}  "
             f"[rel={rel.label}, Δgen {rel.gen_gap:+d}, coi={r.coi * 100:.1f}%]{tag}"

@@ -41,7 +41,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from mewgenics_overlay.core.session import Cat, PartnerRow, Session
+from mewgenics_overlay.core.session import (
+    ALIVE_STATUSES,
+    Cat,
+    PartnerRow,
+    Session,
+)
 from mewgenics_overlay.core.watcher import SaveWatcher, safe_read_save
 from mewgenics_overlay.vendor.breeding import tracked_offspring
 
@@ -65,7 +70,7 @@ log = logging.getLogger("mewgenics_overlay.ui")
 
 STAT_NAMES = ["STR", "DEX", "CON", "INT", "SPD", "CHA", "LCK"]
 
-_COLS = ["Cat", "Family", "GenΔ", "Room", "Risk", "Compat", "Exp/stat", "≥7", "Defects", "Note"]
+_COLS = ["Cat", "Family", "GenΔ", "Room", "Risk", "Chance", "Exp/stat", "≥7", "Defects", "Note"]
 
 # Column explanations shown as tooltips when hovering each header.
 _COL_TIPS = [
@@ -97,11 +102,13 @@ _COL_TIPS = [
     "the pair's inbreeding coefficient (COI — see the Family header). "
     "COI 0% leaves only the ~2% baseline. "
     "Green ≤ 5% (safe), amber 5–12% (caution), red > 12% (likely defect).",
-    # Compat
-    "The game's own compatibility score: 0.15 × charisma × libido × "
-    "lover bonus × sexuality multiplier. Above 0.05 the game will attempt "
-    "the breed; higher = more successful rounds. Green = passes, "
-    "amber = below the pass line.",
+    # Chance
+    "Per-roll breeding chance, as a percentage: each night the game makes "
+    "two rolls, each succeeding with ~compat × √(1 + 0.1×Comfort) — at "
+    "Comfort 0 that's just the raw compatibility, capped at 100%. "
+    "Compat = 0.15 × charisma × libido × lover bonus × sexuality. "
+    "A raw compat below 0.05 (= 5%) means the game won't attempt the pair. "
+    "Green = above the 5% line.",
     # Exp/stat
     "Expected value of each of the kitten's 7 base stats (0–7 scale), "
     "using the better parent's stat with ~50% inheritance weight. "
@@ -120,7 +127,8 @@ _COL_TIPS = [
     "Relationship flags and blockers. ♥ = the focused cat is in love "
     "with them, ♥♥ = mutual lovers, 'hates you' = hater conflict. "
     "Blocked rows show the rejection reason (direct family, straight "
-    "same-sex, …). 'n kitten(s)' = kittens this pair already produced.",
+    "same-sex, …). 'n kittens' = how many this pair produced (and how many "
+    "are still available, i.e. not dead or donated).",
 ]
 
 
@@ -135,9 +143,25 @@ def _note_text(row, kids: list[str]) -> str:
         parts.append("hates you")
     if not row.compatible and row.reason:
         parts.append(row.reason)
-    if kids:
-        parts.append(f"{len(kids)} kitten(s)")
+    kittens = _kittens_label(row)
+    if kittens:
+        parts.append(kittens)
     return "  ".join(parts)
+
+
+def _kittens_label(row) -> str:
+    """e.g. '1 kitten', '3 kittens', '3 kittens, 1 available',
+    '3 kittens, none available' — 'available' means still in the house /
+    on adventures (dead or donated/gone kittens are excluded)."""
+    total = int(getattr(row, "kitty_total", 0) or 0)
+    if total <= 0:
+        return ""
+    noun = "1 kitten" if total == 1 else f"{total} kittens"
+    available = int(getattr(row, "kitty_available", total) or 0)
+    if available < total:
+        noun += ", none available" if available == 0 \
+            else f", {available} available"
+    return noun
 
 
 def _defect_short(name: str) -> str:
@@ -199,6 +223,11 @@ class _DragLabel(QLabel):
 
 def _fmt_compat(v: float) -> str:
     return f"{v:.3f}"
+
+
+def _fmt_chance(v: float) -> str:
+    """Per-roll breeding chance as a percentage (≈compat at Comfort 0)."""
+    return f"{max(0.0, min(100.0, v * 100.0)):.0f}%"
 
 
 def _stats_html(cat: Cat) -> str:
@@ -694,6 +723,10 @@ class PaletteWindow(QWidget):
                 enriched = []
                 for r in rows:
                     kids = tracked_offspring(cat, r.partner)
+                    r.kitty_total = len(kids)
+                    r.kitty_available = sum(
+                        1 for k in kids
+                        if getattr(k, "status", "") in ALIVE_STATUSES)
                     enriched.append((r, [k.name for k in kids]))
                 with self._lock:
                     self._pending.append((token, "partners", (cat_key, enriched)))
@@ -1124,7 +1157,7 @@ class PaletteWindow(QWidget):
 
             it_room = QTableWidgetItem(p.room or p.status)
             it_risk = QTableWidgetItem(f"{row.risk_pct:.1f}%" if ok else "—")
-            it_comp = QTableWidgetItem(_fmt_compat(row.game_compat) if ok else "—")
+            it_comp = QTableWidgetItem(_fmt_chance(row.game_compat) if ok else "—")
             it_exp = QTableWidgetItem(f"{row.expected_avg:.2f}" if ok else "—")
             it_7 = QTableWidgetItem(f"{row.seven_plus_total:.1f}" if ok else "—")
             defects_text = _defects_summary(row, self._stim_value())
@@ -1140,10 +1173,12 @@ class PaletteWindow(QWidget):
                     f"Birth-defect risk for this pair: {row.risk_pct:.1f}%."
                 )
                 it_comp.setToolTip(
-                    f"Game compatibility for this pair: {row.game_compat:.3f} — "
-                    + ("passes the 0.05 line."
+                    f"Per-roll breeding chance: "
+                    f"{_fmt_chance(row.game_compat)} "
+                    f"(raw compat {row.game_compat:.3f}, two rolls per night).\n"
+                    + ("Above the 5% line — the game will attempt this pair."
                        if row.game_compat > 0.05
-                       else "below the 0.05 line.")
+                       else "Below the 5% line — the game won't attempt it.")
                 )
                 proj = row.pair_factors.projection
                 it_exp.setToolTip(
@@ -1167,8 +1202,7 @@ class PaletteWindow(QWidget):
             it_room.setToolTip(f"Current location of {p.name}.")
             it_note.setToolTip(
                 (row.reason if (not ok and row.reason) else "")
-                + (f"This pair already produced {len(kids)} kitten(s) together"
-                   if kids else "")
+                + (f"Existing kittens: {_kittens_label(row)}" if kids else "")
             )
 
             color = "#8a849f" if not ok else "#e8e6ee"
@@ -1217,8 +1251,9 @@ class PaletteWindow(QWidget):
         lines.append(f"Family: {rel.label} · Δgen {rel.gen_gap:+d} "
                      f"· COI {row.coi * 100:.1f}%")
         lines.append(f"Birth-defect risk: {row.risk_pct:.1f}%")
-        lines.append(f"Game compatibility: {row.game_compat:.3f} "
-                     f"(needs > 0.05)")
+        lines.append(f"Per-roll breed chance: "
+                     f"{_fmt_chance(row.game_compat)} "
+                     f"(compat {row.game_compat:.3f} > 0.05)")
         if row.compatible:
             proj = row.pair_factors.projection
             ranges = "  ".join(
@@ -1234,7 +1269,11 @@ class PaletteWindow(QWidget):
         if row.is_lover or row.mutual_lover:
             lines.append("They are lovers" if row.mutual_lover else "They like you")
         if kids:
-            lines.append("Existing kittens together: " + ", ".join(kids))
+            names = ", ".join(kids)
+            label = _kittens_label(row)
+            lines.append(f"Existing kittens together: {names}")
+            if label:
+                lines.append(f"   ({label})")
         lines.append("Double-click to analyse breeding from this cat.")
         return _wt("\n".join(lines))
 
