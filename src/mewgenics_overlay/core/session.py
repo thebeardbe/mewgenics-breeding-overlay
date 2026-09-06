@@ -129,6 +129,7 @@ class Session:
         self.save_path = str(save_path)
         self.data: SaveData | None = None
         self.cats: list[Cat] = []
+        self.npc_progress_flags: set = set()
         self._parent_map: dict = {}
         self._lover_map: dict = {}
         self._hater_map: dict = {}
@@ -140,6 +141,7 @@ class Session:
         self.cats = list(self.data.cats)
         self._finish_cats(self.cats)
         self._parent_map, self._lover_map, self._hater_map = _build_key_maps(self.cats)
+        self.npc_progress_flags = _read_npc_progress_flags(self.save_path)
 
     @staticmethod
     def _finish_cats(cats: list[Cat]) -> None:
@@ -275,3 +277,25 @@ class Session:
             breed_id=cat.breed_id,
             unique_id=cat.unique_id,
         )
+
+_NPC_TOKEN_RE = None
+
+
+def _read_npc_progress_flags(save_path: str) -> set:
+    """Names found in the save's npc_progress blob (NPC unlock/milestone
+    flags). Read-only, best-effort — returns an empty set on any problem."""
+    import re
+    import sqlite3
+
+    try:
+        conn = sqlite3.connect(f"file:{save_path}?mode=ro", uri=True)
+        row = conn.execute(
+            "SELECT data FROM files WHERE key='npc_progress'").fetchone()
+        conn.close()
+        if not row:
+            return set()
+        names = re.findall(rb"[A-Za-z_][A-Za-z0-9_]{2,}", row[0])
+        return {n.decode(errors="replace") for n in names}
+    except Exception:
+        return set()
+

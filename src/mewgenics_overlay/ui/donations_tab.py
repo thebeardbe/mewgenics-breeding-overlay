@@ -65,7 +65,9 @@ class DonationsTab(QWidget):
     # ── data ───────────────────────────────────────────────────────────────
     def refresh(self, session) -> None:
         cats = session.alive if session is not None else []
-        self._slots = donation_report(cats) if cats else []
+        flags = getattr(session, "npc_progress_flags", set()) \
+            if session is not None else set()
+        self._slots = donation_report(cats, active=flags) if cats else []
         self._render()
 
     def _render(self) -> None:
@@ -80,13 +82,17 @@ class DonationsTab(QWidget):
         self._table.setRowCount(0)
         self._table.setRowCount(len(self._slots))
         for r_i, slot in enumerate(self._slots):
-            cells = [slot.npc, slot.wants,
+            name = slot.npc
+            if slot.supported and not slot.active:
+                name += "  (not unlocked)"
+            cells = [name, slot.wants,
                      str(slot.count) if slot.supported else "—",
                      self._suggested_text(slot)]
+            inactive = slot.supported and not slot.active
             for c_i, text in enumerate(cells):
                 it = QTableWidgetItem(text)
                 it.setToolTip(self._cell_tip(slot, c_i))
-                if not slot.supported and c_i == 0:
+                if (not slot.supported or inactive) and c_i == 0:
                     it.setForeground(QColor("#8a849f"))
                 self._table.setItem(r_i, c_i, it)
 
@@ -102,7 +108,10 @@ class DonationsTab(QWidget):
     def _cell_tip(self, slot, c_i: int) -> str:
         if not slot.supported:
             return _wt(f"{slot.npc}\n{slot.unlock_note}")
+        status = "Active — takes cats now" if slot.active \
+            else "Not unlocked yet (greyed out)"
         lines = [f"{slot.npc} — {slot.wants}",
+                 f"{status}",
                  f"Unlock: {slot.unlock_note}",
                  f"Qualifying now: {slot.count}"]
         if slot.candidates:

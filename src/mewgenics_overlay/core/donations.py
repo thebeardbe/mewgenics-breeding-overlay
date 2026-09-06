@@ -75,6 +75,7 @@ class DonationSlot:
     wants: str
     unlock_note: str = ""
     supported: bool = True
+    active: bool = True          # NPC has started taking cats (save flags)
     candidates: List[object] = field(default_factory=list)
     ranks: List[int] = field(default_factory=list)   # parallel: quality rank
 
@@ -114,8 +115,13 @@ def _give_away_score(cat) -> float:
     return score
 
 
-def donation_report(cats) -> List[DonationSlot]:
-    """Rank every donation NPC's qualifying cats for the current roster."""
+def donation_report(cats, active: Optional[set] = None) -> List[DonationSlot]:
+    """Rank every donation NPC's qualifying cats for the current roster.
+
+    ``active`` is an optional set of flag names from the save's npc_progress;
+    NPCs whose accept-flag is present are marked ``active=True``.
+    """
+    flags = set(active or ())
     slots: List[DonationSlot] = []
 
     def info(npc):
@@ -131,7 +137,11 @@ def donation_report(cats) -> List[DonationSlot]:
 
     for npc in NPC_ORDER:
         wants, unlock = info(npc)
-        slot = DonationSlot(npc=npc, wants=wants, unlock_note=unlock)
+        slug = {"Tink": "tink", "Dr. Beanies": "beanies",
+                "Frank": "frank", "Tracy": "tracy"}[npc]
+        slot = DonationSlot(npc=npc, wants=wants, unlock_note=unlock,
+                            active=any(flag.startswith(slug)
+                                       for flag in flags))
         slot.candidates = [c for c in cats if _qualifies(c, npc)]
         # keep protected cats out of the giveaway list entirely-ish: any
         # must-breed / pinned cat sorts after everything else.
