@@ -59,6 +59,14 @@ class DonationsTab(QWidget):
         head.addWidget(self._summary, 1)
         root.addLayout(head)
 
+        self._butch_note = QLabel("")
+        self._butch_note.setWordWrap(True)
+        self._butch_note.setStyleSheet(
+            "color:#6f6c65; padding:4px 8px; border:1px dashed #6a665e; "
+            "border-radius:6px;")
+        self._butch_note.setVisible(False)
+        root.addWidget(self._butch_note)
+
         self._table = QTableWidget(0, len(_COLS))
         self._table.setHorizontalHeaderLabels(_COLS)
         # explain each column (plain words)
@@ -90,6 +98,15 @@ class DonationsTab(QWidget):
         dead = getattr(session, "dead_cats", []) if session is not None else []
         flags = getattr(session, "npc_progress_flags", set()) \
             if session is not None else set()
+        butch_unlocked = any(f.startswith("butch") for f in flags)
+        if butch_unlocked:
+            self._butch_note.setText(
+                "Butch is unlocked — we can't yet tell which cats he'd take: "
+                "the save doesn't record per-cat adventure/chapter progress."
+            )
+            self._butch_note.setVisible(True)
+        else:
+            self._butch_note.setVisible(False)
         report = donation_report(
             cats, active=flags, dead=tuple(dead),
             current_day=getattr(session, "current_day", None)) \

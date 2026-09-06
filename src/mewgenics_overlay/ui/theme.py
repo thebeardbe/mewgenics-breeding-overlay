@@ -109,6 +109,7 @@ QTabBar::tab {
     padding: 6px 18px; margin-right: 3px; font-weight: 700;
 }
 QTabBar::tab:selected { background: #e6e2d6; }
+QPushButton#iconbtn { font-size: 20px; padding: 2px 0; }
 """
 
 _STYLES["noir"] = """
@@ -174,13 +175,14 @@ QTabBar::tab {
     padding: 6px 18px; margin-right: 3px; font-weight: 700;
 }
 QTabBar::tab:selected { background: #37332c; color: #f0ede4; }
+QPushButton#iconbtn { font-size: 20px; padding: 2px 0; }
 """
 
 THEMES = {
     "film": {"title": "Noir · Bright", "colors": _BRIGHT, "css": _STYLES["film"]},
     "noir": {"title": "Noir · Dark", "colors": _DARK, "css": _STYLES["noir"]},
 }
-DEFAULT_THEME = "film"
+DEFAULT_THEME = "noir"
 _ACTIVE = "film"
 
 

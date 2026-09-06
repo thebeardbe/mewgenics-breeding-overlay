@@ -425,6 +425,10 @@ class PaletteWindow(QWidget):
         close.setFixedWidth(34)
         close.setToolTip("Hide (Ctrl+Shift+B / tray) — quits when no tray is available")
         close.clicked.connect(self._on_close_clicked)
+        # header emoji buttons: bigger glyphs, uniform width
+        for _b in (pin, ct, open_save, about, self._btn_theme, close):
+            _b.setObjectName("iconbtn")
+            _b.setFixedWidth(40)
         head.addWidget(grip)
         head.addWidget(self._title)
         head.addWidget(self._status, 1)
