@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from mewgenics_overlay.core.kinship import Relation, relation as relation_of
+from mewgenics_overlay.core.maladies import sexuality_label
 from mewgenics_overlay.vendor.save_parser import (
     Cat,
     SaveData,
@@ -37,6 +38,29 @@ from mewgenics_overlay.vendor.breeding import (
 log = logging.getLogger("mewgenics_overlay.session")
 
 ALIVE_STATUSES = ("In House", "Adventure")
+
+
+def same_sex_straight_block(a, b) -> str:
+    """Return a reason string when a same-sex pair cannot breed because a
+    straight cat is involved, else ''.
+
+    Game rule (player-verified): straight cats never breed with the same
+    sex — a same-sex pair only works when both cats are bi or gay.
+    Neutral '?' cats are exempt.
+    """
+    ga = (getattr(a, "gender", "?") or "?").strip().lower()
+    gb = (getattr(b, "gender", "?") or "?").strip().lower()
+    if ga == "?" or gb == "?" or ga != gb:
+        return ""
+    if ga not in ("male", "female"):
+        return ""
+    sa = sexuality_label(getattr(a, "sexuality_raw", None))
+    sb = sexuality_label(getattr(b, "sexuality_raw", None))
+    if sa == "straight" or sb == "straight":
+        names = [n for n, s in ((a.name, sa), (b.name, sb)) if s == "straight"]
+        return (f"Same sex — {names[0] if names else 'one cat'} is straight, "
+                "and straight cats won't breed same-sex")
+    return ""
 
 
 def display_location(cat) -> str:
@@ -221,12 +245,23 @@ class Session:
                 stimulation=stimulation,
             )
             family = is_direct_family_pair(cat, b, parent_map)
+            sex_block = same_sex_straight_block(cat, b)
+            ok = bool(factors.compatible and not family and not sex_block)
+            if not ok:
+                if sex_block:
+                    reason = sex_block
+                elif family:
+                    reason = "Direct family pair"
+                else:
+                    reason = factors.reason
+            else:
+                reason = ""
             proj = factors.projection
             is_lover = b.db_key in lover_map.get(cat.db_key, set())
             row = PartnerRow(
                 partner=b,
-                compatible=factors.compatible and not family,
-                reason=factors.reason,
+                compatible=ok,
+                reason=reason,
                 risk_pct=factors.risk,
                 game_compat=factors.game_compat,
                 expected_avg=proj.avg_expected,
