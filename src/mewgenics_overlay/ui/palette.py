@@ -333,7 +333,7 @@ class PaletteWindow(QWidget):
             flags |= Qt.WindowType.WindowStaysOnTopHint
         self.setWindowFlags(flags)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, False)
-        self.resize(760, 560)
+        self.resize(880, 600)
         self._restore_geometry()
         self.setStyleSheet(_theme.stylesheet())
         self._build_ui()
@@ -551,7 +551,7 @@ class PaletteWindow(QWidget):
         self._table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         hdr = self._table.horizontalHeader()
         hdr.setStretchLastSection(True)
-        for i, w in enumerate([140, 106, 42, 74, 54, 58, 54, 36, 128]):
+        for i, w in enumerate([130, 104, 66, 74, 56, 58, 88, 40, 132]):
             self._table.setColumnWidth(i, w)
         # manual sorting (headers clickable; tri-state per column)
         self._table.setSortingEnabled(False)
