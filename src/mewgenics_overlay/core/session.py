@@ -188,6 +188,12 @@ class Session:
         return [c for c in self.cats if c.status in ALIVE_STATUSES]
 
     @property
+    def dead_cats(self) -> list[Cat]:
+        """Cats that have died (is_dead flag) — candidates for the Organ
+        Grinder, who takes the dead."""
+        return [c for c in self.cats if getattr(c, "is_dead", False)]
+
+    @property
     def in_house(self) -> list[Cat]:
         return [c for c in self.cats if c.status == "In House"]
 

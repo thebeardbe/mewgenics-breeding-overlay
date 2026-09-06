@@ -67,12 +67,16 @@ NPC_PROFILES: dict = {
     "Baby Jack": NpcProfile("cats with an injury",
                             "unlocked after getting a piece of furniture",
                             "jack"),
+    "Organ Grinder": NpcProfile("cats that have died",
+                                 "after losing an adventure (Frank unlocked)",
+                                 "organ"),
 }
 NPC_ORDER = list(NPC_PROFILES)
 # NPCs whose requirements the save format can't express yet.
 UNSUPPORTED = [
-    ("Butch", "cats far from home", "chapter progress is not in the save data"),
-    ("Organ Grinder", "dead cats", "collected automatically in-game"),
+    ("Butch", "cats that reached far chapters",
+     "per-cat chapter progress is not stored in the save — only an "
+     "adventure heuristic exists"),
 ]
 
 def _has_any_mutation_or_condition(cat) -> bool:
@@ -191,6 +195,8 @@ def _qualifies(cat, npc: str) -> bool:
         return _is_retired(cat)
     if npc == "Baby Jack":
         return _injured_stat_count(cat) >= 1
+    if npc == "Organ Grinder":
+        return bool(getattr(cat, "is_dead", False))
     return False
 
 
@@ -212,11 +218,13 @@ def _give_away_score(cat) -> float:
     return score
 
 
-def donation_report(cats, active: Optional[set] = None) -> List[DonationSlot]:
+def donation_report(cats, active: Optional[set] = None,
+                    dead: tuple = ()) -> List[DonationSlot]:
     """Rank every donation NPC's qualifying cats for the current roster.
 
-    ``active`` is an optional set of flag names from the save's npc_progress;
-    NPCs whose accept-flag is present are marked ``active=True``.
+    ``cats`` are the alive cats; ``dead`` (optional) supplies the cats that
+    have died, which the Organ Grinder takes. ``active`` is an optional set
+    of flag names from the save's npc_progress.
     """
     flags = set(active or ())
     slots: List[DonationSlot] = []
@@ -224,14 +232,16 @@ def donation_report(cats, active: Optional[set] = None) -> List[DonationSlot]:
 
     for npc in NPC_ORDER:
         profile = NPC_PROFILES[npc]
+        pool = dead if npc == "Organ Grinder" else cats
         slot = DonationSlot(npc=npc, wants=profile.wants,
                             unlock_note=profile.unlock_note,
                             active=any(flag.startswith(profile.slug)
                                        for flag in flags))
-        slot.candidates = [c for c in cats if _qualifies(c, npc)]
-        for c in slot.candidates:
-            if id(c) in keepers:
-                c._donate_keep_for_breeding = True
+        slot.candidates = [c for c in pool if _qualifies(c, npc)]
+        if npc != "Organ Grinder":
+            for c in slot.candidates:
+                if id(c) in keepers:
+                    c._donate_keep_for_breeding = True
         # protect the breeding pool: cats that are a top mate for someone
         # sort below expendable cats (but above pinned/must-breed).
         def _protected(c):
@@ -278,6 +288,8 @@ def recommendation_lines(cat) -> List[str]:
     if getattr(cat, "_donate_keep_for_breeding", False):
         lines.append("valuable for breeding (a top mate for someone) — "
                      "donate only if you really need to")
+    if getattr(cat, "is_dead", False):
+        lines.append("deceased — the Organ Grinder takes the dead")
     if not lines:
         lines.append(f"currently {display_location(cat)}")
     return lines

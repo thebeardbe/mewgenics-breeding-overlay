@@ -93,6 +93,19 @@ def test_baby_jack_takes_injured_cats():
     assert [c.name for c in slot.candidates] == ["Hurt"]
 
 
+def test_organ_grinder_takes_the_dead():
+    dead = cat("RIP", age=40)
+    dead.is_dead = True
+    report = donation_report([], dead=(dead,))
+    slot = _slot(report, "Organ Grinder")
+    assert [c.name for c in slot.candidates] == ["RIP"]
+    # dead cats must not leak into other NPCs' lists
+    assert _slot(report, "Tracy").count == 0
+    # Butch is still listed but unsupported
+    butch = _slot(report, "Butch")
+    assert not butch.supported and butch.count == 0
+
+
 def test_unsupported_npcs_listed_but_empty():
     report = donation_report([cat(age=1)])
     for slot in report:

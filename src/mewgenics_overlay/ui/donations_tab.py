@@ -85,9 +85,11 @@ class DonationsTab(QWidget):
     # ── data ───────────────────────────────────────────────────────────────
     def refresh(self, session) -> None:
         cats = session.alive if session is not None else []
+        dead = getattr(session, "dead_cats", []) if session is not None else []
         flags = getattr(session, "npc_progress_flags", set()) \
             if session is not None else set()
-        self._slots = donation_report(cats, active=flags) if cats else []
+        self._slots = donation_report(cats, active=flags, dead=tuple(dead)) \
+            if (cats or dead) else []
         self._rebuild_combo()
 
     def _rebuild_combo(self) -> None:
