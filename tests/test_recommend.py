@@ -12,11 +12,11 @@ def cat(name, defects=None):
 
 
 def row(partner, focused, *, risk=2.0, sevens=2.0, exp_avg=5.0, coi=0.0,
-        compatible=True):
+        compatible=True, game_compat=0.4):
     return SimpleNamespace(
         partner=partner, compatible=compatible,
         risk_pct=risk, seven_plus_total=sevens, expected_avg=exp_avg,
-        coi=coi,
+        game_compat=game_compat, coi=coi,
         pair_factors=SimpleNamespace(cat_a=focused, cat_b=partner),
     )
 
@@ -76,6 +76,19 @@ def test_stat_parser():
     assert effect_stat_net("+2 CON") == 2
     assert effect_stat_net("Start each battle with Immobilize") == 0
     assert effect_stat_net("") == 0
+
+
+def test_nightly_compat_chance_breaks_ties():
+    focus = cat("Focus")
+    picky = cat("Picky")     # great stats, but compat just above the gate
+    steady = cat("Steady")   # equal stats, far higher compat
+    rows = [
+        row(steady, focus, risk=2.0, sevens=3.0, exp_avg=5.0, game_compat=0.70),
+        row(picky, focus, risk=2.0, sevens=3.0, exp_avg=5.0, game_compat=0.06),
+    ]
+    rec = recommend(rows, focus, effect_of=effect_of)
+    assert rec.row.partner is steady
+    assert any("nightly" in b for b in rec.breakdown)
 
 
 def test_incompatible_ignored_and_none_case():

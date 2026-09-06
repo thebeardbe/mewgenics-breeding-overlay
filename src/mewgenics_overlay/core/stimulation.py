@@ -21,12 +21,24 @@ def room_stimulation_map(
     definitions: dict,
 ) -> Dict[str, float]:
     """room key -> furniture Stimulation value (may be negative)."""
-    out: Dict[str, float] = {}
+    env = room_env_map(furniture_by_room, definitions)
+    return {room: vals[0] for room, vals in env.items()}
+
+
+def room_env_map(
+    furniture_by_room: dict,
+    definitions: dict,
+) -> Dict[str, tuple]:
+    """room key -> (Stimulation, effective Comfort). Both drive breeding math:
+    Stimulation shapes inheritance; Comfort multiplies the per-roll chance."""
+    out: Dict[str, tuple] = {}
     for room, items in (furniture_by_room or {}).items():
         if not room:
             continue
         summary = summarize_furniture_room(
             items, definitions=definitions, room=room)
-        out[room] = float(summary.raw_effects.get("Stimulation", 0.0)
-                          or 0.0)
+        out[room] = (
+            float(summary.raw_effects.get("Stimulation", 0.0) or 0.0),
+            float(summary.effective_effects.get("Comfort", 0.0) or 0.0),
+        )
     return out

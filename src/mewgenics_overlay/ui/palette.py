@@ -62,7 +62,7 @@ from mewgenics_overlay.core.maladies import (
 from mewgenics_overlay.core.gameassets import GameAssets, locate_gpak
 from mewgenics_overlay.core.stimulation import (
     STIMULATION_DEFAULT,
-    room_stimulation_map,
+    room_env_map,
 )
 from mewgenics_overlay.core.recommend import recommend as recommend_best
 
@@ -103,12 +103,11 @@ _COL_TIPS = [
     "COI 0% leaves only the ~2% baseline. "
     "Green ≤ 5% (safe), amber 5–12% (caution), red > 12% (likely defect).",
     # Chance
-    "Per-roll breeding chance, as a percentage: each night the game makes "
-    "two rolls, each succeeding with ~compat × √(1 + 0.1×Comfort) — at "
-    "Comfort 0 that's just the raw compatibility, capped at 100%. "
-    "Compat = 0.15 × charisma × libido × lover bonus × sexuality. "
-    "A raw compat below 0.05 (= 5%) means the game won't attempt the pair. "
-    "Green = above the 5% line.",
+    "Per-roll breeding chance, as a percentage (two rolls per night): "
+    "compat × √(1 + 0.1×Comfort), using the selected breeding room's "
+    "Comfort. Compat = 0.15 × charisma × libido × lover bonus × sexuality "
+    "(Stimulation does NOT affect it). A raw compat below 0.05 (= 5%) means "
+    "the game won't attempt the pair. Green = above the 5% line.",
     # Exp/stat
     "Expected value of each of the kitten's 7 base stats (0–7 scale), "
     "using the better parent's stat with ~50% inheritance weight. "
@@ -225,9 +224,22 @@ def _fmt_compat(v: float) -> str:
     return f"{v:.3f}"
 
 
-def _fmt_chance(v: float) -> str:
-    """Per-roll breeding chance as a percentage (≈compat at Comfort 0)."""
-    return f"{max(0.0, min(100.0, v * 100.0)):.0f}%"
+def _fmt_chance(v: float, comfort: float = 0.0) -> str:
+    """Per-roll breeding chance % — compat × √(1+0.1×Comfort), capped."""
+    return f"{max(0.0, min(100.0, _roll_chance(v, comfort) * 100.0)):.0f}%"
+
+
+def _roll_chance(v: float, comfort: float = 0.0) -> float:
+    """Per-roll success chance (0..1): compat × √(1 + 0.1×Comfort)."""
+    roll = v * (1.0 + 0.1 * max(0.0, comfort)) ** 0.5
+    return max(0.0, min(1.0, roll))
+
+
+def _night_chance(v: float, comfort: float = 0.0) -> float:
+    """Chance the pair attempts breeding on a given night (both rolls must
+    succeed, so it is the per-roll chance squared)."""
+    roll = _roll_chance(v, comfort)
+    return roll * roll
 
 
 def _stats_html(cat: Cat) -> str:
@@ -261,7 +273,8 @@ class PaletteWindow(QWidget):
         self._assets_started = False
         self._asset_result: Optional[GameAssets] = None
         self._stim = STIMULATION_DEFAULT     # active breeding Stimulation
-        self._room_items: list = []          # combo entries (room, stimulation)
+        self._comfort = 0.0                  # active room Comfort (roll chance)
+        self._room_items: list = []          # combo entries (room, stim, comf)
 
         self.setWindowTitle("Mewgenics Breeding Overlay")
         flags = Qt.WindowType.FramelessWindowHint
@@ -797,27 +810,30 @@ class PaletteWindow(QWidget):
     def _refresh_room_combo(self) -> None:
         """Rebuild the room list from furniture (needs resources.gpak defs)."""
         prev_room = self._selected_room()
-        rooms_stim: dict = {}
+        rooms_env: dict = {}
         if self._session is not None and self._session.data is not None \
                 and self._ga is not None:
             fb = self._session.data.furniture_by_room or {}
             if fb and self._ga.furniture_data:
-                rooms_stim = room_stimulation_map(fb, self._ga.furniture_data)
+                rooms_env = room_env_map(fb, self._ga.furniture_data)
         self._room_combo.blockSignals(True)
         self._room_combo.clear()
         self._room_items = []
         self._room_combo.addItem("— Stim 50 (no room)")
         self._room_items.append(None)
-        for room in sorted(rooms_stim, key=lambda r: -rooms_stim[r]):
-            value = float(rooms_stim[room])
-            self._room_combo.addItem(f"{room} — Stim {value:g}")
-            self._room_items.append((room, value))
-        self._room_combo.setEnabled(bool(rooms_stim))
+        for room in sorted(rooms_env, key=lambda r: -rooms_env[r][0]):
+            stim, comfort = float(rooms_env[room][0]), float(rooms_env[room][1])
+            label = f"{room} — Stim {stim:g}"
+            if comfort:
+                label += f", Comf {comfort:g}"
+            self._room_combo.addItem(label)
+            self._room_items.append((room, stim, comfort))
+        self._room_combo.setEnabled(bool(rooms_env))
         # prefer the previous pick, else the focused cat's room
         target = None
-        if prev_room is not None and prev_room in rooms_stim:
+        if prev_room is not None and prev_room in rooms_env:
             target = prev_room
-        elif self._focus is not None and self._focus.room in rooms_stim:
+        elif self._focus is not None and self._focus.room in rooms_env:
             target = self._focus.room
         idx = 0
         for i, entry in enumerate(self._room_items):
@@ -825,11 +841,13 @@ class PaletteWindow(QWidget):
                 idx = i
                 break
         old_stim = self._stim_value()
+        old_comf = self._comfort_value()
         self._room_combo.setCurrentIndex(idx)
         self._room_combo.blockSignals(False)
         self._apply_room_selection()
-        if self._focus is not None and self._stim_value() != old_stim:
-            self._schedule_partners()   # numbers change with Stimulation
+        if self._focus is not None and (self._stim_value() != old_stim
+                                        or self._comfort_value() != old_comf):
+            self._schedule_partners()   # numbers change with Stim/Comfort
 
     def _on_room_changed(self, index: int) -> None:
         self._apply_room_selection()
@@ -843,8 +861,16 @@ class PaletteWindow(QWidget):
             entry = self._room_items[idx]
         if entry is None:
             self._stim = STIMULATION_DEFAULT
+            self._comfort = 0.0
         else:
             self._stim = float(entry[1])
+            self._comfort = float(entry[2])
+
+    def _comfort_value(self) -> float:
+        try:
+            return max(0.0, float(self._comfort))
+        except (TypeError, ValueError):
+            return 0.0
 
     # ── selection & search ─────────────────────────────────────────────────
     def set_focus_key(self, db_key: int) -> None:
@@ -1018,7 +1044,8 @@ class PaletteWindow(QWidget):
             return
         effect = self._effect_for_name
         overall = recommend_best(compat, self._focus, effect_of=effect,
-                                 stimulation=self._stim_value())
+                                 stimulation=self._stim_value(),
+                                 comfort=self._comfort_value())
         chosen = overall
         fallback = False
         if self._safe_mode:
@@ -1026,7 +1053,8 @@ class PaletteWindow(QWidget):
             safe_rows = [r for r in compat if r.risk_pct <= cap]
             safe_rec = (recommend_best(safe_rows, self._focus,
                                        effect_of=effect,
-                                       stimulation=self._stim_value())
+                                       stimulation=self._stim_value(),
+                                       comfort=self._comfort_value())
                         if safe_rows else recommend_best([], self._focus))
             if safe_rec.row is not None:
                 chosen = safe_rec
@@ -1157,7 +1185,9 @@ class PaletteWindow(QWidget):
 
             it_room = QTableWidgetItem(p.room or p.status)
             it_risk = QTableWidgetItem(f"{row.risk_pct:.1f}%" if ok else "—")
-            it_comp = QTableWidgetItem(_fmt_chance(row.game_compat) if ok else "—")
+            it_comp = QTableWidgetItem(
+                _fmt_chance(row.game_compat, self._comfort_value())
+                if ok else "—")
             it_exp = QTableWidgetItem(f"{row.expected_avg:.2f}" if ok else "—")
             it_7 = QTableWidgetItem(f"{row.seven_plus_total:.1f}" if ok else "—")
             defects_text = _defects_summary(row, self._stim_value())
@@ -1172,10 +1202,14 @@ class PaletteWindow(QWidget):
                 it_risk.setToolTip(
                     f"Birth-defect risk for this pair: {row.risk_pct:.1f}%."
                 )
+                _comfort = self._comfort_value()
                 it_comp.setToolTip(
                     f"Per-roll breeding chance: "
-                    f"{_fmt_chance(row.game_compat)} "
-                    f"(raw compat {row.game_compat:.3f}, two rolls per night).\n"
+                    f"{_fmt_chance(row.game_compat, _comfort)} "
+                    f"(two rolls per night ⇒ attempt chance "
+                    f"{_night_chance(row.game_compat, _comfort) * 100:.0f}%).\n"
+                    f"Raw compat {row.game_compat:.3f} at room Comfort "
+                    f"{_comfort:g}. "
                     + ("Above the 5% line — the game will attempt this pair."
                        if row.game_compat > 0.05
                        else "Below the 5% line — the game won't attempt it.")
@@ -1251,9 +1285,10 @@ class PaletteWindow(QWidget):
         lines.append(f"Family: {rel.label} · Δgen {rel.gen_gap:+d} "
                      f"· COI {row.coi * 100:.1f}%")
         lines.append(f"Birth-defect risk: {row.risk_pct:.1f}%")
-        lines.append(f"Per-roll breed chance: "
-                     f"{_fmt_chance(row.game_compat)} "
-                     f"(compat {row.game_compat:.3f} > 0.05)")
+        lines.append(
+            f"Breed attempt/night: {_night_chance(row.game_compat, self._comfort_value()) * 100:.0f}% "
+            f"(compat {row.game_compat:.3f} > 0.05)"
+        )
         if row.compatible:
             proj = row.pair_factors.projection
             ranges = "  ".join(
