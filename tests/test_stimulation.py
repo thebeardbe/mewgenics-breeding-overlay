@@ -42,13 +42,14 @@ def test_stimulation_lowers_single_carrier_defect_chance():
 
 
 def test_room_stimulation_map_sums_furniture():
-    item = SimpleNamespace(item_name="toy", room="Floor1_Large")
+    item = SimpleNamespace(item_name="toy", room="Floor1_Large", is_rare=False)
     defs = {"toy": SimpleNamespace(effects={"Stimulation": 40.0,
                                             "Appeal": 5.0})}
     out = room_stimulation_map({"Floor1_Large": [item]}, defs)
     assert out["Floor1_Large"] == pytest.approx(40.0)
     # rooms without furniture defs still appear with their raw sum (0)
     out2 = room_stimulation_map({"Attic": [SimpleNamespace(item_name="x",
-                                                           room="Attic")]},
+                                                           room="Attic",
+                                                           is_rare=False)]},
                                 {})
     assert out2["Attic"] == pytest.approx(0.0)

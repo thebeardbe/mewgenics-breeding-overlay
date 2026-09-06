@@ -1,16 +1,12 @@
+"""Save parser and core data model — vendored from the maintained MBM fork.
+
+Upstreams (both MIT):
+  * frankieg33/MewgenicsBreedingManager (original, archived v5.8.4)
+  * whyayala/MewgenicsBreedingManager (maintained fork, v5.9.5) — source of
+    this copy, updated for the Mewgenics 1.1 breeding-model overhaul.
+See vendor/_VENDORED.md for provenance. Only import paths differ from
+upstream; the body is upstream code and must stay re-vendorable.
 """
-Save parser and core data model for Mewgenics Breeding Manager.
-
-Extracted from mewgenics_manager.py to enable independent testing and
-separation of parsing/genetics logic from the Qt UI.
-
----
-Vendored from frankieg33/MewgenicsBreedingManager (MIT, v5.8.4).
-See vendor/_VENDORED.md for provenance. Only the import statement above
-was changed so the file can live inside this package.
----
-"""
-
 from __future__ import annotations
 
 import struct
@@ -163,6 +159,17 @@ class FurnitureItem:
     @property
     def is_placed(self) -> bool:
         return bool(self.room)
+
+    @property
+    def is_rare(self) -> bool:
+        """True for rare furniture variants, which have doubled stats.
+
+        header_fields[0] is a rarity marker: 0 for every normal item and 2
+        for rares. Verified against a live save — the value-2 rows correlate
+        perfectly with ``can_be_rare true`` GPAK definitions, and items that
+        cannot be rare (special_*) never carry it.
+        """
+        return len(self.header_fields) >= 1 and int(self.header_fields[0]) == 2
 
     @property
     def room_name_len(self) -> int:
@@ -382,6 +389,57 @@ def get_class_stat_mods(class_name: str) -> dict[str, int]:
     return _CLASS_STAT_MODS.get(class_name, {})
 
 
+# Basic-attack tokens that don't follow the "Basic*" naming convention
+# (defined in the gpak's data/abilities/basic_attacks.gon like the rest).
+_BASIC_ATTACK_EXTRA_TOKENS = frozenset({"tinkerercraft"})
+
+
+def is_basic_attack_token(name: str) -> bool:
+    """True for basic-attack ability tokens (class basics included).
+
+    Basic attacks come with the cat's class and are never inherited by
+    kittens, so trait lists and inheritance math must skip them.
+    """
+    lowered = str(name or "").lower()
+    return lowered.startswith("basic") or lowered in _BASIC_ATTACK_EXTRA_TOKENS
+
+
+# Class strings that can appear in the save's trailing class field. The gpak
+# classes.gon is the live source (via _CLASS_STAT_MODS); this builtin list
+# keeps the locator working when no game data is loaded.
+# Note: "Colorless" is the save's INTERNAL token for an unclassed cat — the
+# game UI presents that state as "Collarless" (classes are granted by
+# collars). The parser maps it to cat_class = "", so neither spelling is
+# ever displayed.
+_KNOWN_CLASS_STRINGS = (
+    "Colorless", "Fighter", "Tank", "Monk", "Butcher", "Medic", "Druid",
+    "Necromancer", "Psychic", "Hunter", "Thief", "Mage", "Tinkerer",
+    "Jester",
+)
+
+
+def _find_class_string_end(raw: bytes) -> tuple[int, str] | None:
+    """Locate the trailing class field and return (end_offset, class_name).
+
+    The field is stored as u32 length + u32 zero-pad + UTF-8 name. Most cats
+    have it ending exactly _CLASS_STRING_TAIL_OFFSET bytes before the blob
+    end, but some blobs (retired cats with trailing equipment records, and a
+    one-byte variant) carry extra data after it — so fixed end-of-blob
+    offsets miss the field entirely, which also broke the age and death-day
+    reads anchored the same way. Searching for the last occurrence of the
+    length-prefixed pattern over the known class names is layout-independent.
+    """
+    best: tuple[int, str] | None = None
+    for name in set(_KNOWN_CLASS_STRINGS) | set(_CLASS_STAT_MODS):
+        token = struct.pack("<II", len(name), 0) + name.encode()
+        pos = raw.rfind(token)
+        if pos >= 0:
+            end = pos + len(token)
+            if best is None or end > best[0]:
+                best = (end, name)
+    return best
+
+
 def _parse_class_stat_mods_gon(content: str) -> dict[str, dict[str, int]]:
     """Parse a class GON file and extract stat_mods for each class."""
     result: dict[str, dict[str, int]] = {}
@@ -428,10 +486,70 @@ def _load_class_stat_mods(file_obj, file_offsets: dict[str, tuple[int, int]]) ->
     return merged
 
 
+# {gpak_category: label} for name disambiguation suffixes.
+_MUT_CATEGORY_LABELS: dict[str, str] = {
+    "texture": "Fur", "body": "Body", "head": "Head", "tail": "Tail",
+    "legs": "Legs", "eyes": "Eyes", "eyebrows": "Eyebrows",
+    "ears": "Ears", "mouth": "Mouth",
+}
+
+# {(gpak_category, mutation_id): suffix} for mutations whose display name
+# collides with a DIFFERENT-effect mutation elsewhere (the game data reuses
+# comments like //slender across eleven body parts, and //Pop Eyes for two
+# different eye mutations). Rebuilt by set_visual_mut_data.
+_VISUAL_MUT_NAME_DISAMBIG: dict[tuple[str, int], str] = {}
+
+
+def _build_visual_mut_name_disambiguation(
+    data: dict[str, dict[int, tuple]],
+) -> dict[tuple[str, int], str]:
+    """Build name-disambiguation suffixes from the visual mutation tables.
+
+    Same-name entries with identical effects stay merged (arms/legs share one
+    limb table, so "Hooves" is one trait). Same-name entries with different
+    effects get a stable identity suffix: the category label when categories
+    differ ("Slender (Eyes)"), plus the effect text or id when two distinct
+    mutations share a category ("Pop Eyes (+1 Thorns)").
+    """
+    groups: dict[str, list[tuple[str, int, str, str]]] = {}
+    for category, table in (data or {}).items():
+        for mid, info in table.items():
+            tup = tuple(info)
+            raw_name = str(tup[0] if tup else "").strip()
+            if not raw_name or re.match(r"(?i)^mutation \d+$", raw_name):
+                continue
+            sig = str(tup[2]).strip() if len(tup) >= 3 and str(tup[2] or "").strip() else (
+                str(tup[1]).strip() if len(tup) >= 2 else "")
+            groups.setdefault(raw_name.casefold(), []).append(
+                (category, int(mid), sig.casefold(), sig))
+
+    out: dict[tuple[str, int], str] = {}
+    for items in groups.values():
+        if len(items) < 2 or len({sig for _, _, sig, _ in items}) <= 1:
+            continue  # unique name, or same effect everywhere — keep merged
+        by_cat: dict[str, list[tuple[int, str, str]]] = {}
+        for cat, mid, sig, sig_disp in items:
+            by_cat.setdefault(cat, []).append((mid, sig, sig_disp))
+        single_category = len(by_cat) == 1
+        for cat, ml in by_cat.items():
+            label = _MUT_CATEGORY_LABELS.get(cat, cat.title())
+            if len({sig for _, sig, _ in ml}) <= 1:
+                # One distinct effect in this category — the label suffices.
+                for mid, _sig, _disp in ml:
+                    out[(cat, mid)] = label
+            else:
+                for mid, _sig, sig_disp in ml:
+                    detail = sig_disp if 0 < len(sig_disp) <= 24 else f"#{mid}"
+                    out[(cat, mid)] = detail if single_category else f"{label}, {detail}"
+    return out
+
+
 def set_visual_mut_data(data: dict[str, dict[int, tuple[str, str, str, bool]]]):
     """Update the visual mutation lookup data (called after gpak loading)."""
     global _VISUAL_MUT_DATA, _GLOBALLY_AMBIGUOUS_MUTATION_NAMES
     _VISUAL_MUT_DATA = data
+    _VISUAL_MUT_NAME_DISAMBIG.clear()
+    _VISUAL_MUT_NAME_DISAMBIG.update(_build_visual_mut_name_disambiguation(data))
     # Extend ambiguous set with GPAK names that appear across categories
     gpak_name_cats: dict[str, set[str]] = {}
     for category, muts in data.items():
@@ -617,6 +735,44 @@ def _parse_swf_symbol_names(raw: bytes) -> list[str]:
     return names
 
 
+# In-game text renders [img:token] markup as inline icons (the shield glyph,
+# stat glyphs, ...). The app can't draw them inside plain-text labels, so map
+# each token to a readable word — never strip them, or "Gain +2 [img:shield]"
+# degrades to the meaningless "Gain +2".
+_IMG_TOKEN_LABELS: dict[str, str] = {
+    "str": "STR", "dex": "DEX", "con": "CON", "int": "INT",
+    "spd": "SPD", "cha": "CHA", "lck": "LCK",
+    "shield": "Shield",
+    "divineshield": "Divine Shield",
+    "stimulation": "Stimulation",
+    "comfort": "Comfort",
+    "appeal": "Appeal",
+    "health": "Health",
+    "evolution": "Evolution",
+    "champion": "Champion",
+    "elite": "Elite",
+    "retired": "Retired",
+    "male": "Male",
+    "female": "Female",
+}
+_IMG_TAG_RE = re.compile(r"\[img:([^\]]+)\]")
+
+
+def _replace_img_tokens(text: str) -> str:
+    """Replace [img:...] icon markup with readable text labels."""
+
+    def _sub(match: re.Match) -> str:
+        token = match.group(1).strip()
+        label = _IMG_TOKEN_LABELS.get(token.lower())
+        if label is None:
+            # Unknown token (e.g. a format placeholder like {str_aux}):
+            # degrade to a readable title-cased word rather than dropping it.
+            label = token.strip("{}").replace("_", " ").title()
+        return label
+
+    return _IMG_TAG_RE.sub(_sub, str(text or ""))
+
+
 def _resolve_game_string(value: str, game_strings: dict[str, str]) -> str:
     """Resolve chained game-string references of the form [KEY]."""
     current = value.strip()
@@ -695,6 +851,9 @@ def _parse_mutation_gon(
     mutation_strings = mutation_strings or {}
     csv_prefix = f"MUTATION_{category.upper()}_"
 
+    def _localized_desc(raw: str) -> str:
+        return _replace_img_tokens(_resolve_game_string(raw, game_strings)).strip().rstrip(".")
+
     def _extract_block(start_pos: int) -> tuple[str, int]:
         depth, end = 1, start_pos
         while end < len(content) and depth > 0:
@@ -724,9 +883,9 @@ def _parse_mutation_gon(
         is_birth_defect = bool(re.search(r"\btag\s+birth_defect\b", block))
         csv_key = f"{csv_prefix}{slot_id}_DESC"
         if csv_key in mutation_strings:
-            stat_desc = _resolve_game_string(mutation_strings[csv_key], game_strings).strip().rstrip(".")
+            stat_desc = _localized_desc(mutation_strings[csv_key])
         elif csv_key in game_strings:
-            stat_desc = _resolve_game_string(game_strings[csv_key], game_strings).strip().rstrip(".")
+            stat_desc = _localized_desc(game_strings[csv_key])
         else:
             stat_desc = gon_stats
         result[slot_id] = (raw_name, stat_desc, gon_stats, is_birth_defect)
@@ -752,13 +911,13 @@ def _parse_mutation_gon(
             name_match = re.search(r"//\s*(.+)", block)
             raw_name = name_match.group(1).strip().title() if name_match else "Missing Part"
             raw_name = re.sub(r"\s*\(.*", "", raw_name).strip() or raw_name
-            stat_desc = _resolve_game_string(mutation_strings[csv_key_m2], game_strings).strip().rstrip(".")
+            stat_desc = _localized_desc(mutation_strings[csv_key_m2])
             result[0xFFFFFFFE] = (raw_name, stat_desc, _gon_stat_string(block), True)
         elif csv_key_m2 in game_strings:
             name_match = re.search(r"//\s*(.+)", block)
             raw_name = name_match.group(1).strip().title() if name_match else "Missing Part"
             raw_name = re.sub(r"\s*\(.*", "", raw_name).strip() or raw_name
-            stat_desc = _resolve_game_string(game_strings[csv_key_m2], game_strings).strip().rstrip(".")
+            stat_desc = _localized_desc(game_strings[csv_key_m2])
             result[0xFFFFFFFE] = (raw_name, stat_desc, _gon_stat_string(block), True)
         else:
             _block_to_entry(0xFFFFFFFE, block)
@@ -972,10 +1131,13 @@ def summarize_furniture_room(
     for item in items:
         definition = definitions.get(item.item_name) if definitions else None
         effects = definition.effects if definition is not None else {}
+        # Rare furniture has doubled stats (positive and negative alike).
+        multiplier = 2.0 if item.is_rare else 1.0
         for key, value in effects.items():
-            all_effects[key] = all_effects.get(key, 0.0) + float(value)
+            scaled = float(value) * multiplier
+            all_effects[key] = all_effects.get(key, 0.0) + scaled
             if key in raw_effects:
-                raw_effects[key] += float(value)
+                raw_effects[key] += scaled
 
     crowd_penalty = max(0, int(cat_count) - 4)
     effective_effects = dict(raw_effects)
@@ -1118,9 +1280,20 @@ def _read_visual_mutation_entries(table: list[int]) -> list[dict[str, object]]:
             else:
                 display_name = f"{part_label} {mutation_id}"
 
-        if is_defect:
-            # Defects are shown in-game as part-level defect labels.
-            display_name = f"{part_label} Birth Defect"
+        if is_defect and _is_synthetic_visual_mutation_name(display_name, part_label, slot_label, mutation_id):
+            # No specific name resolved — fall back to the part-level label.
+            # When the GON comment or catalog DID provide a name ("Cataracts",
+            # "Blob Legs"), keep it: trait lists key ratings by display name,
+            # and the old unconditional "{part} Birth Defect" label collapsed
+            # every distinct defect on a body part into one unratable row.
+            display_name = f"No {part_label}" if is_sentinel_missing else f"{part_label} Birth Defect"
+
+        # Same-name mutations with different effects ("Slender" on eleven
+        # parts, two different "Pop Eyes") get a stable identity suffix so
+        # trait lists can rate each one separately.
+        _disambig = _VISUAL_MUT_NAME_DISAMBIG.get((gpak_category, mutation_id))
+        if _disambig:
+            display_name = f"{display_name} ({_disambig})"
 
         display_name = str(display_name).strip() or f"{slot_label} {mutation_id}"
         if logger.isEnabledFor(logging.DEBUG) and (verbose_logs or not _is_synthetic_visual_mutation_name(display_name, part_label, slot_label, mutation_id)):
@@ -1177,6 +1350,17 @@ _MUTATION_STAT_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Matches descriptions that are nothing but a stat-delta list ("+2 CON, -1
+# CHA"). Detail-text delta parsing must be restricted to these: conditional
+# effect sentences ("Gain +1 INT at the end of each turn") name stats too,
+# but describe in-battle effects that do NOT contribute to the character
+# sheet's totals.
+_PURE_STAT_DELTA_RE = re.compile(
+    r"^\s*[+-]\s*\d+\s*(?:" + "|".join(sorted(_MUTATION_STAT_ALIASES, key=len, reverse=True)) + r")"
+    r"(?:\s*,\s*[+-]\s*\d+\s*(?:" + "|".join(sorted(_MUTATION_STAT_ALIASES, key=len, reverse=True)) + r"))*\s*$",
+    re.IGNORECASE,
+)
+
 
 def _parse_mutation_stat_delta(detail: str) -> dict[str, int]:
     """Parse stat deltas from a mutation/defect detail string.
@@ -1223,11 +1407,16 @@ def _mutation_stat_bonus_from_entries(entries: list[dict[str, object]]) -> dict[
         if key in seen:
             continue
         seen.add(key)
-        # Prefer gon_stats (raw GON block data) over detail (CSV description)
+        # Prefer gon_stats (raw GON block data) over detail (CSV description).
+        # The detail fallback only applies to pure stat lists ("+2 CON, -1
+        # CHA") — conditional sentences name stats for in-battle effects that
+        # must not be folded into character-sheet totals.
         gon = str(entry.get("gon_stats") or "")
         deltas = _parse_mutation_stat_delta(gon) if gon else {}
         if not deltas:
-            deltas = _parse_mutation_stat_delta(str(entry.get("detail") or ""))
+            detail = str(entry.get("detail") or "")
+            if _PURE_STAT_DELTA_RE.match(detail):
+                deltas = _parse_mutation_stat_delta(detail)
         for stat, delta in deltas.items():
             bonus[stat] = bonus.get(stat, 0) + delta
     return bonus
@@ -1237,6 +1426,12 @@ def _is_synthetic_visual_mutation_name(display_name: str, part_label: str, slot_
     """Return True when the resolved name is still just a generic fallback."""
     normalized = str(display_name or "").strip().casefold()
     if not normalized:
+        return True
+
+    # Any bare "<word> <number>" name is a synthetic placeholder regardless of
+    # which label variant produced it (the fallback catalog stores names like
+    # "Eyes 702" built from labels that differ from the current part_label).
+    if re.fullmatch(r"[a-z]+ \d+", normalized):
         return True
 
     part = str(part_label or "").strip()
@@ -1255,10 +1450,13 @@ def _is_synthetic_visual_mutation_name(display_name: str, part_label: str, slot_
 
 def _visual_mutation_chip_items(entries: list[dict[str, object]]) -> list[tuple[str, str, bool]]:
     """Return [(display_text, tooltip, is_defect), ...] from visual mutation entries."""
+    # Group by (display name, id) rather than (slot group, id): the same limb
+    # mutation on both arm and leg slots is one trait — two chips would make
+    # the trait list fragment it into slot-suffixed variants.
     grouped: dict[tuple[str, int], list[dict[str, object]]] = {}
     order: list[tuple[str, int]] = []
     for entry in entries:
-        key = (str(entry["group_key"]), int(entry["mutation_id"]))
+        key = (str(entry["name"]), int(entry["mutation_id"]))
         if key not in grouped:
             grouped[key] = []
             order.append(key)
@@ -1335,8 +1533,29 @@ def _appearance_preview_text(a_names: list[str], b_names: list[str]) -> str:
 
 
 def _stimulation_inheritance_weight(stimulation: float) -> float:
+    """Chance the kitten takes the favored side of a part/stat inheritance roll.
+
+    Game formula: (100 + stim) / (200 + |stim|), i.e. 50/50 at 0 stimulation,
+    approaching 100% as stimulation grows. The |stim| in the denominator and
+    the clamp mirror the game's 1.1.21016 fix for negative stimulation below
+    -200 flipping probabilities past 100%.
+    """
     stim = float(stimulation)
-    return (1.0 + 0.01 * stim) / (2.0 + 0.01 * stim)
+    weight = (1.0 + 0.01 * stim) / (2.0 + 0.01 * abs(stim))
+    return max(0.0, min(1.0, weight))
+
+
+def _defect_inheritance_weight(stimulation: float, coi: float) -> float:
+    """Chance the kitten inherits a parent's BIRTH DEFECT part (vs a normal one).
+
+    Since 1.1, birth defects roll with an effective stimulation of
+    ``stim - 2 x inbreeding%`` — stimulation must offset double the kitten's
+    inbreeding percentage to suppress defect inheritance, so inbred kittens
+    are significantly more likely to inherit parental defects. *coi* is the
+    kinship coefficient in [0, 1] (see kinship_coi).
+    """
+    effective = float(stimulation) - 2.0 * max(0.0, float(coi)) * 100.0
+    return _stimulation_inheritance_weight(effective)
 
 
 def _inheritance_candidates(
@@ -1849,13 +2068,21 @@ class Cat:
         self.defects = defect_display_names
         self.defect_chip_items = [(text, tip) for text, tip, is_def in visual_items if is_def]
 
+        # The trailing fields (creation_day/age, class string, death_day) sit
+        # at fixed offsets relative to the class field, which normally ends
+        # _CLASS_STRING_TAIL_OFFSET bytes before the blob end — but some
+        # blobs carry extra data after it (retired cats' equipment records),
+        # so anchor on the located class field instead of the raw blob end.
+        _class_field = _find_class_string_end(raw)
+        _tail_end = (_class_field[0] + _CLASS_STRING_TAIL_OFFSET) if _class_field else len(raw)
+
         # Extract age from creation_day stored near the end of the blob
         if current_day is not None:
             try:
                 eternal_youth = any(d.lower() == "eternalyouth" for d in (getattr(self, "disorders", None) or []))
                 creation_day_candidates: list[int] = []
                 for offset_from_end in [103, 102, 104, 101, 105, 100, 106, 107, 108, 109, 110]:
-                    pos = len(raw) - offset_from_end
+                    pos = _tail_end - offset_from_end
                     if pos + 4 > len(raw) or pos < 0:
                         continue
                     creation_day = struct.unpack_from('<I', raw, pos)[0]
@@ -1867,33 +2094,45 @@ class Cat:
 
         self.parsed_age = self.age
 
-        # Extract class name from a fixed offset before blob end.
-        # The class string ends exactly 115 bytes before the blob end
-        # (stored as u32 length + u32 zero-pad + UTF-8 class name).
+        # Class name from the located trailing class field (see _tail_end
+        # above). The legacy fixed-offset scan remains as a fallback for
+        # blobs where no known class string matched.
         self.cat_class: str = ""
         self.class_stat_mods: dict[str, int] = {}
         try:
-            class_str_end = len(raw) - _CLASS_STRING_TAIL_OFFSET
-            for class_len in range(3, 30):
-                prefix_pos = class_str_end - class_len - 8
-                if prefix_pos < 0:
-                    break
-                length = struct.unpack_from('<I', raw, prefix_pos)[0]
-                zero = struct.unpack_from('<I', raw, prefix_pos + 4)[0]
-                if length == class_len and zero == 0:
-                    class_name = raw[prefix_pos + 8:prefix_pos + 8 + class_len].decode('utf-8', errors='replace')
-                    if class_name != "Colorless":
-                        self.cat_class = class_name
-                        self.class_stat_mods = _CLASS_STAT_MODS.get(class_name, {})
-                    break
+            class_name = ""
+            if _class_field is not None:
+                class_name = _class_field[1]
+            else:
+                class_str_end = len(raw) - _CLASS_STRING_TAIL_OFFSET
+                for class_len in range(3, 30):
+                    prefix_pos = class_str_end - class_len - 8
+                    if prefix_pos < 0:
+                        break
+                    length = struct.unpack_from('<I', raw, prefix_pos)[0]
+                    zero = struct.unpack_from('<I', raw, prefix_pos + 4)[0]
+                    if length == class_len and zero == 0:
+                        class_name = raw[prefix_pos + 8:prefix_pos + 8 + class_len].decode('utf-8', errors='replace')
+                        break
+            if class_name and class_name != "Colorless":
+                self.cat_class = class_name
+                self.class_stat_mods = _CLASS_STAT_MODS.get(class_name, {})
+                # The character sheet applies class stat modifiers on top of
+                # base/mod/sec (they are not stored in any of the save's stat
+                # arrays), so fold them into total_stats like the mutation
+                # bonuses above.
+                for _stat, _delta in self.class_stat_mods.items():
+                    if _stat in self.total_stats:
+                        self.total_stats[_stat] += _delta
         except Exception:
             logger.debug("Cat %s: class extraction failed", cat_key, exc_info=True)
 
-        # Death day: an i64 at offset +8 from creation_day (len(raw) - 95).
-        # Value of -1 means alive; a non-negative value is the day the cat died.
+        # Death day: an i64 20 bytes after the class field ends (95 bytes
+        # before the anchored tail end). Value of -1 means alive; a
+        # non-negative value is the day the cat died.
         self.death_day: Optional[int] = None
         try:
-            dd_pos = len(raw) - 95
+            dd_pos = _tail_end - 95
             if dd_pos >= 0 and dd_pos + 8 <= len(raw):
                 dd = struct.unpack_from('<q', raw, dd_pos)[0]
                 max_day = current_day if current_day is not None else 100000
@@ -2362,14 +2601,21 @@ def get_grandparents(cat: Cat) -> list[Cat]:
 def can_breed(a: Cat, b: Cat) -> tuple[bool, str]:
     """Return (ok, reason). reason is non-empty only when ok is False.
 
-    Game rule (per wiki): compatibility = 0.15 * charisma * libido * lover_mult * sexuality_mult
-    where sexuality_mult = cos(0.5*pi*sexuality_coeff) for opposite-sex pairs
-    and sin(0.5*pi*sexuality_coeff) for same-sex pairs.  A breeding attempt
-    succeeds when compatibility > 0.05.
+    "Can breed" means "can produce a kitten", which is what every caller
+    (room optimizer, planners, pair browsers) actually needs.
 
-    So a "straight" cat (coeff ~0) has sin ~0 → same-sex compatibility ~0 →
-    hard block.  A bi/gay cat has non-trivial sin and *can* produce offspring
-    with a same-sex partner.  Symmetric rule for gay+gay opposite-sex.
+    Game rule (per wiki): compatibility = 0.15 * charisma * libido * lover_mult
+    * sexuality_mult, where sexuality_mult = cos(0.5*pi*sexuality_coeff) for
+    opposite-sex pairs and sin(0.5*pi*sexuality_coeff) for same-sex pairs. A
+    mating attempt succeeds when compatibility > 0.05.
+
+    Crucially, a successful *mating* is not the same as a kitten: per the
+    wiki, "Male-male and Female-female pairs increase the chance of Gay
+    Strays, but do not produce a kitten." So same-sex pairs are rejected here
+    however high their compatibility — the Gay Stray they may attract is a
+    stray with class-derived abilities, not offspring that inherits from
+    these parents. Pairs involving a neutral-gender ("?") cat are not
+    same-sex and still produce kittens normally.
     """
     if a is b:
         return False, "Cannot pair a cat with itself"
@@ -2379,17 +2625,8 @@ def can_breed(a: Cat, b: Cat) -> tuple[bool, str]:
     if ga == "?" or gb == "?":
         return True, ""
 
-    same_gender = ga == gb
-    if same_gender:
-        sa = (getattr(a, "sexuality", None) or "straight").lower()
-        sb = (getattr(b, "sexuality", None) or "straight").lower()
-        if sa == "straight" and sb == "straight":
-            return False, f"Both cats are straight — very low same-sex compatibility"
-        if sa == "straight":
-            return True, f"{a.name} is straight — very low same-sex compatibility"
-        if sb == "straight":
-            return True, f"{b.name} is straight — very low same-sex compatibility"
-        return True, ""
+    if ga == gb:
+        return False, "Same-sex pair — mates but produces no kitten (raises Gay Stray chance)"
 
     # Opposite-sex pair
     sa = (getattr(a, "sexuality", None) or "straight").lower()

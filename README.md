@@ -11,7 +11,12 @@ Click a cat in-game, summon the overlay (`Ctrl+Shift+B` on Windows, tray icon el
 
 Every column is sortable, headers explain each metric, and the roster refreshes automatically when the game saves. Saves are **read-only**: the overlay parses copies and never writes to your `.sav` files.
 
-Built on the parser/genetics engine of the MIT-licensed [MewgenicsBreedingManager](https://github.com/frankieg33/MewgenicsBreedingManager).
+> **Same-sex pairs** (male-male / female-female) mate but never produce a
+> kitten — they raise the Gay-Stray chance instead (1.1 rule) — so they're
+> listed under blocked pairs with that reason. Neutral-gender cats pair
+> normally with anyone.
+
+Built on the parser/genetics engine of the MIT-licensed [MewgenicsBreedingManager](https://github.com/frankieg33/MewgenicsBreedingManager) — synced to the [maintained fork by whyayala](https://github.com/whyayala/MewgenicsBreedingManager) (v5.9.5) for the Mewgenics 1.1 breeding model.
 
 ## Install & run
 
@@ -105,4 +110,4 @@ MEWGENICS_SAMPLE_SAV=/path/to/a/save.sav pytest tests/
 
 ## License
 
-MIT. Parser/genetics engine vendored from [MewgenicsBreedingManager](https://github.com/frankieg33/MewgenicsBreedingManager) (MIT, © 2026 frankieg33) — see `src/mewgenics_overlay/vendor/_VENDORED.md`.
+MIT. Parser/genetics engine vendored from [MewgenicsBreedingManager](https://github.com/frankieg33/MewgenicsBreedingManager) (MIT, © 2026 frankieg33) and its [maintained fork by whyayala](https://github.com/whyayala/MewgenicsBreedingManager) (MIT, v5.9.5, game-1.1 rules) — see `src/mewgenics_overlay/vendor/_VENDORED.md`.

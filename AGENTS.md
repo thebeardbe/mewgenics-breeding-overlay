@@ -85,8 +85,8 @@ src/mewgenics_overlay/
                           nightly attempt chance, defect stat-sign)
     donations.py          donation matrix: roster-relative strength, inbredness,
                           living offspring, line quality, defect signs, pin keepers
-    vendor/               MBM parser/genetics (MIT) — save_parser.py, breeding.py,
-                          visual_mutation_catalog.py + _VENDORED.md (provenance)
+    vendor/               MBM parser/genetics (MIT; frankieg33 v5.8.4, synced to the
+                          whyayala fork v5.9.5 for game-1.1 rules) + _VENDORED.md
   ui/
     theme.py              theme registry: "film" (Noir·Bright), "noir" (Noir·Dark),
                           C_* colour globals, STYLESHEET, risk_color, wrap_tooltip

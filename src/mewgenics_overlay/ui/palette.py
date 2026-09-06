@@ -785,6 +785,10 @@ class PaletteWindow(QWidget):
             f"<a href='https://github.com/frankieg33/MewgenicsBreedingManager'>"
             f"MewgenicsBreedingManager</a> (MIT, © 2026 frankieg33) — "
             f"vendored; provenance in <code>vendor/_VENDORED.md</code></li>"
+            f"<li>1.1 breeding-model sync: "
+            f"<a href='https://github.com/whyayala/MewgenicsBreedingManager'>"
+            f"whyayala's maintained fork</a> (v5.9.5) — same-sex rule, "
+            f"gender-role compat gate, neutral-sexuality fix</li>"
             f"<li>Save-format research: "
             f"<a href='https://github.com/pzx521521/mewgenics-save-editor'>"
             f"pzx521521/mewgenics-save-editor</a> and the community</li>"
@@ -1521,30 +1525,6 @@ class PaletteWindow(QWidget):
                 self._table.setItem(r_i, col, it)
         self._update_sort_indicator()
 
-    def _same_sex_note(self, row: PartnerRow) -> str:
-        """Explain same-sex pairs (only possible with bi/gay cats)."""
-        factors = row.pair_factors
-        if factors is None:
-            return ""
-        a, b = factors.cat_a, factors.cat_b
-        ga = (getattr(a, "gender", "?") or "?").lower()
-        gb = (getattr(b, "gender", "?") or "?").lower()
-        if ga == "?" or gb == "?" or ga != gb:
-            return ""
-        la = sexuality_label(getattr(a, "sexuality_raw", None))
-        lb = sexuality_label(getattr(b, "sexuality_raw", None))
-        nonstraight = [n for n, l in ((a.name, la), (b.name, lb)) if l != "straight"]
-        if not nonstraight:
-            return ""   # both straight same-sex pairs are blocked already
-        if la == lb:
-            who = f"both are {la}"
-        else:
-            who = f"{nonstraight[0]} is " + \
-                  (la if nonstraight[0] == a.name else lb)
-        return (f"Same-sex pair — this works: {who}. "
-                "(In-game, roles are picked at random and bi/gay cats can "
-                "breed same-sex.)")
-
     @staticmethod
     def _family_tooltip(row: PartnerRow) -> str:
         """Row-specific facts only; the COI weighting explanation lives in the
@@ -1593,9 +1573,6 @@ class PaletteWindow(QWidget):
             )
             lines.append(f"Expected kitten stats: {ranges}")
             lines.append(f"Expected ≥7 stats: {row.seven_plus_total:.1f}")
-        note = self._same_sex_note(row)
-        if note:
-            lines.append(note)
         malady = self._pair_malady_lines(row, self._stim_value())
         if malady:
             lines.append("")
@@ -1699,9 +1676,6 @@ class PaletteWindow(QWidget):
         rel = row.relation
         head = (f"{row.partner.name}: {rel.label} · Δgen {rel.gen_gap:+d}"
                 f" · COI {row.coi * 100:.1f}%")
-        same_sex = self._same_sex_note(row)
-        if same_sex:
-            head += "\n" + same_sex
         if row.compatible:
             proj = row.pair_factors.projection
             text = (
