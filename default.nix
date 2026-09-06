@@ -25,7 +25,7 @@ let
 in
 py.buildPythonApplication {
   pname = "mewgenics-overlay";
-  version = "0.1.30";
+  version = "0.1.31";
   inherit src;
   format = "pyproject";
 

@@ -32,7 +32,8 @@ _COL_TIPS = [
     "donation advice — use the 'Donate?' column for that.",
     "Give-away order, weakest first: Donate = safe to part with · Maybe = "
     "borderline · Keep = worth holding on to (breeding-valuable, pinned or "
-    "must-breed). Colours: green = donate · amber = maybe · grey = keep.",
+    "must-breed). Colours: green = donate · amber = maybe · grey = keep. "
+    "The Why column explains each rating.",
     "Why this cat qualifies for this NPC. Cats valuable for breeding (or "
     "pinned / must-breed) sink to the bottom — donate them only if you must.",
 ]
@@ -169,6 +170,24 @@ class DonationsTab(QWidget):
             return "Maybe"
         return "Keep"
 
+    @staticmethod
+    def _advice_lines(cat, rating: str) -> list:
+        """Why this rating? Human-readable reason per Donate? verdict."""
+        if rating == "Keep":
+            if getattr(cat, "is_pinned", False):
+                return ["Pinned — you marked this cat to keep."]
+            if getattr(cat, "must_breed", False):
+                return ["Marked as must-breed — kept for breeding."]
+            if getattr(cat, "_donate_keep_for_breeding", False):
+                return ["A top breeding mate for another cat — donate only "
+                        "if forced."]
+            return ["Among the strongest here — more valuable kept for "
+                    "breeding."]
+        if rating == "Maybe":
+            return ["Not clearly expendable nor essential — donate if you "
+                    "need the space."]
+        return ["One of the weakest / least useful here — a fine donation."]
+
     def _render_slot(self, slot) -> None:
         self._table.setRowCount(0)
         cats = slot.candidates
@@ -183,9 +202,10 @@ class DonationsTab(QWidget):
             base = sum(getattr(cat, "base_stats", {}).values())
             inj = sum(1 for s, v in (getattr(cat, "base_stats", {}) or {}).items()
                       if (getattr(cat, "total_stats", {}) or {}).get(s, v) < v)
-            why = "\n".join("• " + line
-                             for line in recommendation_lines(cat))
             rating = self._donate_rating(cat, r_i, total)
+            why_lines = ["• " + line for line in self._advice_lines(cat, rating)]
+            why_lines += ["• " + line for line in recommendation_lines(cat)]
+            why = "\n".join(why_lines)
             cells = [cat.name, cat_status(cat), str(getattr(cat, "age", "?")),
                      str(base), rating, why]
             for c_i, text in enumerate(cells):
@@ -205,6 +225,8 @@ class DonationsTab(QWidget):
                  f"Stats: {base} · age {getattr(cat, 'age', '?')}"]
         if rating:
             lines.append(f"Donate? → {rating}")
+            lines += ["  • " + line
+                      for line in DonationsTab._advice_lines(cat, rating)]
         lines.append(f"Suitable for: {slot.npc} ({slot.wants})")
         why = recommendation_lines(cat)
         if why:
