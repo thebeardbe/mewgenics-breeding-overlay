@@ -20,6 +20,10 @@ DEFAULTS = {
     "order": "risk",            # partner sort: "risk" (safe first) or "quality"
     "max_partners": 100,
     "show_blocked": 3,
+    # Where the About-box "Report a problem" button points. Defaults to the
+    # GitHub issues page; point it at your own Bugbox (https://<domain>/report)
+    # once deployed so players skip the GitHub account entirely.
+    "report_url": None,
 }
 
 

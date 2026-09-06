@@ -794,6 +794,8 @@ class PaletteWindow(QWidget):
             f"</ul>"
             f"<p>Licensed MIT. Saves are read-only — this tool never "
             f"modifies them.</p>"
+            f"<p>Found a problem? Use <b>🐞 Report a problem</b> below — "
+            f"no account needed.</p>"
         )
         dialog = QDialog(self)
         dialog.setWindowTitle("About")
@@ -806,9 +808,54 @@ class PaletteWindow(QWidget):
         layout.addWidget(label)
         ok = QPushButton("OK")
         ok.clicked.connect(dialog.accept)
+        actions = QWidget()
+        row = QHBoxLayout(actions)
+        row.setContentsMargins(0, 0, 0, 0)
+        report = QPushButton("🐞 Report a problem")
+        report.setToolTip("Open the bug-report form in your browser — no account needed.")
+        report.clicked.connect(self._open_report)
+        copy_info = QPushButton("📋 Copy debug info")
+        copy_info.setToolTip("Copies version + save + theme to the clipboard so a "
+                             "bug report needs no file hunting. Paste it into the form.")
+        copy_info.clicked.connect(self._copy_debug)
+        row.addWidget(report)
+        row.addWidget(copy_info)
+        row.addStretch()
+        layout.addWidget(actions)
         layout.addWidget(ok, 0, Qt.AlignmentFlag.AlignRight)
-        dialog.resize(540, 460)
+        dialog.resize(560, 480)
         dialog.exec()
+
+    def _report_url(self) -> str:
+        """Where the About-box report button points (see config.report_url)."""
+        return (self._settings.get("report_url")
+                or "https://github.com/thebeardbe/mewgenics-breeding-overlay/issues")
+
+    def _open_report(self) -> None:
+        import webbrowser
+        webbrowser.open(self._report_url())
+
+    def _copy_debug(self) -> None:
+        """Copy a compact debug block to the clipboard for bug reports."""
+        import platform
+        try:
+            qt_ver = __import__("PySide6").__version__
+        except Exception:
+            qt_ver = "?"
+        try:
+            py_ver = platform.python_version()
+        except Exception:
+            py_ver = "?"
+        save = self._settings.get("save_path") or ""
+        text = "\n".join([
+            f"Mewgenics Breeding Overlay v{__version__}",
+            f"OS: {platform.system()} {platform.release()}",
+            f"Python: {py_ver} · Qt: {qt_ver}",
+            f"Theme: {self._settings.get('theme')}",
+            f"Save: {save or '(none loaded)'}",
+        ])
+        QApplication.clipboard().setText(text)
+        self._set_status("debug info copied — paste it into a bug report")
 
     # ── save loading ───────────────────────────────────────────────────────
     def _load_last_save(self) -> None:
