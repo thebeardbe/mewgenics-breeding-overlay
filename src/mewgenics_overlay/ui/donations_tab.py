@@ -18,7 +18,6 @@ from PySide6.QtWidgets import (
 from mewgenics_overlay.core.donations import (
     cat_status,
     donation_report,
-    recommendation_lines,
 )
 import mewgenics_overlay.ui.theme as _theme
 from PySide6.QtGui import QColor
@@ -179,6 +178,19 @@ class DonationsTab(QWidget):
         return "Keep"
 
     @staticmethod
+    def _group_reasons(give, keep) -> list:
+        lines = []
+        if give:
+            lines.append("Reasons to donate:")
+            lines += ["  • " + line for line in give]
+        if keep:
+            lines.append("Reasons to keep:")
+            lines += ["  • " + line for line in keep]
+        if not lines:
+            lines.append("No strong reasons either way")
+        return lines
+
+    @staticmethod
     def _advice_lines(cat, rating: str) -> list:
         """Why this rating? Human-readable reason per Donate? verdict."""
         if rating == "Keep":
@@ -230,12 +242,17 @@ class DonationsTab(QWidget):
             inj = sum(1 for s, v in (getattr(cat, "base_stats", {}) or {}).items()
                       if (getattr(cat, "total_stats", {}) or {}).get(s, v) < v)
             rating = self._donate_rating(cat, r_i, total)
-            notes = list(getattr(cat, "_donate_notes", None) or [])
-            if not notes:
-                notes = self._advice_lines(cat, rating)
-            why_lines = ["• " + line for line in notes]
-            why_lines += ["• " + line for line in recommendation_lines(cat)]
-            why = "\n".join(why_lines)
+            give = list(getattr(cat, "_donate_give", None) or [])
+            keep = list(getattr(cat, "_donate_keep", None) or [])
+            if not give and not keep:
+                advice = self._advice_lines(cat, rating)
+                if rating == "Keep":
+                    keep = advice
+                elif rating == "Donate":
+                    give = advice
+                else:
+                    give = advice
+            why = "\n".join(self._group_reasons(give, keep))
             cells = [cat.name, cat_status(cat), str(getattr(cat, "age", "?")),
                      str(base), rating, why]
             for c_i, text in enumerate(cells):
@@ -255,23 +272,19 @@ class DonationsTab(QWidget):
                  f"Stats: {base} · age {getattr(cat, 'age', '?')}"]
         if rating:
             lines.append(f"Donate? → {rating}")
-            lines += ["  • " + line
-                      for line in DonationsTab._advice_lines(cat, rating)]
+        give = list(getattr(cat, "_donate_give", None) or [])
+        keep = list(getattr(cat, "_donate_keep", None) or [])
+        if not give and not keep:
+            advice = DonationsTab._advice_lines(cat, rating)
+            (keep if rating == "Keep" else give).extend(advice)
+        lines += ["  " + line for line in DonationsTab._group_reasons(give, keep)]
         aggression = getattr(cat, "aggression", None)
         if aggression is not None:
             lines.append(f"Aggression: {float(aggression) * 100:.0f}% "
                          "(marked for fighters — not a donation factor)")
-        notes = list(getattr(cat, "_donate_notes", None) or [])
-        if notes:
-            lines.append("Matrix:")
-            lines += [f"  • {line}" for line in notes[:5]]
-        lines.append(f"Suitable for: {slot.npc} ({slot.wants})")
-        why = recommendation_lines(cat)
-        if why:
-            lines.append("Why:")
-            lines += [f"  • {line}" for line in why]
         if injured:
-            lines.append(f"  • {injured} stat(s) with an injury penalty")
+            lines.append(f"{injured} stat(s) with an injury penalty")
+        lines.append(f"Suitable for: {slot.npc} ({slot.wants})")
         room = getattr(cat, "room", "") or getattr(cat, "status", "")
         lines.append(f"Where: {room or '?'}")
         return _wt("\n".join(lines))

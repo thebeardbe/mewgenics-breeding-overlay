@@ -333,43 +333,48 @@ def _give_away_score(cat, sums, effect_of_cat=None) -> float:
     return score
 
 
-def _donation_notes(cat, sums, effect_of_cat=None) -> list:
-    """Human reasons that shaped the score (shown above the Why lines)."""
+def _donation_reasons(cat, sums, effect_of_cat=None):
+    """(reasons_to_donate, reasons_to_keep) that shaped the score."""
     base = _base_sum(cat)
-    rel = _rank_fraction(base, sums)
+    n = len(sums) or 1
+    below = bisect.bisect_left(sums, base) / n      # strictly stronger share
+    above = (len(sums) - bisect.bisect_right(sums, base)) / n  # strictly weaker
     coi = max(0.0, min(1.0, float(getattr(cat, "inbredness", 0.0) or 0.0)))
     living = len(_living_children(cat))
     line = _line_strength(cat, sums)
     bias = _defect_bias(cat, effect_of_cat)
-    notes = []
-    if rel >= 0.8:
-        notes.append(f"Stronger than ~{rel * 100:.0f}% of your living cats")
-    elif rel < 0.5:
-        notes.append(f"Weaker than ~{(1 - rel) * 100:.0f}% of your living cats")
-    if coi > 0.1:
-        notes.append(f"Inbred (COI {coi * 100:.0f}%)")
-    if living:
-        notes.append(f"Has {living} living offspring — line already continues")
-    else:
-        notes.append("No living offspring — donating would end its line")
-    if line >= 0.6:
-        notes.append("Comes from a strong recent line")
-    elif line <= 0.4:
-        notes.append("Weak recent line")
-    if bias > 0:
-        notes.append("Carries positive-stats defects (worth keeping)")
-    elif bias < 0:
-        notes.append("Carries negative-stats defects (safer to donate)")
-    if getattr(cat, "lovers", None):
-        notes.append("Is in love — keep with their partner")
-    if getattr(cat, "must_breed", False):
-        notes.append("Marked must-breed")
-    if getattr(cat, "is_pinned", False):
-        notes.append("Pinned by you — keep")
-    if getattr(cat, "_donate_keep_for_breeding", False):
-        notes.append("Top breeding mate for another cat")
-    return notes
 
+    give: list = []
+    keep: list = []
+    if below >= 0.6:
+        keep.append(f"Stronger than {below * 100:.0f}% of your living cats")
+    elif above >= 0.6:
+        give.append(f"Weaker than {above * 100:.0f}% of your living cats")
+    if coi > 0.1:
+        give.append(f"Inbred (COI {coi * 100:.0f}%)")
+    if living:
+        give.append(f"Has {living} direct child(ren) still living (from any "
+                    f"mate) — its line already continues")
+    else:
+        keep.append("No direct children left living — donating would end "
+                    "its line")
+    if line >= 0.6:
+        keep.append("Comes from a strong recent line")
+    elif line <= 0.4:
+        give.append("Comes from a weak recent line")
+    if bias > 0:
+        keep.append("Carries positive-stats birth defects")
+    elif bias < 0:
+        give.append("Carries negative-stats birth defects")
+    if getattr(cat, "lovers", None):
+        keep.append("Is in love — keep with their partner")
+    if getattr(cat, "must_breed", False):
+        keep.append("Marked must-breed")
+    if getattr(cat, "is_pinned", False):
+        keep.append("Pinned by you")
+    if getattr(cat, "_donate_keep_for_breeding", False):
+        keep.append("Top breeding mate for another cat")
+    return give, keep
 
 
 def donation_report(cats, active: Optional[set] = None,
@@ -414,7 +419,9 @@ def donation_report(cats, active: Optional[set] = None,
             key=lambda c: (int(_protected(c)) * 2 + int(_keeper(c)),
                            _give_away_score(c, sums, effect_of_cat)))
         for c in slot.candidates:
-            c._donate_notes = _donation_notes(c, sums, effect_of_cat)
+            _give, _keep = _donation_reasons(c, sums, effect_of_cat)
+            c._donate_give = _give
+            c._donate_keep = _keep
         slot.ranks = list(range(1, len(slot.candidates) + 1))
         slots.append(slot)
 
