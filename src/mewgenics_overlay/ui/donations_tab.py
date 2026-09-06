@@ -18,7 +18,9 @@ from mewgenics_overlay.core.donations import (
     donation_report,
     recommendation_lines,
 )
-from mewgenics_overlay.ui.theme import C_MUTED, wrap_tooltip as _wt
+import mewgenics_overlay.ui.theme as _theme
+from PySide6.QtGui import QColor
+from mewgenics_overlay.ui.theme import wrap_tooltip as _wt
 
 _COLS = ["Cat", "Status", "Age", "Stats", "Why donate"]
 _COL_TIPS = [

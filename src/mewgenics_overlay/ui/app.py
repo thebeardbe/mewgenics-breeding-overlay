@@ -25,9 +25,10 @@ from PySide6.QtGui import QAction, QColor, QFont, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
 from mewgenics_overlay import __version__
+from mewgenics_overlay.ui import config as ui_config
 from mewgenics_overlay.ui import hotkey as hotkey_mod
+from mewgenics_overlay.ui import theme as _theme
 from mewgenics_overlay.ui.palette import PaletteWindow
-from mewgenics_overlay.ui.theme import STYLESHEET, apply_casual_font
 
 
 def _make_tray_icon() -> QIcon:
@@ -133,8 +134,12 @@ def main(argv=None) -> int:
 
     app = QApplication(sys.argv[:1])
     app.setApplicationName("mewgenics-overlay")
-    apply_casual_font(app)
-    app.setStyleSheet(STYLESHEET)
+    # start with the saved theme (Bleached Film / Noir Ink)
+    _theme_key = ui_config.load().get("theme", _theme.DEFAULT_THEME)
+    if _theme_key not in _theme.THEMES:
+        _theme_key = _theme.DEFAULT_THEME
+    _theme.set_theme(_theme_key)
+    app.setStyleSheet(_theme.stylesheet())
 
     palette = PaletteWindow()
     hotkey = hotkey_mod.install(app, palette.toggle_activate)

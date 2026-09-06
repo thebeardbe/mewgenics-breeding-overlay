@@ -14,6 +14,7 @@ from pathlib import Path
 
 _KEY = "mewgenics-overlay"
 DEFAULTS = {
+    "theme": "film",            # UI theme: film | noir
     "save_path": None,            # last save shown
     "include_adventure": True,    # consider Adventure cats as partners
     "order": "risk",            # partner sort: "risk" (safe first) or "quality"

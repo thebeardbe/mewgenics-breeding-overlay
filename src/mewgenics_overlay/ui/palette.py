@@ -23,6 +23,7 @@ import threading
 from typing import Optional
 
 from PySide6.QtCore import Qt, QEvent, QRect, QTimer
+import mewgenics_overlay.ui.theme as _theme
 from PySide6.QtGui import QColor, QGuiApplication
 from PySide6.QtWidgets import (
     QApplication,
@@ -54,20 +55,7 @@ from mewgenics_overlay.core.watcher import SaveWatcher, safe_read_save
 from mewgenics_overlay.vendor.breeding import tracked_offspring
 
 from . import config as cfg
-from .theme import (
-    C_FAMILY,
-    C_GOOD,
-    C_GRIP,
-    C_MUTED,
-    C_STAT_LOW,
-    C_STATUS,
-    C_TEXT,
-    C_WARN,
-    STYLESHEET,
-    gender_badge,
-    risk_color,
-    wrap_tooltip as _wt,
-)
+from .theme import gender_badge, risk_color, wrap_tooltip as _wt
 from mewgenics_overlay.core.maladies import (
     ASYMMETRIC_GROUPS,
     _side_text,
@@ -304,7 +292,7 @@ def _stats_html(cat: Cat) -> str:
     parts = []
     for s in STAT_NAMES:
         v = cat.base_stats[s]
-        color = C_GOOD if v >= 7 else (C_TEXT if v >= 4 else C_STAT_LOW)
+        color = _theme.C_GOOD if v >= 7 else (_theme.C_TEXT if v >= 4 else _theme.C_STAT_LOW)
         parts.append(f'<span style="color:{color}"><b>{s}</b> {v}</span>')
     return "   ".join(parts)
 
@@ -347,7 +335,7 @@ class PaletteWindow(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, False)
         self.resize(760, 560)
         self._restore_geometry()
-        self.setStyleSheet(STYLESHEET)
+        self.setStyleSheet(_theme.stylesheet())
         self._build_ui()
         self._wire_ui()
         self._poll = QTimer(self)
@@ -397,14 +385,14 @@ class PaletteWindow(QWidget):
         # header
         head = QHBoxLayout()
         grip = _DragLabel("⠿")
-        grip.setStyleSheet(f"color:{C_GRIP}; font-size:13px;")
+        grip.setStyleSheet(f"color:{_theme.C_GRIP}; font-size:13px;")
         grip.setToolTip("Drag to move the overlay")
         self._title = _DragLabel("🐈 Breeding Overlay")
         self._title.setStyleSheet("font-weight:700; font-size:14px;")
         self._title.setCursor(Qt.CursorShape.OpenHandCursor)
         self._status = QLabel("")
         self._status.setObjectName("muted")
-        self._status.setStyleSheet(f"color:{C_STATUS}; font-size:11px;")
+        self._status.setStyleSheet(f"color:{_theme.C_STATUS}; font-size:11px;")
         pin = QPushButton("📌")
         pin.setCheckable(True)
         pin.setChecked(self._pinned)
@@ -429,6 +417,10 @@ class PaletteWindow(QWidget):
         about.setFixedWidth(34)
         about.setToolTip("About — version and credits")
         about.clicked.connect(self._show_about)
+        self._btn_theme = QPushButton("◐")
+        self._btn_theme.setFixedWidth(34)
+        self._btn_theme.setToolTip("Switch theme (Bleached Film ↔ Noir Ink)")
+        self._btn_theme.clicked.connect(self._toggle_theme)
         close = QPushButton("✕")
         close.setFixedWidth(34)
         close.setToolTip("Hide (Ctrl+Shift+B / tray) — quits when no tray is available")
@@ -440,6 +432,7 @@ class PaletteWindow(QWidget):
         head.addWidget(ct)
         head.addWidget(open_save)
         head.addWidget(about)
+        head.addWidget(self._btn_theme)
         head.addWidget(close)
         root.addLayout(head)
 
@@ -474,7 +467,7 @@ class PaletteWindow(QWidget):
         self._cat_lovers.setObjectName("muted")
         self._cat_health = QLabel("")
         self._cat_health.setWordWrap(True)
-        self._cat_health.setStyleSheet(f"color:{C_WARN}; font-size:11px;")
+        self._cat_health.setStyleSheet(f"color:{_theme.C_WARN}; font-size:11px;")
         self._cat_health.setToolTip(_wt(
             "Things this cat carries that can be passed on to kittens.\n"
             "• Disorders — a 15% chance per parent that carries one of "
@@ -696,6 +689,34 @@ class PaletteWindow(QWidget):
         else:
             self.shutdown()
             QApplication.instance().quit()
+
+    def _toggle_theme(self) -> None:
+        keys = list(_theme.THEMES)
+        current = _theme.active_theme()
+        nxt = keys[(keys.index(current) + 1) % len(keys)]
+        self.apply_theme(nxt)
+
+    def apply_theme(self, key: str) -> None:
+        """Switch the active theme, restyle the app and re-render colours."""
+        if key not in _theme.THEMES:
+            return
+        _theme.set_theme(key)
+        self._settings["theme"] = key
+        cfg.save(self._settings)
+        app = QApplication.instance()
+        if app is not None:
+            app.setStyleSheet(_theme.stylesheet())
+        self._refresh_theme()
+
+    def _refresh_theme(self) -> None:
+        """Repaint everything that cached theme colours."""
+        if self._rows:
+            self._redraw_table()
+        if self._focus is not None:
+            self._show_focus(self._focus)
+        donations = getattr(self, "_donations_tab", None)
+        if donations is not None:
+            donations.refresh(self._session)
 
     def _show_about(self) -> None:
         """Credits dialog: who built it and whose research it stands on."""
@@ -1384,13 +1405,13 @@ class PaletteWindow(QWidget):
             specials: dict = {}
             if ok:
                 if rel.is_family:
-                    specials[COL_FAMILY] = C_FAMILY      # related, breedable
+                    specials[COL_FAMILY] = _theme.C_FAMILY      # related, breedable
                 specials[COL_RISK] = risk_color(row.risk_pct)
-                specials[COL_CHANCE] = (C_GOOD if row.game_compat > 0.05
-                                        else C_WARN)
+                specials[COL_CHANCE] = (_theme.C_GOOD if row.game_compat > 0.05
+                                        else _theme.C_WARN)
                 if _any_defect_guaranteed(row, self._stim_value()):
-                    specials[COL_DEFECTS] = C_WARN       # inherited defects
-            base_color = C_MUTED if not ok else C_TEXT
+                    specials[COL_DEFECTS] = _theme.C_WARN       # inherited defects
+            base_color = _theme.C_MUTED if not ok else _theme.C_TEXT
             for col, it in enumerate(cells):
                 it.setForeground(QColor(specials.get(col, base_color)))
                 self._table.setItem(r_i, col, it)
