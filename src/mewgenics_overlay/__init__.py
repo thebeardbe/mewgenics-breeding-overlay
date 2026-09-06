@@ -9,4 +9,4 @@ The parser + genetics engine are vendored from the MIT-licensed
 MewgenicsBreedingManager (see vendor/_VENDORED.md).
 """
 
-__version__ = "0.1.39"
+__version__ = "0.1.40"

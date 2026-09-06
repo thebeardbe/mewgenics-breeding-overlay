@@ -135,6 +135,8 @@ _COL_TIP_PARAS = [
         "already folds in the game's two nightly rolls.",
         "A higher room Comfort nudges it up a little.",
         "Below 5% the game won't even attempt the pair.",
+        "Very high Comfort saturates the per-roll odds — the tool shows those "
+        "as ≥95% instead of promising a 100% chance.",
         "Colour key — green: above the line · amber: below it.",
     ],
     # Exp/stat
@@ -286,13 +288,23 @@ class _DragLabel(QLabel):
         super().mouseReleaseEvent(event)
 
 
+CHANCE_DISPLAY_CAP = 95.0   # never advertise a guaranteed breed
+
+
 def _fmt_compat(v: float) -> str:
     return f"{v:.3f}"
 
 
 def _fmt_chance(v: float, comfort: float = 0.0) -> str:
-    """Nightly breeding chance % — both of the game's rolls folded into one."""
-    return f"{max(0.0, min(100.0, _night_chance(v, comfort) * 100.0)):.0f}%"
+    """Nightly breeding chance % — both of the game's rolls folded into one.
+
+    Comfort-rich rooms can saturate the per-roll odds (chance → 100 % in the
+    model); we display those as "≥95 %" rather than promising a guarantee.
+    """
+    pct = _night_chance(v, comfort) * 100.0
+    if pct >= CHANCE_DISPLAY_CAP:
+        return f"≥{CHANCE_DISPLAY_CAP:.0f}%"
+    return f"{pct:.0f}%"
 
 
 def _roll_chance(v: float, comfort: float = 0.0) -> float:
@@ -1583,7 +1595,7 @@ class PaletteWindow(QWidget):
                      f"· COI {row.coi * 100:.1f}%")
         lines.append(f"Birth-defect risk: {row.risk_pct:.1f}%")
         lines.append(
-            f"Breed attempt/night: {_night_chance(row.game_compat, self._comfort_value()) * 100:.0f}% "
+            f"Breed attempt/night: {_fmt_chance(row.game_compat, self._comfort_value())} "
             f"(compat {row.game_compat:.3f} > 0.05)"
         )
         if row.compatible:
