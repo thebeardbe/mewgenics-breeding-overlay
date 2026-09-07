@@ -22,7 +22,7 @@ import sys
 import threading
 from typing import Optional
 
-from PySide6.QtCore import Qt, QEvent, QRect, QTimer
+from PySide6.QtCore import Qt, QEvent, QRect, QTimer, Signal
 import mewgenics_overlay.ui.theme as _theme
 from PySide6.QtGui import QColor, QGuiApplication
 from PySide6.QtWidgets import (
@@ -236,14 +236,29 @@ def _defect_short(name: str) -> str:
     return name.replace(" Birth Defect", "") or name
 
 
-def _defects_summary(row, stimulation: float = 50.0) -> str:
-    """Compact Defects cell text: shared defects as '✓', single-carrier as %."""
+def _defect_rows_of(row, stimulation: float = 50.0):
+    """Inheritance rows for a partner row's carried defects.
+
+    The background worker precomputes these once per pair (``row.defect_rows``
+    — pure function of the parents + COI + room Stimulation) and every
+    render/tooltip/recommend pass reuses them instead of re-walking shared
+    ancestry on the UI thread. Fresh computation here is only a fallback for
+    rows that never went through the worker.
+    """
+    rows = getattr(row, "defect_rows", None)
+    if rows is not None:
+        return rows
     factors = row.pair_factors
     if factors is None:
-        return ""
+        return []
+    return defect_inheritance_rows(factors.cat_a, factors.cat_b, row.coi,
+                                   stimulation=stimulation)
+
+
+def _defects_summary(row, stimulation: float = 50.0) -> str:
+    """Compact Defects cell text: shared defects as '✓', single-carrier as %."""
     parts = []
-    for d in defect_inheritance_rows(factors.cat_a, factors.cat_b, row.coi,
-                                     stimulation=stimulation):
+    for d in _defect_rows_of(row, stimulation):
         short = _defect_short(d.name)
         parts.append(short + (" ✓" if len(d.carriers) == 2
                               else f" ≈{d.chance_pct:.0f}%"))
@@ -251,13 +266,9 @@ def _defects_summary(row, stimulation: float = 50.0) -> str:
 
 
 def _any_defect_guaranteed(row, stimulation: float = 50.0) -> bool:
-    factors = row.pair_factors
-    if factors is None:
-        return False
+    """True when the pair carries a defect on BOTH parents (guaranteed pass)."""
     return any(len(d.carriers) == 2
-               for d in defect_inheritance_rows(factors.cat_a, factors.cat_b,
-                                                row.coi,
-                                                stimulation=stimulation))
+               for d in _defect_rows_of(row, stimulation))
 
 
 class _DragLabel(QLabel):
@@ -333,12 +344,15 @@ def _stats_html(cat: Cat) -> str:
 class PaletteWindow(QWidget):
     """The overlay palette. Owns the save session, watcher and worker."""
 
+    # The save watcher fires from its own thread; a signal is the Qt-safe way
+    # to hand that notification back to the UI thread (connected in _wire_ui).
+    _save_changed = Signal()
+
     def __init__(self):
         super().__init__()
         self._settings = cfg.load()
         self._session: Optional[Session] = None
         self._focus: Optional[Cat] = None
-        self._history: list[int] = []
         self._watcher: Optional[SaveWatcher] = None
         self._lock = threading.Lock()
         self._pending: list[tuple] = []   # (token, kind, result)
@@ -624,6 +638,8 @@ class PaletteWindow(QWidget):
         self._btn_swap.toggled.connect(self._recompute_partners)
         self._btn_best.clicked.connect(self._on_best_clicked)
         self._btn_safe.toggled.connect(self._on_safe_toggled)
+        # watcher thread -> UI thread (queued automatically by the signal)
+        self._save_changed.connect(self._on_save_changed)
 
     # ── window behaviour: pin, click-through, summoning ────────────────────
     def _toggle_pin(self, checked: bool) -> None:
@@ -944,10 +960,12 @@ class PaletteWindow(QWidget):
     def _start_watcher(self, path: str) -> None:
         if self._watcher is not None:
             self._watcher.stop()
-        self._watcher = SaveWatcher(path, on_change=self._on_save_changed)
+        self._watcher = SaveWatcher(path, on_change=self._save_changed.emit)
         self._watcher.start()
 
     def _on_save_changed(self) -> None:
+        """Run on the UI thread via the ``_save_changed`` signal — the watcher
+        thread only emits, it never touches Qt widgets."""
         self._set_status("save changed — reloading…")
         self._schedule_reload()
 
@@ -1021,6 +1039,16 @@ class PaletteWindow(QWidget):
                         1 for k in kids
                         if getattr(k, "status", "") in ALIVE_STATUSES)
                     enriched.append((r, [k.name for k in kids]))
+                    # Defect inheritance rows are a pure function of the pair
+                    # (+ COI + room Stimulation): compute them ONCE here on the
+                    # worker thread so table cells, tooltips and the Best-match
+                    # recommender reuse the result instead of each re-deriving
+                    # it (and re-walking shared ancestry) on the UI thread.
+                    try:
+                        r.defect_rows = defect_inheritance_rows(
+                            cat, r.partner, r.coi, stimulation=stimulation)
+                    except Exception:
+                        r.defect_rows = None
                 with self._lock:
                     self._pending.append((token, "partners", (cat_key, enriched)))
             except Exception as exc:  # keep UI alive on parser surprises
@@ -1165,7 +1193,6 @@ class PaletteWindow(QWidget):
             self.set_focus(cat)
 
     def set_focus(self, cat: Cat) -> None:
-        self._history.append(cat.db_key)
         self._focus = cat
         self._search.setText("")
         self._search.clearFocus()
@@ -1651,8 +1678,7 @@ class PaletteWindow(QWidget):
             lines.append(f"→ Kitten inherits ≥1 parent disorder: "
                          f"{dis['any_pct']:.0f}% "
                          f"(15% per parent that carries one)")
-        rows = defect_inheritance_rows(a, b, row.coi,
-                                       stimulation=stimulation)
+        rows = _defect_rows_of(row, stimulation)
         for drow in rows:
             asym = drow.group in ASYMMETRIC_GROUPS
             if len(drow.carriers) == 2:

@@ -46,11 +46,13 @@ QT_QPA_PLATFORM=offscreen python scripts/gui_smoke.py
 nix-build default.nix -o /tmp/mg-overlay && /tmp/mg-overlay/bin/mewgenics-overlay
 ```
 
-Release = bump version in **three files** (`pyproject.toml`,
-`default.nix`, `src/mewgenics_overlay/__init__.py`), run the audit checklist
-in `CODING_GUIDELINES.md` §8, commit, then
-`git tag vX.Y.Z && git push origin vX.Y.Z` — CI builds Windows/Linux binaries
-and publishes a GitHub Release.
+Release = bump version in **exactly three files, atomically, never skips a
+file** (`pyproject.toml`, `default.nix`, `src/mewgenics_overlay/__init__.py`),
+run the audit checklist in `CODING_GUIDELINES.md` §8, update the status line
+in §8 of this file if it quotes a release number, commit, then
+`git tag vX.Y.Z && git push origin vX.Y.Z` — CI verifies the three files and
+the tag all agree (`version-check`), then builds Windows/Linux binaries and
+publishes a GitHub Release. A partial bump is a release blocker.
 
 ## 3. Layout — what lives where
 
@@ -63,7 +65,8 @@ README.md / LICENSE
 packaging/entry.py, build_windows.bat, build_linux.sh   PyInstaller
 
 > Bug reports: the self-hosted Bugbox intake service lives in its own repo
-> (thebeardbe/mewgenics-bugbox), not here, so forks of the app stay clean.
+> (thebeardbe/mewgenics-overlay-website — "Bugbox"), not here, so forks of
+> the app stay clean.
 scripts/gui_smoke.py      offscreen end-to-end UI test (loads save, sorts, theme, pin…)
 tests/                    unit tests (see §6)
 src/mewgenics_overlay/
@@ -177,15 +180,17 @@ Plus `scripts/gui_smoke.py` for the real UI offscreen.
   and bump font-size in the theme QSS.
 - **Qt QSS limits**: no box-shadow, no repeating gradients; use
   `qlineargradient` and colour borders only.
-- **Version lives in 3 files** — change all or CI/Nix/About drift.
+- **Version lives in 3 files — bump ALL of them in the same commit, no
+  skips**: partial bumps make CI/Nix/About drift. The release workflow's
+  `version-check` job rejects any `v*` tag whose three files don't match
+  each other and the tag.
 - **Vendored files stay untouched** apart from import paths (see
   `vendor/_VENDORED.md`); keep them re-vendorable.
 - Table header tooltips: set on `horizontalHeaderItem(i).setToolTip(...)`.
 
 ## 8. Status / roadmap
 
-- Latest release: **v0.1.36** (being Windows-tested). Next: **v0.2.0** after
-  tester review.
+- Latest release: **v0.1.42**. Next: **v0.2.0** after tester review.
 - Known gaps: per-NPC donation counters and Butch chapter progress are not
   recoverable from the save; Frank/retired is heuristic (abilities+stat
   gains); aggression is displayed for future fighter-room optimisation but

@@ -14,7 +14,43 @@ on:
   workflow_dispatch:
 
 jobs:
+  version-check:
+    # The version lives in THREE places (pyproject.toml, default.nix,
+    # src/mewgenics_overlay/__init__.py) and a release tag vX.Y.Z must equal
+    # all of them. This job refuses any tagged push where they disagree —
+    # partial bumps are release blockers by design (CODING_GUIDELINES.md 0.3).
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Version parity across the three files + the tag
+        run: |
+          python - <<'PY'
+          import pathlib, re, sys, tomllib
+          repo = pathlib.Path(".")
+          pyproject = tomllib.loads(repo.joinpath("pyproject.toml").read_text())["project"]["version"]
+          init = re.search(r'__version__ = "([^"]+)"',
+                           repo.joinpath("src/mewgenics_overlay/__init__.py").read_text()).group(1)
+          nix = re.search(r'version = "([^"]+)"',
+                          repo.joinpath("default.nix").read_text()).group(1)
+          tag = "${{ github.ref_name }}"
+          if tag.startswith("v"):
+              tag = tag[1:]
+          versions = {"pyproject.toml": pyproject, "__init__.py": init, "default.nix": nix}
+          bad = {k: v for k, v in versions.items() if v != tag}
+          if bad:
+              print(f"version mismatch: tag={tag} but {bad}")
+              sys.exit(1)
+          print(f"version parity OK across all three files + tag: {tag}")
+          PY
+
   build:
+    needs: version-check
     strategy:
       fail-fast: false
       matrix:

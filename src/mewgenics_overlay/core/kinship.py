@@ -18,9 +18,20 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from collections import deque
+from typing import Optional
 
 MAX_DEPTH = 9    # generations of shared ancestry considered for labels
 RECENT_DEPTH = 4  # both sides must be within this many gens to 'count' for defects
+
+
+def depths_of(cat, max_depth: int = MAX_DEPTH) -> dict:
+    """cat -> minimum generational distance map (self = 0, parents = 1, ...).
+
+    Public so callers ranking many pairs against ONE focused cat can trace
+    that cat's ancestry once and hand it to :func:`relation` as
+    ``first_depths`` instead of re-walking it for every partner.
+    """
+    return _depths(cat, max_depth)
 
 
 def _depths(cat, max_depth: int = MAX_DEPTH) -> dict:
@@ -96,9 +107,10 @@ def _collateral(da: int, db: int) -> str:
     A is the focused cat, B the partner; the label always describes B from
     A's point of view, so orientation (which side is closer to the shared
     ancestor) matters: the closer side is the older generation.
+
+    ``da == db == 1`` (shared parents) is unreachable here: relation()
+    returns the full/half-sibling label before ever calling this.
     """
-    if da == db == 1:
-        return "sibling"
     if db == 1:
         # B is only one step from the shared ancestor -> B is the elder:
         # B is A's aunt/uncle (A is 2 up), great-aunt/uncle (3 up), …
@@ -126,9 +138,14 @@ def _collateral(da: int, db: int) -> str:
     return f"{base} {removed}× removed"
 
 
-def relation(first, second) -> Relation:
-    """Label *second* from *first*'s point of view."""
-    da = _depths(first)
+def relation(first, second,
+             first_depths: Optional[dict] = None) -> Relation:
+    """Label *second* from *first*'s point of view.
+
+    ``first_depths`` (from :func:`depths_of`) may be passed to reuse a
+    precomputed ancestry trace of *first* across many calls.
+    """
+    da = first_depths if first_depths is not None else _depths(first)
     db = _depths(second)
     common = set(da) & set(db)
 

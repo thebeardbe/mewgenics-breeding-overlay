@@ -250,8 +250,4 @@ def wrap_tooltip(text: str, width: int = 88) -> str:
     return "\n".join(out)
 
 
-def apply_casual_font(app) -> None:
-    """No custom font — the bold vector look comes from the stylesheet."""
-
-
 set_theme(DEFAULT_THEME)

@@ -17,8 +17,6 @@ import sys
 from mewgenics_overlay.core.discovery import newest_save
 from mewgenics_overlay.core.session import Session, display_location
 
-ALIVE = ("In House", "Adventure")
-
 
 def _resolve_save(args) -> str:
     if args.save:

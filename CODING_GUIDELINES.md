@@ -10,8 +10,14 @@ Rules are numbered so the audit in §8 can reference them.
    copied before parsing. No writes to the `Glaiel Games` folder, ever.
 2. **Never touch `ui/…/vendor/`** beyond the documented import rewrites.
    It is upstream MBM code and must stay re-vendorable.
-3. **Version lives in exactly three files** and must be bumped together:
-   `pyproject.toml`, `default.nix`, `src/mewgenics_overlay/__init__.py`.
+3. **Version lives in exactly three files and is bumped ATOMICALLY — never
+   skip one, no exceptions:** `pyproject.toml`, `default.nix`,
+   `src/mewgenics_overlay/__init__.py`. A release tag `vX.Y.Z` must equal the
+   version string in all three; the release workflow's `version-check` job
+   (`.github/workflows/release.yml`) fails any tagged push whose three files
+   disagree with each other or with the tag. If you notice a partial bump in
+   someone else's commit, fix the missing file in the same PR — partial
+   bumps never ship.
 4. Core genetics/breeding/UI-facing logic we wrote may import `vendor`, but
    the opposite must never happen.
 
@@ -85,8 +91,14 @@ Rules are numbered so the audit in §8 can reference them.
 
 ## 7. Releases
 
-- Bump version (rule 0.3) → commit → tag `vX.Y.Z` → push tag (CI builds
-  binaries). Keep commits atomic and descriptive.
+- Bump the version (rule 0.3) in **all three files in one commit** — never a
+  partial bump. If AGENTS.md §8 or the README quotes a release number, that
+  goes in the same commit too.
+- Run the audit checklist (§8) → commit → tag `vX.Y.Z` → push the tag. CI
+  (release.yml) verifies the three files + tag agree (`version-check`),
+  builds the binaries, and publishes the release. A tag whose versions
+  disagree fails CI — that is deliberate, not a nuisance.
+- Keep commits atomic and descriptive.
 
 ## 8. Audit checklist (run after any large change)
 
@@ -94,6 +106,8 @@ Rules are numbered so the audit in §8 can reference them.
       names or unused imports
 - [ ] No line exceeds 120 in `src/mewgenics_overlay` (exclude `vendor/`)
 - [ ] No hex colour literals outside `theme.py`
-- [ ] Version matches in the three files
+- [ ] Version identical in the three files and equal to the release tag
+      (CI's `version-check` enforces this on `v*` pushes — no skips)
+- [ ] AGENTS.md §8 status / README do not quote an older release number
 - [ ] `python -m pytest tests/ -q` green
 - [ ] `QT_QPA_PLATFORM=offscreen python scripts/gui_smoke.py` green

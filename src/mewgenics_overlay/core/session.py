@@ -16,10 +16,12 @@ projection, lover/haters/family blocking) — identical math to MBM.
 from __future__ import annotations
 
 import logging
+import re
+import sqlite3
 from dataclasses import dataclass, field
 from typing import Optional
 
-from mewgenics_overlay.core.kinship import Relation, relation as relation_of
+from mewgenics_overlay.core.kinship import Relation, depths_of, relation as relation_of
 from mewgenics_overlay.vendor.save_parser import (
     Cat,
     SaveData,
@@ -36,6 +38,9 @@ from mewgenics_overlay.vendor.breeding import (
 log = logging.getLogger("mewgenics_overlay.session")
 
 ALIVE_STATUSES = ("In House", "Adventure")
+
+RISK_SAFE_TIER = 8.0   # partners at/below this risk % sort above riskier ones
+                      # (see the "risk" order in rank_partners)
 
 
 def display_location(cat) -> str:
@@ -54,7 +59,9 @@ def display_location(cat) -> str:
     return status or "Gone"
 
 
-def _build_key_maps(cats: list[Cat]) -> tuple[dict, dict, dict]:
+def _build_key_maps(
+    cats: list[Cat],
+) -> tuple[dict[int, set[int]], dict[int, set[int]], dict[int, set[int]]]:
     parent_map: dict[int, set[int]] = {}
     lover_map: dict[int, set[int]] = {}
     hater_map: dict[int, set[int]] = {}
@@ -88,6 +95,11 @@ class PartnerRow:
     kitty_available: int = 0    # ... still in house/on adventures (not dead/gone)
     quality: float = 0.0
     pair_factors: PairFactors = field(repr=False, default=None)
+    defect_rows: list = field(repr=False, default=None)
+    # inheritance rows for the defects the parents carry; pure function of
+    # (cat_a, cat_b, coi, stimulation) so the UI worker computes it ONCE per
+    # pair and table/tooltip/best-match rendering reuse it instead of
+    # re-deriving it 3-4x per row.
 
 
 @dataclass(slots=True)
@@ -129,9 +141,9 @@ class Session:
         self.data: SaveData | None = None
         self.cats: list[Cat] = []
         self.npc_progress_flags: set = set()
-        self._parent_map: dict = {}
-        self._lover_map: dict = {}
-        self._hater_map: dict = {}
+        self._parent_map: dict[int, set[int]] = {}
+        self._lover_map: dict[int, set[int]] = {}
+        self._hater_map: dict[int, set[int]] = {}
         self.load()
 
     # ── loading ────────────────────────────────────────────────────────────
@@ -140,8 +152,10 @@ class Session:
         self.cats = list(self.data.cats)
         self._finish_cats(self.cats)
         self._parent_map, self._lover_map, self._hater_map = _build_key_maps(self.cats)
-        self.npc_progress_flags = _read_npc_progress_flags(self.save_path)
-        self.current_day: Optional[int] = _read_current_day(self.save_path)
+        # current_day + npc_progress both live in the same sqlite file the
+        # parser just opened, so read them in ONE extra read-only connection.
+        self.current_day, self.npc_progress_flags = _read_aux_save_data(
+            self.save_path)
 
     @staticmethod
     def _finish_cats(cats: list[Cat]) -> None:
@@ -214,6 +228,14 @@ class Session:
         lover_map, hater_map = self._lover_map, self._hater_map
         parent_map = self._parent_map
 
+        # One shared kinship memo for the whole loop: partner ancestries
+        # overlap heavily, so a shared memo turns each fresh deep-lineage
+        # walk into dict lookups (the vendored engine documents this use).
+        kinship_memo: dict = {}
+        # The focused cat's ancestry is identical for every partner — trace
+        # it once and reuse it for every relation label.
+        focus_depths = depths_of(cat)
+
         good: list[PartnerRow] = []
         blocked: list[PartnerRow] = []
         for b in pool:
@@ -226,6 +248,7 @@ class Session:
                 lover_key_map=lover_map,
                 avoid_lovers=False,   # lover exclusivity is not a hard block in-game
                 parent_key_map=parent_map,
+                kinship_memo=kinship_memo,
                 stimulation=stimulation,
             )
             family = is_direct_family_pair(cat, b, parent_map)
@@ -252,8 +275,8 @@ class Session:
                 stat_sum_range=proj.sum_range,
                 seven_plus_total=proj.seven_plus_total,
                 direct_family=family,
-                relation=relation_of(cat, b),
-                coi=kinship_coi(cat, b),
+                relation=relation_of(cat, b, first_depths=focus_depths),
+                coi=kinship_coi(cat, b, kinship_memo),
                 mutual_lover=bool(is_lover and cat.db_key in lover_map.get(b.db_key, set())),
                 is_lover=is_lover,
                 is_hater=cat.db_key in hater_map.get(b.db_key, set()),
@@ -267,7 +290,7 @@ class Session:
             good = [r for r in good if r.quality >= quality_floor]
 
         if order == "risk":
-            good.sort(key=lambda r: (0 if r.risk_pct <= 8.0 else 1,
+            good.sort(key=lambda r: (0 if r.risk_pct <= RISK_SAFE_TIER else 1,
                                      -r.quality, r.risk_pct))
         else:
             good.sort(key=lambda r: (-r.quality, r.risk_pct))
@@ -297,38 +320,32 @@ class Session:
             unique_id=cat.unique_id,
         )
 
-_NPC_TOKEN_RE = None
+def _read_aux_save_data(save_path: str) -> tuple[Optional[int], set]:
+    """Best-effort extra save fields: (current in-game day, npc_progress flags).
 
-
-def _read_current_day(save_path: str) -> Optional[int]:
-    """The save's current in-game day (plain integer property)."""
-    import sqlite3
-
+    Both live in the same read-only sqlite database the parser already opened
+    (``properties/current_day`` and the ``files/npc_progress`` blob), so they
+    are read together in ONE connection. On any problem returns
+    ``(None, empty set)`` — the overlay degrades gracefully without them.
+    """
     try:
         conn = sqlite3.connect(f"file:{save_path}?mode=ro", uri=True)
-        row = conn.execute(
-            "SELECT data FROM properties WHERE key='current_day'").fetchone()
-        conn.close()
-        return int(row[0]) if row is not None else None
+        try:
+            day: Optional[int] = None
+            row = conn.execute(
+                "SELECT data FROM properties WHERE key='current_day'"
+            ).fetchone()
+            if row is not None:
+                day = int(row[0])
+            flags: set = set()
+            row = conn.execute(
+                "SELECT data FROM files WHERE key='npc_progress'").fetchone()
+            if row:
+                names = re.findall(rb"[A-Za-z_][A-Za-z0-9_]{2,}", row[0])
+                flags = {n.decode(errors="replace") for n in names}
+        finally:
+            conn.close()
+        return day, flags
     except Exception:
-        return None
-
-
-def _read_npc_progress_flags(save_path: str) -> set:
-    """Names found in the save's npc_progress blob (NPC unlock/milestone
-    flags). Read-only, best-effort — returns an empty set on any problem."""
-    import re
-    import sqlite3
-
-    try:
-        conn = sqlite3.connect(f"file:{save_path}?mode=ro", uri=True)
-        row = conn.execute(
-            "SELECT data FROM files WHERE key='npc_progress'").fetchone()
-        conn.close()
-        if not row:
-            return set()
-        names = re.findall(rb"[A-Za-z_][A-Za-z0-9_]{2,}", row[0])
-        return {n.decode(errors="replace") for n in names}
-    except Exception:
-        return set()
+        return None, set()
 

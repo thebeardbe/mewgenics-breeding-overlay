@@ -33,8 +33,8 @@ from mewgenics_overlay.core.recommend import (
     W_SEVENS,
     effect_stat_net,
 )
-from mewgenics_overlay.vendor.save_parser import get_all_ancestors
-from mewgenics_overlay.core.session import display_location
+from mewgenics_overlay.vendor.save_parser import get_all_ancestors, risk_percent
+from mewgenics_overlay.core.session import ALIVE_STATUSES, display_location
 from mewgenics_overlay.core.stimulation import STIMULATION_DEFAULT
 from mewgenics_overlay.vendor.breeding import pair_projection
 
@@ -56,7 +56,7 @@ W_NO_OFFSPRING = 0.3  # no living offspring -> keep (line would end)
 W_LINE = 1.2          # roster-relative recent-line strength -> keep
 W_DEFECT_SIGN = 0.8   # per signed defect (positive = keep)
 W_LOVER_KEEP = 0.5
-ALIVE_STATUSES = ("In House", "Adventure")
+# ALIVE_STATUSES is imported from core.session (single source of truth).
 # retired (Frank) detection: abilities gained + stat growth
 ADV_ABILITIES_MIN = 3
 # Organ Grinder: only list deaths recent enough to plausibly still
@@ -160,17 +160,13 @@ def cat_status(cat) -> str:
     return "normal"
 
 
-def _pair_value(a, b) -> float:
+def _pair_value(a, b, kinship_memo: dict) -> float:
     """Breeding value of pairing a with b: 7s + stats, minus a safety
     penalty for the pair's birth-defect risk (low-risk pairings are worth
-    more)."""
+    more). ``kinship_memo`` is shared across all pairs so the COI walks are
+    amortized instead of restarted per pair."""
     proj = pair_projection(a, b, stimulation=STIMULATION_DEFAULT)
-    risk = 0.0
-    try:
-        from mewgenics_overlay.vendor.save_parser import risk_percent
-        risk = float(risk_percent(a, b))
-    except Exception:
-        risk = 0.0
+    risk = float(risk_percent(a, b, kinship_memo))
     return (W_SEVENS * proj.seven_plus_total
             + W_AVG * proj.avg_expected
             - W_RISK * risk)
@@ -181,13 +177,14 @@ def _breeding_keepers(cats) -> set:
     breeding pool. Kept deliberately simple: their best pairing score must
     beat the 75th percentile of the roster's scores."""
     scores: list = []
+    memo: dict = {}
     for a in cats:
         best = 0.0
         for b in cats:
             if b is a:
                 continue
             try:
-                best = max(best, _pair_value(a, b))
+                best = max(best, _pair_value(a, b, memo))
             except Exception:
                 continue
         scores.append((a, best))
@@ -199,8 +196,27 @@ def _breeding_keepers(cats) -> set:
 
 
 @dataclass
+class DonationAdvice:
+    """Why one candidate ranks where it does, parallel to the slot's
+    ``candidates`` list (advice[i] explains candidates[i]).
+
+    Computed fresh on every ``donation_report`` call and never stored on the
+    cats themselves — no hidden/stale state left behind on parser objects.
+    """
+
+    give: List[str]            # reasons to donate (shown first / ranked weak)
+    keep: List[str]            # reasons to keep
+    keep_for_breeding: bool    # top breeding mate for another cat
+    score: float = 0.0         # the sort score (lower = give away first)
+
+
+@dataclass
 class DonationSlot:
-    """Qualified cats for one NPC, ranked worst-kept first."""
+    """Qualified cats for one NPC, ranked worst-kept first.
+
+    ``candidates`` keeps the raw cat objects (ordering is the ranking);
+    ``advice`` holds the matching per-cat analysis, parallel by index.
+    """
 
     npc: str
     wants: str
@@ -208,6 +224,7 @@ class DonationSlot:
     supported: bool = True
     active: bool = True          # NPC has started taking cats (save flags)
     candidates: List[object] = field(default_factory=list)
+    advice: List[DonationAdvice] = field(default_factory=list)
     ranks: List[int] = field(default_factory=list)   # parallel: quality rank
 
     @property
@@ -307,9 +324,14 @@ def _defect_bias(cat, effect_of_cat) -> float:
     return bias
 
 
-def _give_away_score(cat, sums, effect_of_cat=None) -> float:
-    """Donation keep-score: LOWER = give away first. Based on how the cat
-    compares with the CURRENT living roster + genealogy + defect signs."""
+def _assess(cat, sums, effect_of_cat=None):
+    """One pass over a cat: (score, reasons_to_donate, reasons_to_keep).
+
+    LOWER score = give away first. Merges what used to be two separate
+    functions (score + reason builder) so the expensive shared inputs —
+    roster percentile, living offspring, line strength, defect sign — are
+    computed ONCE per cat per report instead of twice.
+    """
     base = _base_sum(cat)
     rel = _rank_fraction(base, sums)
     coi = max(0.0, min(1.0, float(getattr(cat, "inbredness", 0.0) or 0.0)))
@@ -317,35 +339,11 @@ def _give_away_score(cat, sums, effect_of_cat=None) -> float:
     line = _line_strength(cat, sums)
     bias = _defect_bias(cat, effect_of_cat)
 
-    score = 0.0
-    score += (rel - 0.5) * W_STRENGTH          # vs. living average (bell)
-    score -= coi * W_INBRED                    # inbred -> donate
-    score += (line - 0.5) * W_LINE             # good line -> keep
-    if living:
-        score -= min(1.5, living) * W_OFFSPRING   # line continues -> donate
-    else:
-        score += W_NO_OFFSPRING                   # line would end -> keep
-    score += bias * W_DEFECT_SIGN
-    if getattr(cat, "lovers", None):
-        score += W_LOVER_KEEP
-    if getattr(cat, "must_breed", False) or getattr(cat, "is_pinned", False):
-        score -= 100.0
-    return score
-
-
-def _donation_reasons(cat, sums, effect_of_cat=None):
-    """(reasons_to_donate, reasons_to_keep) that shaped the score."""
-    base = _base_sum(cat)
+    give: list = []
+    keep: list = []
     n = len(sums) or 1
     below = bisect.bisect_left(sums, base) / n      # strictly stronger share
     above = (len(sums) - bisect.bisect_right(sums, base)) / n  # strictly weaker
-    coi = max(0.0, min(1.0, float(getattr(cat, "inbredness", 0.0) or 0.0)))
-    living = len(_living_children(cat))
-    line = _line_strength(cat, sums)
-    bias = _defect_bias(cat, effect_of_cat)
-
-    give: list = []
-    keep: list = []
     if below >= 0.6:
         keep.append(f"Stronger than {below * 100:.0f}% of your living cats")
     elif above >= 0.6:
@@ -372,9 +370,21 @@ def _donation_reasons(cat, sums, effect_of_cat=None):
         keep.append("Marked must-breed")
     if getattr(cat, "is_pinned", False):
         keep.append("Pinned by you")
-    if getattr(cat, "_donate_keep_for_breeding", False):
-        keep.append("Top breeding mate for another cat")
-    return give, keep
+
+    score = 0.0
+    score += (rel - 0.5) * W_STRENGTH          # vs. living average (bell)
+    score -= coi * W_INBRED                    # inbred -> donate
+    score += (line - 0.5) * W_LINE             # good line -> keep
+    if living:
+        score -= min(1.5, living) * W_OFFSPRING   # line continues -> donate
+    else:
+        score += W_NO_OFFSPRING                   # line would end -> keep
+    score += bias * W_DEFECT_SIGN
+    if getattr(cat, "lovers", None):
+        score += W_LOVER_KEEP
+    if getattr(cat, "must_breed", False) or getattr(cat, "is_pinned", False):
+        score -= 100.0
+    return score, give, keep
 
 
 def donation_report(cats, active: Optional[set] = None,
@@ -385,11 +395,24 @@ def donation_report(cats, active: Optional[set] = None,
     ``cats`` are the alive cats; ``dead`` (optional) supplies the cats that
     have died, which the Organ Grinder takes. ``active`` is an optional set
     of flag names from the save's npc_progress.
+
+    Results are fully self-contained: each slot carries its cats AND its
+    analysis (``advice``), so nothing is written onto the cat objects.
     """
     flags = set(active or ())
     slots: List[DonationSlot] = []
     keepers = _breeding_keepers(cats)
     sums = _roster_ctx(cats)
+    # A cat can qualify for several NPCs, but its score/reasons depend only on
+    # the roster — assess each cat once per report and reuse the result.
+    assessed: dict = {}
+
+    def _assessment_of(c) -> tuple:
+        cached = assessed.get(id(c))
+        if cached is None:
+            cached = _assess(c, sums, effect_of_cat)
+            assessed[id(c)] = cached
+        return cached
 
     for npc in NPC_ORDER:
         profile = NPC_PROFILES[npc]
@@ -398,31 +421,26 @@ def donation_report(cats, active: Optional[set] = None,
                             unlock_note=profile.unlock_note,
                             active=any(flag.startswith(profile.slug)
                                        for flag in flags))
-        slot.candidates = [c for c in pool
-                         if _qualifies(c, npc)
-                         and (npc != "Organ Grinder"
-                              or _recent_death(c, current_day))
-                         and (npc != "Organ Grinder" or _visible_dead(c))]
-        if npc != "Organ Grinder":
-            for c in slot.candidates:
-                if id(c) in keepers:
-                    c._donate_keep_for_breeding = True
+        qualified = [c for c in pool
+                     if _qualifies(c, npc)
+                     and (npc != "Organ Grinder"
+                          or _recent_death(c, current_day))
+                     and (npc != "Organ Grinder" or _visible_dead(c))]
         # protect the breeding pool: cats that are a top mate for someone
         # sort below expendable cats (but above pinned/must-breed).
-        def _protected(c):
-            return bool(getattr(c, "must_breed", False)
-                        or getattr(c, "is_pinned", False))
-
-        def _keeper(c):
-            return bool(getattr(c, "_donate_keep_for_breeding", False))
-        slot.candidates.sort(
-            key=lambda c: (int(_protected(c)) * 2 + int(_keeper(c)),
-                           _give_away_score(c, sums, effect_of_cat)))
-        for c in slot.candidates:
-            _give, _keep = _donation_reasons(c, sums, effect_of_cat)
-            c._donate_give = _give
-            c._donate_keep = _keep
-        slot.ranks = list(range(1, len(slot.candidates) + 1))
+        scored = []
+        for c in qualified:
+            keeper = id(c) in keepers
+            protected = bool(getattr(c, "must_breed", False)
+                             or getattr(c, "is_pinned", False))
+            score, give, keep = _assessment_of(c)
+            scored.append((protected, keeper, score, give, keep, c))
+        scored.sort(key=lambda t: (int(t[0]) * 2 + int(t[1]), t[2]))
+        slot.candidates = [t[5] for t in scored]
+        slot.advice = [DonationAdvice(give=t[3], keep=t[4],
+                                      keep_for_breeding=t[1], score=t[2])
+                       for t in scored]
+        slot.ranks = list(range(1, len(scored) + 1))
         slots.append(slot)
 
     for name, wants, why in UNSUPPORTED:
@@ -431,8 +449,12 @@ def donation_report(cats, active: Optional[set] = None,
     return slots
 
 
-def recommendation_lines(cat) -> List[str]:
-    """Short human lines explaining why a cat is a candidate."""
+def recommendation_lines(cat, keep_for_breeding: bool = False) -> List[str]:
+    """Short human lines explaining why a cat is a candidate.
+
+    ``keep_for_breeding`` comes from the matching ``DonationAdvice`` — the
+    caller knows it, a bare cat never carries it.
+    """
     lines: List[str] = []
     age = _age(cat)
     if age is not None and age <= TINK_MAX_AGE:
@@ -454,7 +476,7 @@ def recommendation_lines(cat) -> List[str]:
     if _injured_stat_count(cat) >= 1:
         lines.append("stat penalties suggest an injury — Baby Jack will take "
                      "them")
-    if getattr(cat, "_donate_keep_for_breeding", False):
+    if keep_for_breeding:
         lines.append("valuable for breeding (a top mate for someone) — "
                      "donate only if you really need to")
     if getattr(cat, "is_dead", False):

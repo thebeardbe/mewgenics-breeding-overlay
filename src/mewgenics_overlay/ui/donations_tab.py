@@ -180,11 +180,12 @@ class DonationsTab(QWidget):
         self._render_slot(slot)
 
     @staticmethod
-    def _donate_rating(cat, index: int, total: int) -> str:
+    def _donate_rating(cat, index: int, total: int,
+                       keep_for_breeding: bool = False) -> str:
         """Donate? label: Donate / Maybe / Keep (weakest first ordering)."""
         if getattr(cat, "must_breed", False) or getattr(cat, "is_pinned", False):
             return "Keep"
-        if getattr(cat, "_donate_keep_for_breeding", False):
+        if keep_for_breeding:
             return "Keep"
         if total <= 1:
             return "Donate"
@@ -194,6 +195,18 @@ class DonationsTab(QWidget):
         if fraction < 0.75:
             return "Maybe"
         return "Keep"
+
+    @staticmethod
+    def _display_reasons(advice) -> list:
+        """(give, keep) reason lists for a candidate, including the
+        breeding-pool note when the cat is a top mate for someone (kept out
+        of the core assessment so cats never carry that state)."""
+        give = list(advice.give)
+        keep = list(advice.keep)
+        if advice.keep_for_breeding and not any(
+                "Top breeding mate" in line for line in keep):
+            keep.append("Top breeding mate for another cat")
+        return give, keep
 
     @staticmethod
     def _group_reasons(give, keep) -> list:
@@ -216,9 +229,6 @@ class DonationsTab(QWidget):
                 return ["Pinned — you marked this cat to keep."]
             if getattr(cat, "must_breed", False):
                 return ["Marked as must-breed — kept for breeding."]
-            if getattr(cat, "_donate_keep_for_breeding", False):
-                return ["A top breeding mate for another cat — donate only "
-                        "if forced."]
             return ["Among the strongest here — more valuable kept for "
                     "breeding."]
         if rating == "Maybe":
@@ -255,28 +265,26 @@ class DonationsTab(QWidget):
             "Maybe": _theme.C_WARN,
             "Keep": _theme.C_MUTED,
         }
-        for r_i, cat in enumerate(cats):
+        for r_i, (cat, advice) in enumerate(zip(cats, slot.advice)):
             base = sum(getattr(cat, "base_stats", {}).values())
             inj = sum(1 for s, v in (getattr(cat, "base_stats", {}) or {}).items()
                       if (getattr(cat, "total_stats", {}) or {}).get(s, v) < v)
-            rating = self._donate_rating(cat, r_i, total)
-            give = list(getattr(cat, "_donate_give", None) or [])
-            keep = list(getattr(cat, "_donate_keep", None) or [])
+            rating = self._donate_rating(cat, r_i, total,
+                                         keep_for_breeding=advice.keep_for_breeding)
+            give, keep = self._display_reasons(advice)
             if not give and not keep:
-                advice = self._advice_lines(cat, rating)
+                advice_lines = self._advice_lines(cat, rating)
                 if rating == "Keep":
-                    keep = advice
-                elif rating == "Donate":
-                    give = advice
+                    keep = advice_lines
                 else:
-                    give = advice
+                    give = advice_lines
             why = "\n".join(self._group_reasons(give, keep))
             _pin = "📌 " if getattr(cat, "is_pinned", False) else ""
             cells = [f"{_pin}{cat.name}", cat_status(cat), str(getattr(cat, "age", "?")),
                      str(base), rating, why]
             for c_i, text in enumerate(cells):
                 it = QTableWidgetItem(text)
-                it.setToolTip(self._row_tip(cat, slot, base, inj, rating))
+                it.setToolTip(self._row_tip(cat, slot, base, inj, rating, advice))
                 if c_i == 4:
                     it.setForeground(QColor(rating_colour[rating]))
                 self._table.setItem(r_i, c_i, it)
@@ -286,16 +294,17 @@ class DonationsTab(QWidget):
         )
 
     @staticmethod
-    def _row_tip(cat, slot, base, injured, rating="") -> str:
+    def _row_tip(cat, slot, base, injured, rating="", advice=None) -> str:
         lines = [f"{cat.name}  ({getattr(cat, 'gender', '?')})",
                  f"Stats: {base} · age {getattr(cat, 'age', '?')}"]
         if rating:
             lines.append(f"Donate? → {rating}")
-        give = list(getattr(cat, "_donate_give", None) or [])
-        keep = list(getattr(cat, "_donate_keep", None) or [])
+        give, keep = [], []
+        if advice is not None:
+            give, keep = DonationsTab._display_reasons(advice)
         if not give and not keep:
-            advice = DonationsTab._advice_lines(cat, rating)
-            (keep if rating == "Keep" else give).extend(advice)
+            advice_lines = DonationsTab._advice_lines(cat, rating)
+            (keep if rating == "Keep" else give).extend(advice_lines)
         lines += ["  " + line for line in DonationsTab._group_reasons(give, keep)]
         aggression = getattr(cat, "aggression", None)
         if aggression is not None:

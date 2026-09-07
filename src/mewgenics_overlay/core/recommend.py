@@ -121,8 +121,14 @@ def recommend(
             continue
         partner = row.partner
         partner_side = "b" if factors.cat_b is partner else "a"
-        defect_rows = defect_inheritance_rows(
-            factors.cat_a, factors.cat_b, row.coi, stimulation=stimulation)
+        # Rows may already carry their defect inheritance rows (computed once
+        # in the background worker); reusing them avoids re-walking shared
+        # ancestry per render for every candidate.
+        defect_rows = getattr(row, "defect_rows", None)
+        if defect_rows is None:
+            defect_rows = defect_inheritance_rows(
+                factors.cat_a, factors.cat_b, row.coi,
+                stimulation=stimulation)
 
         sevens = float(row.seven_plus_total)
         exp_avg = float(row.expected_avg)
