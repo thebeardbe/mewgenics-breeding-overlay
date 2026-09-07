@@ -866,6 +866,13 @@ class PaletteWindow(QWidget):
             f"<li>Save-format research: "
             f"<a href='https://github.com/pzx521521/mewgenics-save-editor'>"
             f"pzx521521/mewgenics-save-editor</a> and the community</li>"
+            f"<li>Breeding formulas (datamined from the game): "
+            f"<a href='https://mewgenicswiki.org/tools/breeding-calculator'>"
+            f"Mewgenics breeding calculator</a> (mewgenicswiki.org) + "
+            f"<a href='https://gist.github.com/SciresM/95a9dbba22937420e75d4da617af1397'>"
+            f"SciresM's game-code analysis</a>, cross-checked against "
+            f"<a href='https://mewgenics.wiki.gg/wiki/Breeding'>wiki.gg's "
+            f"datamined tables</a> — pinned by tests/test_wiki_math.py</li>"
             f"<li>Game mechanics reference: "
             f"<a href='https://mewgenics.wiki.gg/wiki/Mewgenics'>"
             f"Mewgenics Wiki</a></li>"
@@ -1576,9 +1583,10 @@ class PaletteWindow(QWidget):
                 better = _better_stat_expectation(row, self._stim_value())
                 it_exp.setToolTip(
                     f"Expected offspring stat average: {row.expected_avg:.2f} / 7.\n"
-                    + (f"Inherits the HIGHER parent value in ≈{better[0]:.1f} "
-                       f"of {better[1]} differing stats (at Stim "
-                       f"{self._stim_value():g}).\n" if better else "")
+                    + (f"The kitten takes the HIGHER of the two parents' "
+                       f"values in ≈{better[0]:.1f} of {better[1]} differing "
+                       f"stats (at Stim {self._stim_value():g}).\n"
+                       if better else "")
                     + "Per-stat inheritance ranges for this pair:\n"
                     + "\n".join(
                         f"  {s}: {proj.stat_ranges[s][0]}–{proj.stat_ranges[s][1]}"
@@ -1675,8 +1683,8 @@ class PaletteWindow(QWidget):
             better = _better_stat_expectation(row, self._stim_value())
             if better:
                 lines.append(
-                    f"Higher parent value wins in ≈{better[0]:.1f} of "
-                    f"{better[1]} differing stats"
+                    f"Takes the higher of the two parents' values in "
+                    f"≈{better[0]:.1f} of {better[1]} differing stats"
                 )
         malady = self._pair_malady_lines(row, self._stim_value())
         if malady:
@@ -1792,7 +1800,8 @@ class PaletteWindow(QWidget):
             )
             better = _better_stat_expectation(row, self._stim_value())
             if better:
-                text += (f"\nHigher parent value wins in ≈{better[0]:.1f} of "
+                text += (f"\nThe kitten takes the higher of the two parents' "
+                         f"values in ≈{better[0]:.1f} of "
                          f"{better[1]} differing stats")
             if kids:
                 text += f"   ·   existing kittens: {', '.join(kids)}"

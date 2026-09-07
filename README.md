@@ -18,6 +18,8 @@ Every column is sortable, headers explain each metric, and the roster refreshes 
 
 Built on the parser/genetics engine of the MIT-licensed [MewgenicsBreedingManager](https://github.com/frankieg33/MewgenicsBreedingManager) — synced to the [maintained fork by whyayala](https://github.com/whyayala/MewgenicsBreedingManager) (v5.9.5) for the Mewgenics 1.1 breeding model.
 
+**Breeding formulas** come from the datamined game code: the [Mewgenics breeding calculator](https://mewgenicswiki.org/tools/breeding-calculator) and [SciresM's analysis](https://gist.github.com/SciresM/95a9dbba22937420e75d4da617af1397) of `glaiel::CatData::breed`, cross-checked against [wiki.gg's datamined tables](https://mewgenics.wiki.gg/wiki/Breeding). Every formula is pinned by `tests/test_wiki_math.py`, so a future engine re-sync that drifts from the game data fails the test suite instead of silently changing your numbers.
+
 ## Install & run
 
 No Python or install step is needed for the binary builds — download, run, done. The overlay auto-detects your save (`%APPDATA%\Glaiel Games\Mewgenics\...\saves\` on Windows, the Proton prefix equivalent on Linux), or open one manually with the 📁 button. Set `MEWGENICS_SAVES_ROOT` to override discovery.
@@ -106,7 +108,10 @@ pip install pytest
 MEWGENICS_SAMPLE_SAV=/path/to/a/save.sav pytest tests/
 ```
 
-(No sample saves are committed; point the env var at one of your own.)
+(No sample saves are committed; point the env var at one of your own.
+`tests/test_wiki_math.py` needs **no** save — it pins every breeding formula
+(stat inheritance, ability/disorder/defect odds, sexuality, kinship,
+compatibility) to the public game-code documentation.)
 
 ## License
 
