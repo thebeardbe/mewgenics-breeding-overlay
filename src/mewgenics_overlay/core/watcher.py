@@ -15,6 +15,7 @@ see ``safe_read_save``).
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import tempfile
 import threading
@@ -108,6 +109,11 @@ def safe_read_save(path: str, dest_dir: Optional[str] = None) -> Optional[str]:
     """
     try:
         base = os.path.basename(path)
+        # sqlite ``file:`` URIs treat '?' / '#' as query / fragment markers, and
+        # the temp name below is later opened through such a URI. A hostile
+        # save filename (e.g. ``evil.sav?mode=rw``) could smuggle URI params,
+        # so temp names only keep safe characters.
+        base = re.sub(r"[^A-Za-z0-9._-]", "_", base)
         tmp = tempfile.NamedTemporaryFile(
             prefix=f"mewgenics-{base}-", suffix=".sav", delete=False, dir=dest_dir
         )

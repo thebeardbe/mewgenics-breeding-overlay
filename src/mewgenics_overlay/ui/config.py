@@ -39,16 +39,90 @@ def config_path() -> Path:
     return config_dir() / "config.json"
 
 
-def load() -> dict:
+def _coerce(saved: dict) -> dict:
+    """Return *saved* typed against DEFAULTS, junk-proof.
+
+    The config file is plain JSON sitting in a user-writable directory, so a
+    corrupt or tampered value must never reach code that assumes a type
+    (e.g. ``QRect(*window_rect)`` or ``int(max_partners)``) and crash the
+    overlay at startup or mid-session. Keys the app owns at runtime but that
+    are not defaults (``window_rect``, the pinned map, …) pass through as-is,
+    except ``window_rect`` which is sanity-checked.
+    """
     data = dict(DEFAULTS)
+
+    def _int(v, default, lo=None, hi=None):
+        try:
+            i = int(v)
+        except (TypeError, ValueError):
+            return default
+        if lo is not None and i < lo:
+            i = lo
+        if hi is not None and i > hi:
+            i = hi
+        return i
+
+    def _bool(v, default):
+        if isinstance(v, bool):
+            return v
+        if isinstance(v, (int, float)):
+            return v != 0
+        if isinstance(v, str):
+            return v.strip().lower() in ("1", "true", "yes", "on")
+        return default
+
+    def _float(v, default):
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            return default
+        if f != f or f in (float("inf"), float("-inf")):
+            return default
+        return f
+
+    def _rect(v):
+        if not (isinstance(v, list) and len(v) == 4):
+            return None
+        try:
+            xs = [int(x) for x in v]
+        except (TypeError, ValueError):
+            return None
+        if not all(-100000 <= x <= 100000 for x in xs) or xs[2] <= 0 or xs[3] <= 0:
+            return None
+        return xs
+
+    for key, v in saved.items():
+        if key == "window_rect":
+            data[key] = _rect(v)
+            continue
+        if key not in DEFAULTS:
+            data[key] = v          # runtime-owned key (pinned map, …)
+            continue
+        default = DEFAULTS[key]
+        if default is None:
+            # null-defaulted strings: only accept real strings (or null)
+            data[key] = v if isinstance(v, str) else None
+        elif key == "max_partners":
+            data[key] = _int(v, default, lo=1, hi=500)
+        elif isinstance(default, bool):
+            data[key] = _bool(v, default)
+        elif isinstance(default, (int, float)):
+            data[key] = _float(v, default)
+        else:
+            data[key] = v if isinstance(v, str) else default
+    return data
+
+
+def load() -> dict:
+    saved: dict = {}
     try:
         with open(config_path(), "r", encoding="utf-8") as f:
-            saved = json.load(f)
-        if isinstance(saved, dict):
-            data.update(saved)
+            raw = json.load(f)
+        if isinstance(raw, dict):
+            saved = raw
     except (OSError, ValueError):
         pass
-    return data
+    return _coerce(saved)
 
 
 def save(data: dict) -> None:

@@ -1027,11 +1027,18 @@ class PaletteWindow(QWidget):
                 return
             try:
                 sess = Session(tmp)
+            except Exception as exc:  # corrupt/hostile save must not kill the
+                log.exception("save reload failed")
                 with self._lock:
-                    self._pending.append((token, "session", sess))
+                    self._pending.append((token, "session_error", str(exc)))
+                return
             finally:
-                import os
-                os.unlink(tmp)
+                try:
+                    os.unlink(tmp)   # unlink can itself fail (e.g. AV lock)
+                except OSError:
+                    pass
+            with self._lock:
+                self._pending.append((token, "session", sess))
 
         threading.Thread(target=work, name="save-reload", daemon=True).start()
 
@@ -1109,6 +1116,13 @@ class PaletteWindow(QWidget):
             if kind == "session":
                 if token >= self._token:
                     self._adopt_session(result)
+            elif kind == "session_error":
+                if token >= self._token:
+                    # Keep the previous roster; never leave the UI hanging on
+                    # a corrupt/hostile save.
+                    self._set_status("⚠ could not read save — keeping the "
+                                     "previous cats")
+                    log.warning("save reload failed: %s", result)
             elif kind == "partners":
                 cat_key, rows = result
                 if token >= self._token and self._focus is not None \
@@ -1136,12 +1150,17 @@ class PaletteWindow(QWidget):
 
     # ── breeding-room Stimulation ──────────────────────────────────────────
     @staticmethod
-    def _to_float(raw, default: float, floor: Optional[float] = None) -> float:
+    def _to_float(raw, default: float, floor: Optional[float] = None,
+                  ceil: Optional[float] = None) -> float:
         try:
             value = float(raw)
         except (TypeError, ValueError):
             value = default
-        return max(value, floor) if floor is not None else value
+        if floor is not None:
+            value = max(value, floor)
+        if ceil is not None:
+            value = min(value, ceil)
+        return value
 
     def _stim_value(self) -> float:
         """Active Stimulation for pair math (selected room's furniture value
@@ -1408,7 +1427,8 @@ class PaletteWindow(QWidget):
         chosen = overall
         fallback = False
         if self._safe_mode:
-            cap = float(self._settings.get("safe_risk_cap", 15.0))
+            cap = self._to_float(self._settings.get("safe_risk_cap", 15.0),
+                                 15.0, floor=1.0, ceil=100.0)
             safe_rows = [r for r in compat if r.risk_pct <= cap]
             safe_rec = (recommend_best(safe_rows, self._focus,
                                        effect_of=effect,
