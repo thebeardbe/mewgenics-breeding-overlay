@@ -139,6 +139,13 @@ Key invariants:
   quality, defect sign, lovers; pinned/must-breed forced Keep.
 - **Pinning**: per-save keep-list keyed by `unique_id`; cats whose status is
   `Gone` are pruned automatically.
+- **Lover/rival affinity**: the save stores an affinity float beside each
+  relationship UID (probed: ~0.25 when formed, ×0.9 decay otherwise), but the
+  vendored parser only exposes the UID lists — affinity-driven lover
+  multipliers stay approximated (1.25/0.75/1.0). Parsing it is an upstream
+  (MBM fork) change, not an overlay one.
+- **Fertility/twins** (twin chance = combined fertility − 1) is a hidden stat
+  the game never reveals (Tink has no display for it); not modelled.
 - **NPC unlocks** are read from the save's `npc_progress` flags; locked NPCs
   are hidden entirely (spoiler guard). Organ Grinder counts only *visible*
   (non-`Gone`) dead cats. Butch chapter progress and per-NPC donation counters
@@ -156,6 +163,7 @@ Key invariants:
 | `test_stimulation.py` | Stim/Comfort effect on inheritance & odds |
 | `test_location.py` | "Outside house", same-sex straight block |
 | `test_donations.py` | matrix factors, NPCS, rating, organ filters, pin |
+| `test_wiki_math.py` | formula pins vs mewgenicswiki.org calculator + SciresM gist + wiki.gg datamine (stat curve, ability breakpoints, inbreeding rolls, defect inheritance, sexuality averages, kinship escalation, compat/night rolls) — no save needed; a failure here is a vendor-drift alarm |
 
 Plus `scripts/gui_smoke.py` for the real UI offscreen.
 
@@ -190,7 +198,7 @@ Plus `scripts/gui_smoke.py` for the real UI offscreen.
 
 ## 8. Status / roadmap
 
-- Latest release: **v0.1.42**. Next: **v0.2.0** after tester review.
+- Latest release: **v0.1.43**. Next: **v0.2.0** after tester review.
 - Known gaps: per-NPC donation counters and Butch chapter progress are not
   recoverable from the save; Frank/retired is heuristic (abilities+stat
   gains); aggression is displayed for future fighter-room optimisation but

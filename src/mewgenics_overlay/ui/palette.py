@@ -54,6 +54,9 @@ from mewgenics_overlay.core.session import (
 )
 from mewgenics_overlay.core.watcher import SaveWatcher, safe_read_save
 from mewgenics_overlay.vendor.breeding import tracked_offspring
+from mewgenics_overlay.vendor.save_parser import (
+    _stimulation_inheritance_weight as _better_stat_weight,
+)
 
 from . import config as cfg
 from .theme import gender_badge, risk_color, wrap_tooltip as _wt
@@ -330,6 +333,29 @@ def _night_chance(v: float, comfort: float = 0.0) -> float:
     rolls must succeed, so it is the per-roll chance squared."""
     roll = _roll_chance(v, comfort)
     return roll * roll
+
+
+def _better_stat_expectation(row, stimulation: float = 50.0):
+    """(expected, differing) over the 7 stats for a partner row.
+
+    ``expected`` is how many stats are expected to take the HIGHER parent's
+    value at this room Stimulation (the calculator's "expected better stats",
+    counted only over the stats the parents actually differ on); ``differing``
+    is that count. Wiki rule: each stat takes one parent's value with
+    P(better) = (100 + Stim) / (200 + |Stim|).
+    """
+    factors = row.pair_factors
+    if factors is None:
+        return None
+    proj = factors.projection
+    expected = 0.0
+    differing = 0
+    for s in STAT_NAMES:
+        lo, hi = proj.stat_ranges[s]
+        if hi > lo:
+            differing += 1
+            expected += _better_stat_weight(stimulation)
+    return expected, differing
 
 
 def _stats_html(cat: Cat) -> str:
@@ -1547,9 +1573,13 @@ class PaletteWindow(QWidget):
                             "game won't attempt it.")
                 ))
                 proj = row.pair_factors.projection
+                better = _better_stat_expectation(row, self._stim_value())
                 it_exp.setToolTip(
                     f"Expected offspring stat average: {row.expected_avg:.2f} / 7.\n"
-                    "Per-stat inheritance ranges for this pair:\n"
+                    + (f"Inherits the HIGHER parent value in ≈{better[0]:.1f} "
+                       f"of {better[1]} differing stats (at Stim "
+                       f"{self._stim_value():g}).\n" if better else "")
+                    + "Per-stat inheritance ranges for this pair:\n"
                     + "\n".join(
                         f"  {s}: {proj.stat_ranges[s][0]}–{proj.stat_ranges[s][1]}"
                         for s in STAT_NAMES
@@ -1642,6 +1672,12 @@ class PaletteWindow(QWidget):
             )
             lines.append(f"Expected kitten stats: {ranges}")
             lines.append(f"Expected ≥7 stats: {row.seven_plus_total:.1f}")
+            better = _better_stat_expectation(row, self._stim_value())
+            if better:
+                lines.append(
+                    f"Higher parent value wins in ≈{better[0]:.1f} of "
+                    f"{better[1]} differing stats"
+                )
         malady = self._pair_malady_lines(row, self._stim_value())
         if malady:
             lines.append("")
@@ -1754,6 +1790,10 @@ class PaletteWindow(QWidget):
                     for s in STAT_NAMES
                 )
             )
+            better = _better_stat_expectation(row, self._stim_value())
+            if better:
+                text += (f"\nHigher parent value wins in ≈{better[0]:.1f} of "
+                         f"{better[1]} differing stats")
             if kids:
                 text += f"   ·   existing kittens: {', '.join(kids)}"
         else:
