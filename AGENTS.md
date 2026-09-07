@@ -198,7 +198,7 @@ Plus `scripts/gui_smoke.py` for the real UI offscreen.
 
 ## 8. Status / roadmap
 
-- Latest release: **v0.1.45**. Next: **v0.2.0** after tester review.
+- Latest release: **v0.1.46**. Next: **v0.2.0** after tester review.
 - Known gaps: per-NPC donation counters and Butch chapter progress are not
   recoverable from the save; Frank/retired is heuristic (abilities+stat
   gains); aggression is displayed for future fighter-room optimisation but

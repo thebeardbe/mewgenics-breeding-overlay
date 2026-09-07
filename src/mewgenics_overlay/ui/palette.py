@@ -543,6 +543,14 @@ class PaletteWindow(QWidget):
         self._cat_lovers = QLabel("")
         self._cat_lovers.setObjectName("muted")
         self._cat_health = QLabel("")
+        # Save-derived text (cat names, disorder/defect names) must never be
+        # interpreted as rich text: Qt's AutoText would render HTML-looking
+        # names as styled content (and try to fetch <img> resources). These
+        # labels show user data, so force plain text; _cat_stats is OUR html
+        # (stat chips only) and stays rich.
+        for _lbl in (self._cat_name, self._cat_meta, self._cat_lovers,
+                     self._cat_health):
+            _lbl.setTextFormat(Qt.TextFormat.PlainText)
         self._cat_health.setWordWrap(True)
         self._cat_health.setStyleSheet(f"color:{_theme.C_WARN}; font-size:11px;")
         self._cat_health.setToolTip(_wt(
@@ -637,6 +645,8 @@ class PaletteWindow(QWidget):
         self._detail = QLabel("Select a partner row for inheritance detail.")
         self._detail.setWordWrap(True)
         self._detail.setObjectName("muted")
+        # can embed partner names (save-derived) — never auto-rich-text them
+        self._detail.setTextFormat(Qt.TextFormat.PlainText)
         self._detail.setToolTip(_wt(
             "Information about the row you have highlighted:\n"
             "• What each kitten stat could come out as (the possible range "
@@ -913,8 +923,14 @@ class PaletteWindow(QWidget):
 
     def _report_url(self) -> str:
         """Where the About-box report button points (see config.report_url)."""
-        return (self._settings.get("report_url")
-                or "https://github.com/thebeardbe/mewgenics-breeding-overlay/issues")
+        url = (self._settings.get("report_url")
+               or "https://github.com/thebeardbe/mewgenics-breeding-overlay/issues")
+        # Only ever hand an http(s) URL to the OS browser — never a custom
+        # scheme from a config file (file:, or registered protocol handlers).
+        if isinstance(url, str) and url.lower().startswith(("http://",
+                                                           "https://")):
+            return url
+        return "https://github.com/thebeardbe/mewgenics-breeding-overlay/issues"
 
     def _open_report(self) -> None:
         import webbrowser
