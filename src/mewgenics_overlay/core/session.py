@@ -100,6 +100,7 @@ class PartnerRow:
     # (cat_a, cat_b, coi, stimulation) so the UI worker computes it ONCE per
     # pair and table/tooltip/best-match rendering reuse it instead of
     # re-deriving it 3-4x per row.
+    defect_rows_ok: bool = True   # False = worker failed to compute (≠ no defects)
 
 
 @dataclass(slots=True)

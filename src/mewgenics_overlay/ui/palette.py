@@ -1302,12 +1302,21 @@ class PaletteWindow(QWidget):
                 if ok else "—")
             it_exp = QTableWidgetItem(f"{row.expected_avg:.2f}" if ok else "—")
             it_7 = QTableWidgetItem(f"{row.seven_plus_total:.1f}" if ok else "—")
-            defects_text = _defects_summary(row, self._stim_value())
-            it_defects = QTableWidgetItem(defects_text)
-            it_defects.setToolTip(
-                _wt("\n".join(self._pair_malady_lines(row, self._stim_value()))
-                   or "Both parents clean.")
-            )
+            if not getattr(row, "defect_rows_ok", True):
+                # Compute failed in the worker: show a distinct marker, not
+                # an identical empty cell ("we don't know" vs "no defects").
+                it_defects = QTableWidgetItem("—")
+                it_defects.setToolTip(_wt(
+                    "Defect information is unavailable for this pair — "
+                    "scoring failed (details in the log). The Risk column "
+                    "remains the safer guide here."))
+            else:
+                defects_text = _defects_summary(row, self._stim_value())
+                it_defects = QTableWidgetItem(defects_text)
+                it_defects.setToolTip(
+                    _wt("\n".join(self._pair_malady_lines(row, self._stim_value()))
+                        or "Both parents clean.")
+                )
             it_note = QTableWidgetItem(_note_text(row, kids))
 
             if ok:
@@ -1371,7 +1380,8 @@ class PaletteWindow(QWidget):
                                             row.game_compat,
                                             self._comfort_value()) >= 0.05
                                         else _theme.C_WARN)
-                if _any_defect_guaranteed(row, self._stim_value()):
+                if getattr(row, "defect_rows_ok", True) and \
+                        _any_defect_guaranteed(row, self._stim_value()):
                     specials[COL_DEFECTS] = _theme.C_WARN       # inherited defects
             base_color = _theme.C_MUTED if not ok else _theme.C_TEXT
             for col, it in enumerate(cells):

@@ -149,11 +149,16 @@ class SaveController:
                     # (+ COI + room Stimulation): compute them ONCE here so
                     # cells, tooltips and Best-match reuse the result instead
                     # of re-walking shared ancestry on the UI thread.
+                    r.defect_rows_ok = True
                     try:
                         r.defect_rows = defect_inheritance_rows(
                             cat, r.partner, r.coi, stimulation=stimulation)
                     except Exception:
+                        # Distinguish 'truly no defects' from 'we could not
+                        # compute them': the table shows a distinct marker
+                        # instead of an identical empty cell.
                         r.defect_rows = None
+                        r.defect_rows_ok = False
                 self._push(token, "partners", (cat_key, enriched))
             except Exception as exc:  # keep the UI alive on parser surprises
                 log.exception("partner scoring failed")
