@@ -32,6 +32,6 @@ Informal backlog for the overlay. Nothing here is scheduled unless it says so.
 - Step 1 done: `SaveController` extracted.
 - Step 2 done: `PartnerTableWidget` (config/sort/render/tooltips) +
   Defects tri-state.
-- Step 3 next: `FocusedCatPanel` extraction.
+- Step 3 done: `FocusedCatPanel` extracted (ui/focuspanel.py).
 - Step 4 next: thin-coordinator cleanup + mechanical tidy (slots=True,
   glyph constants in theme.py).

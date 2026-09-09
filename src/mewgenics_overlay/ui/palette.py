@@ -50,6 +50,7 @@ from mewgenics_overlay.core.session import (
     display_location,
 )
 from mewgenics_overlay.ui.savecontroller import SaveController
+from mewgenics_overlay.ui.focuspanel import FocusedCatPanel
 
 # Partner-table pure core (columns, header tips, cell formatters) — moved to
 # ui/partnertable.py so the interactive widget can stay Qt-focused (step 2b).
@@ -62,11 +63,7 @@ from .partnertable import (
 )
 
 from . import config as cfg
-from .theme import gender_badge, wrap_tooltip as _wt
-from mewgenics_overlay.core.maladies import (
-    defect_lines,
-    sexuality_label,
-)
+from .theme import wrap_tooltip as _wt
 from mewgenics_overlay import __version__
 from mewgenics_overlay.core.gameassets import GameAssets, locate_gpak
 from mewgenics_overlay.core.stimulation import (
@@ -104,15 +101,6 @@ class _DragLabel(QLabel):
     def mouseReleaseEvent(self, event):
         self._dragging = False
         super().mouseReleaseEvent(event)
-
-
-def _stats_html(cat: Cat) -> str:
-    parts = []
-    for s in STAT_NAMES:
-        v = cat.base_stats[s]
-        color = _theme.C_GOOD if v >= 7 else (_theme.C_TEXT if v >= 4 else _theme.C_STAT_LOW)
-        parts.append(f'<span style="color:{color}"><b>{s}</b> {v}</span>')
-    return "   ".join(parts)
 
 
 class PaletteWindow(QWidget):
@@ -313,36 +301,8 @@ class PaletteWindow(QWidget):
         root.addWidget(self._results)
 
         # focused cat summary
-        self._cat_box = QWidget()
-        cat_l = QVBoxLayout(self._cat_box)
-        cat_l.setContentsMargins(0, 0, 0, 0)
-        cat_l.setSpacing(3)
-        self._cat_name = QLabel("No cat selected")
-        self._cat_name.setObjectName("headerName")
-        self._cat_meta = QLabel("")
-        self._cat_meta.setObjectName("muted")
-        self._cat_stats = QLabel("")
-        self._cat_stats.setTextFormat(Qt.TextFormat.RichText)
-        self._cat_lovers = QLabel("")
-        self._cat_lovers.setObjectName("muted")
-        self._cat_health = QLabel("")
-        # Save-derived text (cat names, disorder/defect names) must never be
-        # interpreted as rich text: Qt's AutoText would render HTML-looking
-        # names as styled content (and try to fetch <img> resources). These
-        # labels show user data, so force plain text; _cat_stats is OUR html
-        # (stat chips only) and stays rich.
-        for _lbl in (self._cat_name, self._cat_meta, self._cat_lovers,
-                     self._cat_health):
-            _lbl.setTextFormat(Qt.TextFormat.PlainText)
-        self._cat_health.setWordWrap(True)
-        self._cat_health.setStyleSheet(f"color:{_theme.C_WARN}; font-size:11px;")
-        self._cat_health.setToolTip(_wt(
-            "Things this cat carries that can be passed on to kittens.\n"
-            "• Disorders — a 15% chance per parent that carries one of "
-            "passing a random disorder to the kitten.\n"
-            "• Birth defects — kittens inherit these per body part; pick a "
-            "partner to see the exact odds for that pairing."
-        ))
+        self._focus_panel = FocusedCatPanel()
+        root.addWidget(self._focus_panel)
         row2 = QHBoxLayout()
         room_lbl = QLabel("Breed room:")
         room_lbl.setToolTip(_wt(
@@ -369,13 +329,10 @@ class PaletteWindow(QWidget):
         row2.addWidget(self._room_combo)
         row2.addStretch(1)
         row2.addWidget(self._btn_swap)
-        cat_l.addWidget(self._cat_name)
-        cat_l.addWidget(self._cat_meta)
-        cat_l.addWidget(self._cat_stats)
-        cat_l.addWidget(self._cat_lovers)
-        cat_l.addWidget(self._cat_health)
-        cat_l.addLayout(row2)
-        root.addWidget(self._cat_box)
+        _row_holder = QWidget()
+        _row_holder.setLayout(row2)
+        self._focus_panel.append_row(_row_holder)
+
 
         # best-match banner (+ safe-mode switch)
         best_row = QHBoxLayout()
@@ -967,11 +924,7 @@ class PaletteWindow(QWidget):
 
     def _clear_focus(self) -> None:
         self._focus = None
-        self._cat_name.setText("No cat selected")
-        self._cat_meta.setText("")
-        self._cat_stats.setText("")
-        self._cat_lovers.setText("")
-        self._cat_health.setText("")
+        self._focus_panel.clear()
         self._best_row = None
         self._btn_best.setVisible(False)
         self._btn_safe.setVisible(False)
@@ -979,95 +932,11 @@ class PaletteWindow(QWidget):
         self._detail.setText("Select a partner row for inheritance detail.")
 
     def _show_focus(self, cat: Cat) -> None:
-        gen = "stray" if cat.generation == 0 else f"gen {cat.generation}"
-        _gender = (cat.gender or "?").lower()
-        _sex = sexuality_label(getattr(cat, "sexuality_raw", None)) \
-            if _gender in ("male", "female") else None
-        meta = f"{gender_badge(cat.gender)} {cat.gender}" + \
-            (f" · {_sex}" if _sex else "") + \
-            f" · {display_location(cat)} · {gen}"
-        if cat.age is not None:
-            meta += f" · {cat.age}d"
-        if cat.inbredness > 0.03:
-            meta += f" · inbred {cat.inbredness * 100:.0f}%"
-        _pin = "📌 " if getattr(cat, "is_pinned", False) else ""
-        self._cat_name.setText(f"{_pin}{cat.name}")
-        self._cat_name.setToolTip(_wt(
-            f"{cat.name}  (save id {cat.db_key})\n"
-            "The cat you are analysing. Double-click a partner to switch "
-            "the analysis to them."
-        ))
-        self._cat_meta.setText(meta)
-        self._cat_meta.setToolTip(_wt(
-            f"{cat.gender} · {display_location(cat)} · "
-            f"generation {cat.generation} (0 = stray, each generation adds "
-            f"depth and shared ancestry)"
-            + (f"\nSexuality: {_sex}. "
-               "Bi/gay cats can breed with the same sex." if _sex else "")
-            + (f" · age {cat.age} days" if cat.age is not None else "")
-            + (f"\nInbreeding coefficient {cat.inbredness * 100:.1f}% = kinship "
-               "of this cat's parents — flagged above 3%."
-               if cat.inbredness > 0.03 else "")
-        ))
-        self._cat_stats.setText(_stats_html(cat))
-        self._cat_stats.setToolTip(_wt(
-            "Base stats (STR DEX CON INT SPD CHA LCK, 0–7) — the birth stats "
-            "kittens inherit from. Green = 7. These drive breeding math; "
-            "gear/mod bonuses are not shown here."
-        ))
-        lover_txt = ", ".join(l.name for l in getattr(cat, "lovers", []))
-        self._cat_lovers.setText(
-            f"♥ in love with: {lover_txt}" if lover_txt else "no lovers"
-        )
-        self._cat_lovers.setToolTip(_wt(
-            "In-game relationships.\n"
-            "Being lovers gives the pair a bonus when breeding.\n"
-            "If a cat already loves someone else, picking a different "
-            "partner can complicate things later." if lover_txt
-            else "This cat is not in love with anyone right now."
-        ))
-        # traits this cat already carries (defects / disorders)
-        disorders = list(getattr(cat, "disorders", None) or [])
-        own_defects = defect_lines(cat)
-        health_bits = []
-        if disorders:
-            health_bits.append("disorders: " + ", ".join(disorders))
-        if own_defects:
-            health_bits.append("birth defects: " + ", ".join(own_defects))
-        self._cat_health.setText(
-            "⚠ " + " · ".join(health_bits) if health_bits else ""
-        )
-        self._cat_health.setToolTip(_wt(self._health_tooltip(
-            cat, disorders, own_defects)))
+        def _gpak_effect(group_key, mutation_id):
+            return self._ga.effect_for(group_key, mutation_id) \
+                if self._ga is not None else ""
+        self._focus_panel.show_cat(cat, effect_for=_gpak_effect)
 
-    def _health_tooltip(self, cat, disorders, own_defects) -> str:
-        """Hover text for the ⚠ health line: carried traits + in-game effects
-        (effects come from resources.gpak when available)."""
-        if not (disorders or own_defects):
-            return "No birth defects or disorders."
-        lines = [f"{cat.name} carries:"]
-        if disorders:
-            lines.append("• disorders: " + ", ".join(disorders)
-                         + " — each parent with a disorder has a 15% chance "
-                           "to pass one")
-        if own_defects:
-            lines.append("• birth defects (odds depend on the partner — "
-                         "select one to see them):")
-            seen: set = set()
-            for e in (getattr(cat, "visual_mutation_entries", None) or []):
-                if not e.get("is_defect"):
-                    continue
-                name = e.get("name")
-                if not name or name in seen:
-                    continue
-                seen.add(name)
-                eff = (self._ga.effect_for(e.get("group_key"),
-                                           e.get("mutation_id"))
-                       if self._ga is not None else "")
-                lines.append("    · " + name + (f" — {eff}" if eff else ""))
-        return "\n".join(lines)
-
-    # ── search results ─────────────────────────────────────────────────────
     def _on_search_text(self, text: str) -> None:
         if not text.strip():
             self._results.setVisible(False)
