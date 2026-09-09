@@ -46,14 +46,12 @@ from PySide6.QtWidgets import (
 )
 
 from mewgenics_overlay.core.session import (
-    ALIVE_STATUSES,
     Cat,
     PartnerRow,
     Session,
     display_location,
 )
-from mewgenics_overlay.core.watcher import SaveWatcher, safe_read_save
-from mewgenics_overlay.vendor.breeding import tracked_offspring
+from mewgenics_overlay.ui.savecontroller import SaveController
 from mewgenics_overlay.vendor.save_parser import (
     _stimulation_inheritance_weight as _better_stat_weight,
 )
@@ -377,12 +375,9 @@ class PaletteWindow(QWidget):
     def __init__(self):
         super().__init__()
         self._settings = cfg.load()
-        self._session: Optional[Session] = None
         self._focus: Optional[Cat] = None
-        self._watcher: Optional[SaveWatcher] = None
-        self._lock = threading.Lock()
-        self._pending: list[tuple] = []   # (token, kind, result)
-        self._token = 0
+        self._save = SaveController()   # session state + background queue + watcher
+        self._asset_lock = threading.Lock()
         self._ui_busy = False
         self._pinned = True               # mirror of the 📌 button state
         self._click_through = False       # mouse passes through to the game
@@ -420,6 +415,15 @@ class PaletteWindow(QWidget):
         self._load_last_save()
         self._maybe_start_assets()
 
+    # ── save/session state (delegated to SaveController) ───────────────────
+    @property
+    def _session(self) -> Optional[Session]:
+        return self._save.session
+
+    @_session.setter
+    def _session(self, sess: Optional[Session]) -> None:
+        self._save.session = sess
+
     def _maybe_start_assets(self) -> None:
         """Load resources.gpak effect tables off the UI thread (once)."""
         if self._assets_started:
@@ -434,7 +438,7 @@ class PaletteWindow(QWidget):
                 ga = GameAssets(path)
             except Exception:
                 ga = None
-            with self._lock:
+            with self._asset_lock:
                 self._asset_result = ga
 
         threading.Thread(target=work, name="gpak-assets", daemon=True).start()
@@ -1007,10 +1011,7 @@ class PaletteWindow(QWidget):
         self._schedule_reload()
 
     def _start_watcher(self, path: str) -> None:
-        if self._watcher is not None:
-            self._watcher.stop()
-        self._watcher = SaveWatcher(path, on_change=self._save_changed.emit)
-        self._watcher.start()
+        self._save.start_watcher(path, on_change=self._save_changed.emit)
 
     def _on_save_changed(self) -> None:
         """Run on the UI thread via the ``_save_changed`` signal — the watcher
@@ -1028,101 +1029,31 @@ class PaletteWindow(QWidget):
     def shutdown(self) -> None:
         """Stop background threads before the app exits."""
         self._poll.stop()
-        if self._watcher is not None:
-            self._watcher.stop()
-            self._watcher = None
+        self._save.stop_watcher()
 
     # ── background work ────────────────────────────────────────────────────
     def _schedule_reload(self) -> None:
-        with self._lock:
-            self._token += 1
-            token = self._token
         path = self._settings.get("save_path")
-        if not path:
-            return
-
-        def work():
-            tmp = safe_read_save(path)
-            if tmp is None:
-                return
-            try:
-                sess = Session(tmp)
-            except Exception as exc:  # corrupt/hostile save must not kill the
-                log.exception("save reload failed")
-                with self._lock:
-                    self._pending.append((token, "session_error", str(exc)))
-                return
-            finally:
-                try:
-                    os.unlink(tmp)   # unlink can itself fail (e.g. AV lock)
-                except OSError:
-                    pass
-            with self._lock:
-                self._pending.append((token, "session", sess))
-
-        threading.Thread(target=work, name="save-reload", daemon=True).start()
+        if path:
+            self._save.schedule_reload(path)
 
     def _schedule_partners(self) -> None:
-        with self._lock:
-            self._token += 1
-            token = self._token
-            session = self._session
-            focus = self._focus
-        if session is None or focus is None:
+        focus = self._focus
+        if self._save.session is None or focus is None:
             return
-        cat_key = focus.db_key
-        max_rows = int(self._settings.get("max_partners", 100))
-        show_blocked = 0 if self._btn_swap.isChecked() else None
-        include_adv = bool(self._settings.get("include_adventure", True))
-        order = str(self._settings.get("order", "risk"))
-        stimulation = self._stim_value()
-
-        def work():
-            try:
-                sess = session
-                cat = sess.by_key.get(cat_key)
-                if cat is None:
-                    return
-                rows = sess.rank_partners(
-                    cat,
-                    max_partners=max_rows,
-                    include_adventure=include_adv,
-                    show_blocked=show_blocked,
-                    order=order,
-                    stimulation=stimulation,
-                )
-                enriched = []
-                for r in rows:
-                    kids = tracked_offspring(cat, r.partner)
-                    r.kitty_total = len(kids)
-                    r.kitty_available = sum(
-                        1 for k in kids
-                        if getattr(k, "status", "") in ALIVE_STATUSES)
-                    enriched.append((r, [k.name for k in kids]))
-                    # Defect inheritance rows are a pure function of the pair
-                    # (+ COI + room Stimulation): compute them ONCE here on the
-                    # worker thread so table cells, tooltips and the Best-match
-                    # recommender reuse the result instead of each re-deriving
-                    # it (and re-walking shared ancestry) on the UI thread.
-                    try:
-                        r.defect_rows = defect_inheritance_rows(
-                            cat, r.partner, r.coi, stimulation=stimulation)
-                    except Exception:
-                        r.defect_rows = None
-                with self._lock:
-                    self._pending.append((token, "partners", (cat_key, enriched)))
-            except Exception as exc:  # keep UI alive on parser surprises
-                log.exception("partner scoring failed")
-                with self._lock:
-                    self._pending.append((token, "partners_error", str(exc)))
-
-        threading.Thread(target=work, name="partner-score", daemon=True).start()
+        self._save.schedule_partners(
+            focus.db_key,
+            int(self._settings.get("max_partners", 100)),
+            0 if self._btn_swap.isChecked() else None,
+            bool(self._settings.get("include_adventure", True)),
+            str(self._settings.get("order", "risk")),
+            self._stim_value(),
+        )
 
     def _on_poll(self) -> None:
         """Drain completed background jobs on the UI thread (token-guarded)."""
-        with self._lock:
-            items = self._pending
-            self._pending = []
+        items = self._save.drain()
+        with self._asset_lock:
             assets = self._asset_result
             self._asset_result = None
         if assets is not None:
@@ -1132,12 +1063,13 @@ class PaletteWindow(QWidget):
                 self._redraw_table()          # effects now available in tooltips
             if self._focus is not None:
                 self._show_focus(self._focus)  # refresh health/effect tooltip
+        token_now = self._save.token
         for token, kind, result in items:
             if kind == "session":
-                if token >= self._token:
+                if token >= token_now:
                     self._adopt_session(result)
             elif kind == "session_error":
-                if token >= self._token:
+                if token >= token_now:
                     # Keep the previous roster; never leave the UI hanging on
                     # a corrupt/hostile save.
                     self._set_status("⚠ could not read save — keeping the "
@@ -1145,7 +1077,7 @@ class PaletteWindow(QWidget):
                     log.warning("save reload failed: %s", result)
             elif kind == "partners":
                 cat_key, rows = result
-                if token >= self._token and self._focus is not None \
+                if token >= token_now and self._focus is not None \
                         and self._focus.db_key == cat_key:
                     self._render_partners(rows)
             elif kind == "partners_error":
