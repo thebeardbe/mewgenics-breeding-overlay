@@ -23,6 +23,20 @@ The vendored save parser is itself based on research credited in MBM's README
 ([pzx521521/mewgenics-save-editor](https://github.com/pzx521521/mewgenics-save-editor),
 community reverse-engineering).
 
+## Private-name dependencies (contract — see tests/test_vendor_api.py)
+
+Overlay code deliberately imports a few leading-underscore helpers across the
+vendor boundary; a vendor sync must keep them (or update this list + the
+callers in one move):
+
+| Symbol | Consumed by |
+|---|---|
+| `save_parser._kinship` | `core/session.py` (generation tracing) |
+| `save_parser.kinship_coi`, `risk_percent`, `can_breed` | `core/session.py`, `core/donations.py` |
+| `save_parser._stimulation_inheritance_weight` | vendored `breeding.py` (stat inheritance) |
+| `breeding.pair_projection`, `score_pair`, `tracked_offspring` | `core/donations.py`, `ui/palette.py` |
+| `visual_mutation_catalog.*` | vendored parser + `core/maladies.py` |
+
 To update: copy newer files from the fork and re-apply the two import rewrites
 above. Everything else in this project's `mewgenics_overlay/` package is
 original overlay code.

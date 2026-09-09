@@ -14,6 +14,7 @@ see ``safe_read_save``).
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 import shutil
@@ -21,6 +22,8 @@ import tempfile
 import threading
 import time
 from typing import Callable, Optional
+
+log = logging.getLogger("mewgenics_overlay.watcher")
 
 _WAL_SUFFIXES = ("-wal", "-shm", "-journal")
 
@@ -95,8 +98,11 @@ class SaveWatcher:
                 if not self._stop.is_set():
                     try:
                         self.on_change()
-                    except Exception:  # caller handles logging
-                        pass
+                    except Exception:
+                        # Never kill the watcher thread on a callback bug, but
+                        # do leave a trace — silent reload-kills are the worst
+                        # kind of failure.
+                        log.exception("SaveWatcher change callback failed")
             self._stop.wait(self.poll)
 
 

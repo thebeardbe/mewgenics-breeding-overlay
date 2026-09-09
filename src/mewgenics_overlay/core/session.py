@@ -346,6 +346,12 @@ def _read_aux_save_data(save_path: str) -> tuple[Optional[int], set]:
         finally:
             conn.close()
         return day, flags
+    except sqlite3.Error as exc:
+        # corrupt/locked save: degrade gracefully but stay discoverable
+        log.warning("aux save data unreadable for %s: %s", save_path, exc)
+        return None, set()
     except Exception:
+        log.exception("unexpected error reading aux save data for %s",
+                      save_path)
         return None, set()
 

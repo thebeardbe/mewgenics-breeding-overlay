@@ -8,9 +8,12 @@ Stored per-user in a platform config dir:
 from __future__ import annotations
 
 import json
+import logging
 import os
 import tempfile
 from pathlib import Path
+
+log = logging.getLogger("mewgenics_overlay.config")
 
 _KEY = "mewgenics-overlay"
 DEFAULTS = {
@@ -95,6 +98,16 @@ def _coerce(saved: dict) -> dict:
         if key == "window_rect":
             data[key] = _rect(v)
             continue
+        if key == "report_url":
+            # URL defaults are validated once here: only http(s) is ever
+            # accepted, so no consumer can be tricked into opening
+            # javascript:/file: schemes even if a new call site appears.
+            if isinstance(v, str) and v.strip().lower().startswith(
+                    ("http://", "https://")):
+                data[key] = v.strip()
+            else:
+                data[key] = DEFAULTS["report_url"]
+            continue
         if key not in DEFAULTS:
             data[key] = v          # runtime-owned key (pinned map, …)
             continue
@@ -134,8 +147,9 @@ def save(data: dict) -> None:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(merged, f, indent=2, sort_keys=True)
         os.replace(tmp, str(path))   # atomic
-    except OSError:
+    except OSError as exc:
+        log.warning("could not persist settings to %s: %s", path, exc)
         try:
             os.unlink(tmp)
-        except OSError:
-            pass
+        except OSError as exc2:
+            log.debug("could not remove config temp %s: %s", tmp, exc2)

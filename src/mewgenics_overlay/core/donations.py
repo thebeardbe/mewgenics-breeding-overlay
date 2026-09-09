@@ -23,8 +23,11 @@ with "unsupported" so the tab stays honest about coverage.
 from __future__ import annotations
 
 import bisect
+import logging
 from dataclasses import dataclass, field
 from typing import List, Optional
+
+log = logging.getLogger("mewgenics_overlay.donations")
 
 
 from mewgenics_overlay.core.recommend import (
@@ -49,6 +52,10 @@ TRACY_MIN_AGE = 5         # minimum age Tracy accepts
 KEEPER_PERCENTILE = 0.75
 
 # donation matrix weights (positive = keep, negative = donate)
+# Rationale: each weight multiplies a roster-relative or per-cat signal and
+# was tuned against real saves — the full reasoning lives in git history
+# (commit subjects like 'weight nightly chance strongly') and SCORING notes;
+# change numbers deliberately, never ad-hoc.
 W_STRENGTH = 2.0      # roster-relative strength (bell curve)
 W_INBRED = 2.0        # per COI point -> donate
 W_OFFSPRING = 0.35    # per living offspring -> donate (line continues)
@@ -178,6 +185,7 @@ def _breeding_keepers(cats) -> set:
     beat the 75th percentile of the roster's scores."""
     scores: list = []
     memo: dict = {}
+    skipped = 0
     for a in cats:
         best = 0.0
         for b in cats:
@@ -186,8 +194,16 @@ def _breeding_keepers(cats) -> set:
             try:
                 best = max(best, _pair_value(a, b, memo))
             except Exception:
-                continue
+                # One broken pair must never silently poison advice for the
+                # whole roster: count it, log the first few loudly, and move
+                # on scoring the next pair.
+                skipped += 1
+                if skipped <= 3:
+                    log.exception("keeper scoring failed for %s x %s",
+                                  getattr(a, "name", a), getattr(b, "name", b))
         scores.append((a, best))
+    if skipped:
+        log.warning("keeper scoring skipped %d pair(s) after errors", skipped)
     if len(scores) < 4:
         return set()
     ordered = sorted(v for _, v in scores)

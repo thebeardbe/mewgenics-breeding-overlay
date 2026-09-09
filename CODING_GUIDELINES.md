@@ -106,6 +106,10 @@ Rules are numbered so the audit in §8 can reference them.
       names or unused imports
 - [ ] No line exceeds 120 in `src/mewgenics_overlay` (exclude `vendor/`)
 - [ ] No hex colour literals outside `theme.py`
+- [ ] `tests/test_vendor_api.py` passes — vendor surface unchanged after any
+      upstream re-sync (update `_VENDORED.md` when it intentionally changes)
+- [ ] Every save-derived string shown in a widget is set as PlainText (never
+      rich text / HTML built from save data)
 - [ ] Version identical in the three files and equal to the release tag
       (CI's `version-check` enforces this on `v*` pushes — no skips)
 - [ ] AGENTS.md §8 status / README do not quote an older release number

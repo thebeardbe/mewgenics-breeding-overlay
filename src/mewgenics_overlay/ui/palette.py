@@ -1015,8 +1015,12 @@ class PaletteWindow(QWidget):
     def _on_save_changed(self) -> None:
         """Run on the UI thread via the ``_save_changed`` signal — the watcher
         thread only emits, it never touches Qt widgets."""
-        self._set_status("save changed — reloading…")
-        self._schedule_reload()
+        try:
+            self._set_status("save changed — reloading…")
+            self._schedule_reload()
+        except Exception:
+            log.exception("save-change handler failed")
+            self._set_status("⚠ save changed but reload failed — see the log")
 
     def _set_status(self, text: str) -> None:
         self._status.setText(text)
@@ -1145,7 +1149,10 @@ class PaletteWindow(QWidget):
                         and self._focus.db_key == cat_key:
                     self._render_partners(rows)
             elif kind == "partners_error":
-                self._set_status(f"scoring failed: {result}")
+                # raw exception already logged in the worker; show a
+                # friendly line, never a Python traceback in the UI.
+                self._set_status("⚠ partner scoring failed — see the log; "
+                                 "try selecting another cat")
 
     def _adopt_session(self, sess: Optional[Session]) -> None:
         self._session = sess
