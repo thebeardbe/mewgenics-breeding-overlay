@@ -24,7 +24,7 @@ from typing import Optional
 
 from PySide6.QtCore import Qt, QEvent, QRect, QTimer, Signal
 import mewgenics_overlay.ui.theme as _theme
-from PySide6.QtGui import QColor, QGuiApplication
+from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -46,7 +46,6 @@ from PySide6.QtWidgets import (
 
 from mewgenics_overlay.core.session import (
     Cat,
-    PartnerRow,
     Session,
     display_location,
 )
@@ -55,37 +54,17 @@ from mewgenics_overlay.ui.savecontroller import SaveController
 # Partner-table pure core (columns, header tips, cell formatters) — moved to
 # ui/partnertable.py so the interactive widget can stay Qt-focused (step 2b).
 from .partnertable import (
-    COL_CAT,
-    COL_CHANCE,
-    COL_DEFECTS,
-    COL_EXP,
-    COL_FAMILY,
-    COL_GEN_DELTA,
-    COL_NOTE,
-    COL_RISK,
-    COL_ROOM,
-    COL_SEVEN,
     STAT_NAMES,
     _COL_TIPS,
-    _any_defect_guaranteed,
     _better_stat_expectation,
-    _cat_glyphs,
-    _defect_rows_of,
-    _defects_summary,
-    _fmt_chance,
-    _kittens_label,
     _night_chance,
-    _note_text,
     PartnerTableWidget,
 )
 
 from . import config as cfg
-from .theme import gender_badge, risk_color, wrap_tooltip as _wt
+from .theme import gender_badge, wrap_tooltip as _wt
 from mewgenics_overlay.core.maladies import (
-    ASYMMETRIC_GROUPS,
-    _side_text,
     defect_lines,
-    disorder_summary,
     sexuality_label,
 )
 from mewgenics_overlay import __version__
@@ -1198,7 +1177,8 @@ class PaletteWindow(QWidget):
             text += "   ⚠ breeds rarely"
         self._btn_best.setText(text)
         tool = "Why this pick:\n" + "\n".join(chosen.breakdown)
-        malady = self._pair_malady_lines(chosen.row, self._stim_value())
+        malady = self._table._pair_malady_lines(
+            chosen.row, self._stim_value(), self._effect_for_name)
         if malady:
             tool += "\n\n" + "\n".join(malady)
         tool += "\n\nClick to select this partner."
@@ -1218,43 +1198,6 @@ class PaletteWindow(QWidget):
                 self._on_partner_selected()
                 return
 
-    def _col_key(self, col: int, row: PartnerRow, kids: list[str]):
-        """Sort key for a column (text columns sort as strings, rest numeric)."""
-        p = row.partner
-        if col == COL_CAT:
-            return p.name.lower()
-        if col == COL_FAMILY:
-            return row.relation.label.lower()
-        if col == COL_GEN_DELTA:
-            return row.relation.gen_gap
-        if col == COL_ROOM:
-            return display_location(p).lower()
-        if col == COL_RISK:
-            return row.risk_pct
-        if col == COL_CHANCE:
-            return row.game_compat
-        if col == COL_EXP:
-            return row.expected_avg
-        if col == COL_SEVEN:
-            return row.seven_plus_total
-        if col == COL_DEFECTS:
-            return _defects_summary(row, self._stim_value()).lower()
-        return _note_text(row, kids).lower()
-
-    def _order_rows(self) -> list:
-        """Compatible partners first (per active column), blocked rows after."""
-        if self._sort_col is None:
-            return list(self._rows)          # default safe-first order from engine
-        rev = self._sort_dir == "desc"
-        good = [e for e in self._rows if e[0].compatible]
-        blocked = [e for e in self._rows if not e[0].compatible]
-        good.sort(key=lambda e: self._col_key(self._sort_col, e[0], e[1]), reverse=rev)
-        # blocked rows keep a readable fixed order (text columns only)
-        if self._sort_col in (COL_CAT, COL_FAMILY, COL_DEFECTS, COL_NOTE):
-            blocked.sort(key=lambda e: self._col_key(self._sort_col, e[0], e[1]),
-                         reverse=rev)
-        return good + blocked
-
     def _on_header_clicked(self, col: int) -> None:
         """Tri-state sort: asc -> desc -> back to default order."""
         self._table.toggle_sort(col)
@@ -1265,256 +1208,12 @@ class PaletteWindow(QWidget):
 
     # ── table rendering ────────────────────────────────────────────────────
     def _redraw_table(self) -> None:
-        ordered = self._order_rows()
-        self._table.setRowCount(0)
-        self._table.setRowCount(len(ordered))
-        for r_i, (row, kids) in enumerate(ordered):
-            p = row.partner
-            ok = row.compatible
-            _pin = "📌 " if getattr(p, "is_pinned", False) else ""
-            glyphs = _cat_glyphs(p)
-            nm = f"{_pin}{p.name} {glyphs}"
-            name = nm if ok else f"{nm}  (✗)"
-            rel = row.relation
-
-            it_name = QTableWidgetItem(name)
-            it_name.setData(Qt.ItemDataRole.UserRole, (row, kids))
-            it_name.setToolTip(self._partner_tooltip(row, kids))
-
-            it_family = QTableWidgetItem(rel.label)
-            it_family.setToolTip(self._family_tooltip(row))
-            it_gap = QTableWidgetItem(f"{rel.gen_gap:+d}" if rel.gen_gap else "0")
-            it_gap.setToolTip(
-                f"Generation gap for {p.name}: focused gen − partner gen "
-                f"= {rel.gen_gap:+d}."
-            )
-
-            it_room = QTableWidgetItem(display_location(p))
-            it_risk = QTableWidgetItem(f"{row.risk_pct:.1f}%" if ok else "—")
-            it_comp = QTableWidgetItem(
-                _fmt_chance(row.game_compat, self._comfort_value())
-                if ok else "—")
-            it_exp = QTableWidgetItem(f"{row.expected_avg:.2f}" if ok else "—")
-            it_7 = QTableWidgetItem(f"{row.seven_plus_total:.1f}" if ok else "—")
-            if not getattr(row, "defect_rows_ok", True):
-                # Compute failed in the worker: show a distinct marker, not
-                # an identical empty cell ("we don't know" vs "no defects").
-                it_defects = QTableWidgetItem("—")
-                it_defects.setToolTip(_wt(
-                    "Defect information is unavailable for this pair — "
-                    "scoring failed (details in the log). The Risk column "
-                    "remains the safer guide here."))
-            else:
-                defects_text = _defects_summary(row, self._stim_value())
-                it_defects = QTableWidgetItem(defects_text)
-                it_defects.setToolTip(
-                    _wt("\n".join(self._pair_malady_lines(row, self._stim_value()))
-                        or "Both parents clean.")
-                )
-            it_note = QTableWidgetItem(_note_text(row, kids))
-
-            if ok:
-                it_risk.setToolTip(
-                    f"Birth-defect risk for this pair: {row.risk_pct:.1f}%."
-                )
-                _comfort = self._comfort_value()
-                it_comp.setToolTip(_wt(
-                    f"Nightly breeding chance: "
-                    f"{_fmt_chance(row.game_compat, _comfort)}.\n"
-                    "That's the answer to 'will they breed tonight?' — the "
-                    "game's two rolls are already folded in."
-                    + ("\nAbove the game's compat line (0.05) so the game "
-                       "will try it — but amber below means under 5% per "
-                       "night despite that." if row.game_compat > 0.05
-                       else "\nBelow the game's compat line (0.05) — the "
-                            "game won't attempt it.")
-                ))
-                proj = row.pair_factors.projection
-                better = _better_stat_expectation(row, self._stim_value())
-                it_exp.setToolTip(
-                    f"Expected offspring stat average: {row.expected_avg:.2f} / 7.\n"
-                    + (f"The kitten takes the HIGHER of the two parents' "
-                       f"values in ≈{better[0]:.1f} of {better[1]} differing "
-                       f"stats (at Stim {self._stim_value():g}).\n"
-                       if better else "")
-                    + "Per-stat inheritance ranges for this pair:\n"
-                    + "\n".join(
-                        f"  {s}: {proj.stat_ranges[s][0]}–{proj.stat_ranges[s][1]}"
-                        for s in STAT_NAMES
-                    )
-                )
-                it_7.setToolTip(
-                    f"Expected stats at 7 or higher: "
-                    f"{row.seven_plus_total:.1f} of 7.\n"
-                    "Locked 7s for this pair (both parents at 7): "
-                    + (", ".join(proj.locked_stats) or "none")
-                )
-            else:
-                for it in (it_risk, it_comp, it_exp, it_7):
-                    it.setToolTip("No values — this pair cannot breed. "
-                                  "Reason is in the Note column.")
-            it_room.setToolTip(f"Current location of {p.name}.")
-            it_note.setToolTip(
-                (row.reason if (not ok and row.reason) else "")
-                + (f"Existing kittens: {_kittens_label(row)}" if kids else "")
-            )
-
-            cells = [it_name, it_family, it_gap, it_room, it_risk, it_comp,
-                     it_exp, it_7, it_defects, it_note]
-            specials: dict = {}
-            if ok:
-                if rel.is_family:
-                    specials[COL_FAMILY] = _theme.C_FAMILY      # related, breedable
-                specials[COL_RISK] = risk_color(row.risk_pct)
-                # Colour tracks the chance actually shown: green ≈ ≥5% per
-                # night, amber below it (the game's own 0.05 *compat* gate is
-                # separate — it only decides whether attempts happen at all).
-                specials[COL_CHANCE] = (_theme.C_GOOD
-                                        if _night_chance(
-                                            row.game_compat,
-                                            self._comfort_value()) >= 0.05
-                                        else _theme.C_WARN)
-                if getattr(row, "defect_rows_ok", True) and \
-                        _any_defect_guaranteed(row, self._stim_value()):
-                    specials[COL_DEFECTS] = _theme.C_WARN       # inherited defects
-            base_color = _theme.C_MUTED if not ok else _theme.C_TEXT
-            for col, it in enumerate(cells):
-                it.setForeground(QColor(specials.get(col, base_color)))
-                self._table.setItem(r_i, col, it)
-        self._update_sort_indicator()
-
-    @staticmethod
-    def _family_tooltip(row: PartnerRow) -> str:
-        """Row-specific facts only; the COI weighting explanation lives in the
-        Family column header tooltip."""
-        rel = row.relation
-        lines = [f"Relationship: {rel.label}",
-                 f"Shared family history (COI): {row.coi * 100:.1f}%"]
-        if rel.is_family:
-            close = f"{rel.shared_recent} shared ancestor(s) close enough " \
-                    "to matter"
-            if rel.shared_ancestors > rel.shared_recent:
-                close += f" (of {rel.shared_ancestors} in total)"
-            lines.append(close)
-            if row.direct_family:
-                lines.append("Direct family — the game stops this pairing.")
-            else:
-                lines.append("Related, but allowed — this shared history "
-                             "is what raises the Risk %.")
-        else:
-            lines.append("No shared family history that matters — the "
-                         "safest kind of pairing.")
-        lines.append("Longer explanation: hover the Family heading above.")
-        return _wt("\n".join(lines))
-
-    def _partner_tooltip(self, row: PartnerRow, kids: list[str]) -> str:
-        p = row.partner
-        _pg = (p.gender or "?").lower()
-        _pl = sexuality_label(getattr(p, "sexuality_raw", None)) \
-            if _pg in ("male", "female") else None
-        lines = [f"{p.name}  ({p.gender}"
-                 + (f" · {_pl}" if _pl else "")
-                 + f", {display_location(p)})"]
-        rel = row.relation
-        lines.append(f"Family: {rel.label} · Δgen {rel.gen_gap:+d} "
-                     f"· COI {row.coi * 100:.1f}%")
-        lines.append(f"Birth-defect risk: {row.risk_pct:.1f}%")
-        lines.append(
-            f"Breed attempt/night: {_fmt_chance(row.game_compat, self._comfort_value())} "
-            f"(compat {row.game_compat:.3f} > 0.05)"
-        )
-        if row.compatible:
-            proj = row.pair_factors.projection
-            ranges = "  ".join(
-                f"{s} {proj.stat_ranges[s][0]}–{proj.stat_ranges[s][1]}"
-                for s in STAT_NAMES
-            )
-            lines.append(f"Expected kitten stats: {ranges}")
-            lines.append(f"Expected ≥7 stats: {row.seven_plus_total:.1f}")
-            better = _better_stat_expectation(row, self._stim_value())
-            if better:
-                lines.append(
-                    f"Takes the higher of the two parents' values in "
-                    f"≈{better[0]:.1f} of {better[1]} differing stats"
-                )
-        malady = self._pair_malady_lines(row, self._stim_value())
-        if malady:
-            lines.append("")
-            lines.extend(malady)
-        if row.is_lover or row.mutual_lover:
-            lines.append("They are lovers" if row.mutual_lover else "They like you")
-        if kids:
-            names = ", ".join(kids)
-            label = _kittens_label(row)
-            lines.append(f"Existing kittens together: {names}")
-            if label:
-                lines.append(f"   ({label})")
-        lines.append("Double-click to analyse breeding from this cat.")
-        return _wt("\n".join(lines))
-
-    def _pair_malady_lines(self, row: PartnerRow,
-                           stimulation: float = 50.0) -> list[str]:
-        """Inheritance of traits the parents ALREADY carry (disorders exact,
-        visual birth defects per body part, effects when the gpak is present).
-        Empty when both parents are clean."""
-        if row.pair_factors is None:
-            return []
-        a = row.pair_factors.cat_a          # focused cat
-        b = row.pair_factors.cat_b          # partner
-        dis = disorder_summary(a, b)
-        lines: list[str] = []
-        if dis["a"]:
-            lines.append(f"⚠ {a.name} carries disorder(s): "
-                         + ", ".join(dis["a"]))
-        if dis["b"]:
-            lines.append(f"⚠ {b.name} carries disorder(s): "
-                         + ", ".join(dis["b"]))
-        if dis["a"] or dis["b"]:
-            lines.append(f"→ Kitten inherits ≥1 parent disorder: "
-                         f"{dis['any_pct']:.0f}% "
-                         f"(15% per parent that carries one)")
-        rows = _defect_rows_of(row, stimulation)
-        for drow in rows:
-            asym = drow.group in ASYMMETRIC_GROUPS
-            if len(drow.carriers) == 2:
-                if not asym:
-                    lines.append(f"→ {drow.name}: both parents carry it — "
-                                 f"the kitten gets it (≈100%)")
-                elif drow.same_line:
-                    lines.append(
-                        f"→ {drow.name}: both parents carry it from the SAME "
-                        f"line → the kitten gets it on the same part/side "
-                        f"(≈100%)"
-                    )
-                else:
-                    lines.append(
-                        f"→ {drow.name}: both parents carry it from DIFFERENT "
-                        f"lines → the kitten gets it on the same side as one "
-                        f"parent OR the opposite side (≈100%)"
-                    )
-                if asym:
-                    sa = _side_text(drow.slots_a)
-                    sb = _side_text(drow.slots_b)
-                    if sa and sb:
-                        lines.append(f"    ({a.name}: {sa} · {b.name}: {sb})")
-            else:
-                who = a.name if drow.carriers[0] == "a" else b.name
-                where = _side_text(drow.slots_a or drow.slots_b)
-                loc = f", on {where}" if where else ""
-                lines.append(
-                    f"→ {drow.name} (carried by {who} only{loc}): "
-                    f"≈{drow.chance_pct:.0f}% to pass at "
-                    f"{stimulation:g} Stimulation"
-                )
-            effect = self._effect_for_name(a, b, drow.name)
-            if effect:
-                lines.append(f"    effect: {effect}")
-        if rows and any(len(r.carriers) == 1 for r in rows):
-            lines.append("(single-sided odds assume the other parent's matching "
-                         "body part is normal; a 20% part-reroll can still "
-                         "change one part)")
-        return lines
-
+        """Render the partner rows via PartnerTableWidget."""
+        self._table.redraw(
+            stimulation=self._stim_value(),
+            comfort=self._comfort_value(),
+            effect_of=self._effect_for_name
+            if self._ga is not None else None)
     def _effect_for_name(self, a, b, name: str) -> str:
         """Look up the first known gpak effect for a defect carried by a/b."""
         if self._ga is None:
@@ -1558,7 +1257,8 @@ class PaletteWindow(QWidget):
                 text += f"   ·   existing kittens: {', '.join(kids)}"
         else:
             text = head + f"\nCan't breed: {row.reason or 'blocked'}"
-        malady = self._pair_malady_lines(row, self._stim_value())
+        malady = self._table._pair_malady_lines(
+            row, self._stim_value(), self._effect_for_name)
         if malady:
             text += "\n" + "\n".join(malady)
         self._detail.setText(text)
