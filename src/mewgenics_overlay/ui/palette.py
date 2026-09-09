@@ -39,6 +39,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QSizeGrip,
     QListWidget,
     QListWidgetItem,
     QMenu,
@@ -151,6 +152,7 @@ class PaletteWindow(QWidget):
         self.setWindowFlags(flags)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, False)
         self.resize(880, 600)
+        self.setMinimumSize(620, 460)
         self._restore_geometry()
         self.setStyleSheet(_theme.stylesheet())
         self._build_ui()
@@ -284,9 +286,11 @@ class PaletteWindow(QWidget):
         root.setSpacing(6)
         tabs.addTab(self._page_main, "Breeding")
 
-        # header
+        # header: drag grip + title + status only. Actions live in the
+        # ⚙ Settings tab and the tab-bar corner.
         head = QHBoxLayout()
         grip = _DragLabel("⠿")
+        self._grip = grip
         grip.setStyleSheet(f"color:{_theme.C_GRIP}; font-size:13px;")
         grip.setToolTip("Drag to move the overlay")
         self._title = _DragLabel("🐈 Breeding Overlay")
@@ -294,78 +298,38 @@ class PaletteWindow(QWidget):
         self._title.setCursor(Qt.CursorShape.OpenHandCursor)
         self._status = QLabel("")
         self._status.setObjectName("muted")
-        self._status.setStyleSheet(f"color:{_theme.C_STATUS}; font-size:11px;")
-        pin = QPushButton("📌")
-        pin.setCheckable(True)
-        pin.setChecked(self._pinned)
-        pin.setFixedWidth(34)
-        pin.setToolTip("Keep above the game (native pin on Windows, "
-                       "Hyprland rules on Linux)")
-        pin.clicked.connect(self._toggle_pin)
-        self._btn_pin = pin
-        ct = QPushButton("🧿")
-        ct.setCheckable(True)
-        ct.setChecked(self._click_through)
-        ct.setFixedWidth(34)
-        ct.setToolTip("Click-through: let mouse clicks reach Mewgenics. "
-                      "Press Ctrl+Shift+B (Windows) / tray to interact again.")
-        ct.clicked.connect(self._on_ct_clicked)
-        self._btn_ct = ct
-        open_save = QPushButton("📁")
-        open_save.setFixedWidth(34)
-        open_save.setToolTip("Choose a different save file")
-        open_save.clicked.connect(self._pick_save)
-        self._btn_open = open_save
-        about = QPushButton("ℹ️")
-        about.setFixedWidth(34)
-        about.setToolTip("About — version and credits")
-        about.clicked.connect(self._show_about)
-        self._btn_about = about
-        self._btn_theme = QPushButton("◐")
-        self._btn_theme.setFixedWidth(34)
-        self._btn_theme.setToolTip("Switch theme (Bleached Film ↔ Noir Ink)")
-        self._btn_theme.clicked.connect(self._toggle_theme)
-        _zoom = float(self._settings.get("zoom", 1.0) or 1.0)
-        self._btn_zoom = QPushButton(f"{int(round(_zoom * 100))}%")
-        self._btn_zoom.setFixedWidth(44)
-        self._btn_zoom.setToolTip("Zoom: click to cycle 100/150/200/300% · "
-                                  "Ctrl++ / Ctrl+- / Ctrl+0 · Ctrl+wheel")
-        self._btn_zoom.clicked.connect(self._cycle_zoom)
-        self._btn_zoom.setStyleSheet(
-            "QPushButton { padding-left: 8px; padding-right: 8px; }")
-        close = QPushButton("✕")
-        close.setFixedWidth(34)
-        close.setToolTip("Hide (Ctrl+Shift+B / tray) — quits when no tray is available")
-        close.clicked.connect(self._on_close_clicked)
-        self._btn_close = close
-        # header emoji buttons: bigger glyphs, uniform width
-        for _b in (pin, ct, open_save, about, self._btn_theme,
-                   self._btn_zoom, close):
-            _b.setObjectName("iconbtn")
-            _b.setFixedSize(46, 26)   # uniform; scale_icon_buttons re-sizes
+        self._status.setStyleSheet(
+            f"color:{_theme.C_STATUS}; font-size:11px;")
         head.addWidget(grip)
         head.addWidget(self._title)
+        head.setSpacing(12)
+        head.setContentsMargins(4, 2, 6, 2)
         head.addWidget(self._status, 1)
-        self._btn_update = QPushButton("")
-        self._btn_update.setVisible(False)
-        self._btn_update.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._btn_update.setStyleSheet(
-            f"QPushButton {{ color:{_theme.C_GOOD}; font-weight:600; "
-            f"border:1px solid {_theme.C_GRIP}; border-radius:10px; "
-            "padding:2px 10px; }}")
-        self._btn_update.clicked.connect(self._open_update)
-        self._update_url = ""
-        head.addWidget(self._btn_update)
-        head.addWidget(pin)
-        head.addWidget(ct)
-        head.addWidget(open_save)
-        head.addWidget(about)
-        head.addWidget(self._btn_theme)
-        head.addWidget(self._btn_zoom)
-        head.addWidget(close)
-        # header lives ABOVE the tabs (insertLayout(0)) so the chrome stays
-        # visible on every tab — it used to live inside the Breeding page
-        # and vanished on Donations.
+        self._btn_pin = QPushButton("📌")
+        self._btn_pin.setCheckable(True)
+        self._btn_pin.setChecked(self._pinned)
+        self._btn_pin.setObjectName("iconbtn")
+        self._btn_pin.setFixedSize(46, 26)
+        self._btn_pin.setToolTip("Keep above the game (native pin on Windows, "
+                                 "Hyprland rules on Linux)")
+        self._btn_pin.clicked.connect(self._toggle_pin)
+        self._btn_ct = QPushButton("🧿")
+        self._btn_ct.setCheckable(True)
+        self._btn_ct.setChecked(self._click_through)
+        self._btn_ct.setObjectName("iconbtn")
+        self._btn_ct.setFixedSize(46, 26)
+        self._btn_ct.setToolTip("Click-through: let mouse clicks reach "
+                                "Mewgenics. Ctrl+Shift+B / tray to interact.")
+        self._btn_ct.clicked.connect(self._on_ct_clicked)
+        self._btn_close = QPushButton("✕")
+        self._btn_close.setObjectName("iconbtn")
+        self._btn_close.setFixedSize(46, 26)
+        self._btn_close.setToolTip("Hide (Ctrl+Shift+B / tray) — quits when "
+                                   "no tray is available")
+        self._btn_close.clicked.connect(self._on_close_clicked)
+        head.addWidget(self._btn_pin)
+        head.addWidget(self._btn_ct)
+        head.addWidget(self._btn_close)
         outer.insertLayout(0, head)
 
         # search
@@ -461,8 +425,55 @@ class PaletteWindow(QWidget):
 
         # Donations tab (last, so it exists before sessions arrive)
         from mewgenics_overlay.ui.donations_tab import DonationsTab
+
+        self._tabs = tabs
         self._donations_tab = DonationsTab(palette=self)
         tabs.addTab(self._donations_tab, "Donations")
+        # the update notice sits on the right of the tab row
+        self._btn_update = QPushButton("")
+        self._btn_update.setVisible(False)
+        self._btn_update.setStyleSheet(
+            f"QPushButton {{ color:{_theme.C_GOOD}; font-weight:600; "
+            f"border:1px solid {_theme.C_GRIP}; border-radius:10px; "
+            "padding:0 8px; }}")
+        self._btn_update.clicked.connect(self._open_update)
+        self._update_url = ""
+
+        corner = QWidget()
+        cl = QHBoxLayout(corner)
+        cl.setContentsMargins(0, 0, 4, 0)
+        cl.setSpacing(2)
+        cl.addWidget(self._btn_update)
+        tabs.setCornerWidget(corner, Qt.Corner.TopRightCorner)
+
+        # ⚙ Settings tab (save / appearance / zoom / help)
+        from mewgenics_overlay.ui.settings_tab import SettingsTab
+        self._settings_tab = SettingsTab(
+            {
+                "open_save": self._pick_save,
+                "load_slot": self._on_load_slot,
+                "set_theme": self.apply_theme,
+                "zoom_in": self._zoom_inc,
+                "zoom_out": self._zoom_dec,
+                "zoom_reset": self._zoom_default,
+                "about": self._show_about,
+                "report": self._open_report,
+            },
+            titles={k: _theme.THEMES[k]["title"] for k in _theme.THEMES},
+        )
+        tabs.addTab(self._settings_tab, "⚙ Settings")
+        # resize handle in the bottom-right corner (frameless window)
+        size_row = QHBoxLayout()
+        size_row.setContentsMargins(6, 0, 6, 4)
+        size_row.addStretch(1)
+        grip_w = QSizeGrip(self)
+        grip_w.setFixedSize(22, 22)
+        grip_w.setToolTip("Drag the corner to resize the window")
+        size_row.addWidget(grip_w)
+        outer.addLayout(size_row)
+
+        self._refresh_save_slots()
+
         self._tabs = tabs
 
     def _wire_ui(self) -> None:
@@ -607,8 +618,6 @@ class PaletteWindow(QWidget):
         button is wider so its text has real left/right padding."""
         h = max(22, int(26 * z))
         for attr, bw in (("_btn_pin", 46), ("_btn_ct", 46),
-                         ("_btn_open", 46), ("_btn_about", 46),
-                         ("_btn_theme", 46), ("_btn_zoom", 66),
                          ("_btn_close", 46)):
             btn = getattr(self, attr, None)
             if btn is not None:
@@ -633,13 +642,27 @@ class PaletteWindow(QWidget):
         if self._table is not None:
             self._table.scale_columns(z)
         self.apply_theme(str(self._settings.get("theme", "noir")))
+        self._restyle_header(z)
+        if getattr(self, "_focus_panel", None) is not None:
+            self._focus_panel.restyle(z)
+
+    def _restyle_header(self, zoom: float) -> None:
+        """Header grip/title/status font sizes follow the zoom level."""
+        self._grip.setStyleSheet(
+            f"color:{_theme.C_GRIP}; font-size:{_theme.zoom_px(13)}px;")
+        self._title.setStyleSheet(
+            f"font-weight:700; font-size:{_theme.zoom_px(14)}px; "
+            f"color:{_theme.C_TEXT};")
+        self._status.setStyleSheet(
+            f"color:{_theme.C_STATUS}; font-size:{_theme.zoom_px(11)}px;")
 
     def _set_zoom(self, z: float) -> None:
         """Persist and apply a new zoom level."""
         z = round(min(4.0, max(0.75, float(z))), 2)
         self._settings["zoom"] = z
         cfg.save(self._settings)
-        self._btn_zoom.setText(f"{int(round(z * 100))}%")
+        if getattr(self, "_settings_tab", None) is not None:
+            self._settings_tab.set_zoom(int(round(z * 100)))
         self._zoom_render(z)
 
     def wheelEvent(self, event):  # noqa: N802 (Qt API)
@@ -664,6 +687,8 @@ class PaletteWindow(QWidget):
         _theme.set_theme(key)
         self._settings["theme"] = key
         cfg.save(self._settings)
+        if getattr(self, "_settings_tab", None) is not None:
+            self._settings_tab.set_active_theme(key)
         app = QApplication.instance()
         if app is not None:
             app.setStyleSheet(_theme.stylesheet())
@@ -845,6 +870,40 @@ class PaletteWindow(QWidget):
         import os
         return bool(path) and os.path.exists(path)
 
+    def _discover_slot_paths(self) -> list:
+        """steamcampaign01..03 saves under the discovered saves folder."""
+        try:
+            from mewgenics_overlay.core.discovery import find_all_saves
+            records = find_all_saves()
+        except Exception:
+            records = []
+        by_num = {}
+        for r in records:
+            raw = str(r.get("path", "") or "")
+            base = raw.split("/")[-1].split(chr(92))[-1]
+            if base.startswith("steamcampaign") and base.endswith(".sav"):
+                try:
+                    n = int(base[len("steamcampaign"):-4])
+                except ValueError:
+                    continue
+                by_num[n] = raw
+        return [by_num.get(n) for n in (1, 2, 3)]
+
+    def _refresh_save_slots(self) -> None:
+        paths = self._discover_slot_paths()
+        self._slot_paths = paths
+        if getattr(self, "_settings_tab", None) is not None:
+            self._settings_tab.set_slots(
+                [(f"Slot {i + 1}", p) for i, p in enumerate(paths)])
+            self._settings_tab.set_current(self._settings.get("save_path"))
+
+    def _on_load_slot(self, index: int) -> None:
+        paths = getattr(self, "_slot_paths", None)
+        if not paths:
+            return
+        if 0 <= index < len(paths) and paths[index]:
+            self.open_save(paths[index])
+
     def _pick_save(self) -> None:
         """Open a file picker and load the chosen save.
 
@@ -871,7 +930,10 @@ class PaletteWindow(QWidget):
         # watch on the *copied* path isn't needed: watch the real file.
         self._settings["save_path"] = path
         cfg.save(self._settings)
-        self._title.setText(f"🐈 Overlay — {path.split('/')[-1].split(chr(92))[-1]}")
+        base = path.split('/')[-1].split(chr(92))[-1]
+        self._title.setText(f"🐈 Overlay — {base}")
+        if getattr(self, "_settings_tab", None) is not None:
+            self._settings_tab.set_current(path)
         self._start_watcher(path)
         self._set_status("loading save…")
         self._schedule_reload()

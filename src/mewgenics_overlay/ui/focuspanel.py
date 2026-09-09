@@ -54,8 +54,7 @@ class FocusedCatPanel(QWidget):
                     self._cat_health):
             lbl.setTextFormat(Qt.TextFormat.PlainText)
         self._cat_health.setWordWrap(True)
-        self._cat_health.setStyleSheet(
-            f"color:{_theme.C_WARN}; font-size:11px;")
+        self.restyle()
         self._cat_health.setToolTip(_theme.wrap_tooltip(
             "Things this cat carries that can be passed on to kittens.\n"
             "• Disorders — a 15% chance per parent that carries one of "
@@ -72,6 +71,15 @@ class FocusedCatPanel(QWidget):
     def append_row(self, widget: QWidget) -> None:
         """Allow the window to slot extra controls under the health line."""
         self._extras.addWidget(widget)
+
+    def restyle(self, zoom: float | None = None) -> None:
+        """Re-derive the health label style for the current theme + zoom so
+        the ⚠ defects/disorders text grows with the UI."""
+        if zoom is not None:
+            _theme.set_zoom(zoom)
+        self._cat_health.setStyleSheet(
+            f"color:{_theme.C_WARN}; "
+            f"font-size:{_theme.zoom_px(11)}px;")
 
     # ── rendering ─────────────────────────────────────────────────────────
     def clear(self) -> None:
