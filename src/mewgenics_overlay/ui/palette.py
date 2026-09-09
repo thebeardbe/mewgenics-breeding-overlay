@@ -20,6 +20,7 @@ import logging
 import os
 import sys
 import threading
+import time
 from typing import Optional
 
 from PySide6.QtCore import Qt, QEvent, QRect, QTimer, Signal
@@ -71,6 +72,7 @@ from . import config as cfg
 from .theme import wrap_tooltip as _wt
 from mewgenics_overlay import __version__
 from mewgenics_overlay.core.gameassets import GameAssets, locate_gpak
+from mewgenics_overlay.ui import update_check as _updates
 from mewgenics_overlay.core.stimulation import (
     STIMULATION_DEFAULT,
     room_env_map,
@@ -160,6 +162,13 @@ class PaletteWindow(QWidget):
         QShortcut(QKeySequence("Ctrl++"), self, activated=self._zoom_inc)
         QShortcut(QKeySequence("Ctrl+-"), self, activated=self._zoom_dec)
         QShortcut(QKeySequence("Ctrl+0"), self, activated=self._zoom_default)
+        QTimer.singleShot(2500, self._start_update_check)
+        # also re-check periodically while the overlay stays open (still
+        # interval-gated, so it only hits GitHub when it should).
+        self._update_timer = QTimer(self)
+        self._update_timer.setInterval(60 * 60 * 1000)
+        self._update_timer.timeout.connect(self._start_update_check)
+        self._update_timer.start()
 
         self._zoom_render(float(self._settings.get("zoom", 1.0) or 1.0))
         self._adopt_session(None)
@@ -202,6 +211,37 @@ class PaletteWindow(QWidget):
     def _sort_dir(self, d: str) -> None:
         if self._table is not None:
             self._table.sort_dir = d
+
+    # ── update availability check (read-only; no download) ────────────────
+    def _start_update_check(self) -> None:
+        """Ask GitHub for the newest release at most once per window."""
+        if not _updates.due(self._settings.get("last_update_check")):
+            return
+        now = time.time()
+        self._settings["last_update_check"] = now
+        cfg.save(self._settings)
+
+        def work():
+            result = _updates.latest_release()
+            QTimer.singleShot(0, lambda: self._show_update_available(result))
+
+        threading.Thread(target=work, name="update-check", daemon=True).start()
+
+    def _show_update_available(self, result) -> None:
+        if result is None:
+            return
+        remote, url = result
+        local = _updates.parse_version(__version__)
+        if remote <= local:
+            return
+        self._update_url = url
+        self._btn_update.setText(
+            f"⬇ v{'.'.join(str(x) for x in remote)} available")
+        self._btn_update.setVisible(True)
+
+    def _open_update(self) -> None:
+        import webbrowser
+        webbrowser.open(self._update_url or _updates.RELEASES_URL)
 
     def _maybe_start_assets(self) -> None:
         """Load resources.gpak effect tables off the UI thread (once)."""
@@ -300,6 +340,16 @@ class PaletteWindow(QWidget):
         head.addWidget(grip)
         head.addWidget(self._title)
         head.addWidget(self._status, 1)
+        self._btn_update = QPushButton("")
+        self._btn_update.setVisible(False)
+        self._btn_update.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._btn_update.setStyleSheet(
+            f"QPushButton {{ color:{_theme.C_GOOD}; font-weight:600; "
+            f"border:1px solid {_theme.C_GRIP}; border-radius:10px; "
+            "padding:2px 10px; }}")
+        self._btn_update.clicked.connect(self._open_update)
+        self._update_url = ""
+        head.addWidget(self._btn_update)
         head.addWidget(pin)
         head.addWidget(ct)
         head.addWidget(open_save)
