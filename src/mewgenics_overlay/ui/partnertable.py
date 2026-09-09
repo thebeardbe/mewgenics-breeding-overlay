@@ -310,6 +310,10 @@ class PartnerTableWidget(QTableWidget):
         self.sort_col: int | None = None
         self.sort_dir: str = "asc"
 
+    def scale_columns(self, zoom: float) -> None:
+        for i, w in enumerate(_COL_WIDTHS):
+            self.setColumnWidth(i, max(1, int(w * zoom)))
+
     def set_header_tooltips(self, tips, wrap) -> None:
         for i, tip in enumerate(tips):
             item = self.horizontalHeaderItem(i)

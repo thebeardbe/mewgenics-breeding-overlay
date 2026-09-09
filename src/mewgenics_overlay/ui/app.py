@@ -21,7 +21,7 @@ import os
 import sys
 
 from PySide6.QtCore import Qt, QPoint
-from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPixmap
+from PySide6.QtGui import QAction, QColor, QGuiApplication, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
 from mewgenics_overlay import __version__
@@ -132,6 +132,11 @@ def main(argv=None) -> int:
         logging.info("QT_QPA_PLATFORMTHEME=gtk3 would crash file dialogs "
                      "without GSettings schemas — using generic")
 
+    # Respect fractional monitor scales (125/150%): Qt6 rounds up to 1
+    # unless told to pass through, which makes the overlay tiny on HiDPI.
+    from PySide6.QtCore import Qt
+    QGuiApplication.setHighDpiScaleFactorRoundingPolicy(
+        Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
     app = QApplication(sys.argv[:1])
     app.setApplicationName("mewgenics-overlay")
     # start with the saved theme (Bleached Film / Noir Ink)

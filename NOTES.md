@@ -4,11 +4,20 @@ Informal backlog for the overlay. Nothing here is scheduled unless it says so.
 
 ## Bugs (small)
 
-- **Scaling on large resolutions:** at big monitor resolutions the overlay
-  (and its text) renders tiny, even when Mewgenics itself is set to a lower
-  resolution. Ideas: a button to scale the window 2×/4×, and/or
-  `Ctrl + mouse-wheel` zooming (scale the root layout).
+- ✅ **Scaling** resolved (v0.1.47+): HiDPI PassThrough rounding policy at
+  startup (fractional 125/150% honored) + user zoom: header % button
+  (100/150/200/300%), Ctrl++/Ctrl+-/Ctrl+0, Ctrl+wheel; scales app font,
+  table columns and header buttons; persisted. Verify on the Windows
+  tester's HiDPI display.
 
+
+## Open question / needs tester
+
+- **Ctrl+Shift+B hotkey on Windows 11** may not fire while Mewgenics is in
+  (exclusive) fullscreen — global hotkeys can be swallowed by the game's
+  capture. Logging added (overlay.log shows RegisterHotKey failures); the
+  tray icon always works as a summon fallback. If the tester still can't
+  summon in fullscreen, a low-level keyboard-hook backend is the follow-up.
 
 ## Future features
 

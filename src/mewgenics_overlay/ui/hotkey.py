@@ -20,8 +20,11 @@ Usage:
 
 from __future__ import annotations
 
+import logging
 import sys
 from typing import Callable, Optional
+
+log = logging.getLogger("mewgenics_overlay.hotkey")
 
 from PySide6.QtCore import QAbstractNativeEventFilter
 
@@ -46,6 +49,11 @@ class _WindowsHotkeyFilter(QAbstractNativeEventFilter):
         user32 = ctypes.windll.user32
         mods = self.MOD_CONTROL | self.MOD_SHIFT | self.MOD_NOREPEAT
         self._registered = bool(user32.RegisterHotKey(None, _HOTKEY_ID, mods, ord("B")))
+        if not self._registered:
+            log.warning(
+                "RegisterHotKey failed (error %s) - hotkey inactive; use the "
+                "tray icon to summon the overlay",
+                ctypes.windll.kernel32.GetLastError())
         return self._registered
 
     def unregister(self) -> None:

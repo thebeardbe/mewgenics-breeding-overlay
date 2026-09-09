@@ -18,6 +18,7 @@ log = logging.getLogger("mewgenics_overlay.config")
 _KEY = "mewgenics-overlay"
 DEFAULTS = {
     "theme": "noir",            # UI theme: film (bright) | noir (dark)
+    "zoom": 1.0,               # user zoom multiplier (Ctrl+wheel/buttons)
     "save_path": None,            # last save shown
     "include_adventure": True,    # consider Adventure cats as partners
     "order": "risk",            # partner sort: "risk" (safe first) or "quality"

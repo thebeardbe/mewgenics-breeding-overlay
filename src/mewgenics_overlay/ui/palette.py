@@ -24,7 +24,12 @@ from typing import Optional
 
 from PySide6.QtCore import Qt, QEvent, QRect, QTimer, Signal
 import mewgenics_overlay.ui.theme as _theme
-from PySide6.QtGui import QGuiApplication
+from PySide6.QtGui import (
+    QFont,
+    QGuiApplication,
+    QKeySequence,
+    QShortcut,
+)
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -113,6 +118,9 @@ class PaletteWindow(QWidget):
     def __init__(self):
         super().__init__()
         self._settings = cfg.load()
+        self._zoom_base_font = QFont(
+            QApplication.instance().font()) if QApplication.instance() else None
+        _theme.set_zoom(float(self._settings.get("zoom", 1.0) or 1.0))
         self._focus: Optional[Cat] = None
         self._save = SaveController()   # session state + background queue + watcher
         self._asset_lock = threading.Lock()
@@ -149,7 +157,11 @@ class PaletteWindow(QWidget):
         self._poll.setInterval(120)
         self._poll.timeout.connect(self._on_poll)
         self._poll.start()
+        QShortcut(QKeySequence("Ctrl++"), self, activated=self._zoom_inc)
+        QShortcut(QKeySequence("Ctrl+-"), self, activated=self._zoom_dec)
+        QShortcut(QKeySequence("Ctrl+0"), self, activated=self._zoom_default)
 
+        self._zoom_render(float(self._settings.get("zoom", 1.0) or 1.0))
         self._adopt_session(None)
         self._load_last_save()
         self._maybe_start_assets()
@@ -257,22 +269,34 @@ class PaletteWindow(QWidget):
         open_save.setFixedWidth(34)
         open_save.setToolTip("Choose a different save file")
         open_save.clicked.connect(self._pick_save)
+        self._btn_open = open_save
         about = QPushButton("ℹ️")
         about.setFixedWidth(34)
         about.setToolTip("About — version and credits")
         about.clicked.connect(self._show_about)
+        self._btn_about = about
         self._btn_theme = QPushButton("◐")
         self._btn_theme.setFixedWidth(34)
         self._btn_theme.setToolTip("Switch theme (Bleached Film ↔ Noir Ink)")
         self._btn_theme.clicked.connect(self._toggle_theme)
+        _zoom = float(self._settings.get("zoom", 1.0) or 1.0)
+        self._btn_zoom = QPushButton(f"{int(round(_zoom * 100))}%")
+        self._btn_zoom.setFixedWidth(44)
+        self._btn_zoom.setToolTip("Zoom: click to cycle 100/150/200/300% · "
+                                  "Ctrl++ / Ctrl+- / Ctrl+0 · Ctrl+wheel")
+        self._btn_zoom.clicked.connect(self._cycle_zoom)
+        self._btn_zoom.setStyleSheet(
+            "QPushButton { padding-left: 8px; padding-right: 8px; }")
         close = QPushButton("✕")
         close.setFixedWidth(34)
         close.setToolTip("Hide (Ctrl+Shift+B / tray) — quits when no tray is available")
         close.clicked.connect(self._on_close_clicked)
+        self._btn_close = close
         # header emoji buttons: bigger glyphs, uniform width
-        for _b in (pin, ct, open_save, about, self._btn_theme, close):
+        for _b in (pin, ct, open_save, about, self._btn_theme,
+                   self._btn_zoom, close):
             _b.setObjectName("iconbtn")
-            _b.setFixedWidth(40)
+            _b.setFixedSize(46, 26)   # uniform; scale_icon_buttons re-sizes
         head.addWidget(grip)
         head.addWidget(self._title)
         head.addWidget(self._status, 1)
@@ -281,6 +305,7 @@ class PaletteWindow(QWidget):
         head.addWidget(open_save)
         head.addWidget(about)
         head.addWidget(self._btn_theme)
+        head.addWidget(self._btn_zoom)
         head.addWidget(close)
         # header lives ABOVE the tabs (insertLayout(0)) so the chrome stays
         # visible on every tab — it used to live inside the Breeding page
@@ -503,6 +528,72 @@ class PaletteWindow(QWidget):
         else:
             self.shutdown()
             QApplication.instance().quit()
+
+    def _zoom_step(self, delta: float) -> None:
+        self._set_zoom(float(self._settings.get("zoom", 1.0) or 1.0) + delta)
+
+    def _zoom_inc(self) -> None:
+        self._zoom_step(0.25)
+
+    def _zoom_dec(self) -> None:
+        self._zoom_step(-0.25)
+
+    def _zoom_default(self) -> None:
+        self._set_zoom(1.0)
+
+    def _cycle_zoom(self) -> None:
+        cur = float(self._settings.get("zoom", 1.0) or 1.0)
+        nxt = next((c for c in (1.0, 1.5, 2.0, 3.0) if c > cur + 0.001), 1.0)
+        self._set_zoom(nxt)
+
+    def _scale_icon_buttons(self, z: float) -> None:
+        """Buttons share one height and one glyph width; only the zoom %
+        button is wider so its text has real left/right padding."""
+        h = max(22, int(26 * z))
+        for attr, bw in (("_btn_pin", 46), ("_btn_ct", 46),
+                         ("_btn_open", 46), ("_btn_about", 46),
+                         ("_btn_theme", 46), ("_btn_zoom", 66),
+                         ("_btn_close", 46)):
+            btn = getattr(self, attr, None)
+            if btn is not None:
+                btn.setFixedSize(max(38, int(bw * z)), h)
+
+    def _zoom_render(self, z: float) -> None:
+        """Re-zoom every visual: app font (tables/labels), header buttons,
+        column widths and the theme stylesheet font sizes."""
+        _theme.set_zoom(z)
+        app = QApplication.instance()
+        base = getattr(self, "_zoom_base_font", None) or (app.font() if app else None)
+        if app is not None and base is not None:
+            nf = QFont(base)
+            if base.pixelSize() > 0:
+                nf.setPixelSize(max(6, int(round(base.pixelSize() * z))))
+            else:
+                nf.setPointSizeF(max(4.0, base.pointSizeF() * z))
+            app.setFont(nf)
+            for w in app.allWidgets():
+                w.setFont(nf)
+        self._scale_icon_buttons(z)
+        if self._table is not None:
+            self._table.scale_columns(z)
+        self.apply_theme(str(self._settings.get("theme", "noir")))
+
+    def _set_zoom(self, z: float) -> None:
+        """Persist and apply a new zoom level."""
+        z = round(min(4.0, max(0.75, float(z))), 2)
+        self._settings["zoom"] = z
+        cfg.save(self._settings)
+        self._btn_zoom.setText(f"{int(round(z * 100))}%")
+        self._zoom_render(z)
+
+    def wheelEvent(self, event):  # noqa: N802 (Qt API)
+        if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            delta = event.angleDelta().y()
+            if delta:
+                self._zoom_step(0.25 if delta > 0 else -0.25)
+            event.accept()
+            return
+        super().wheelEvent(event)
 
     def _toggle_theme(self) -> None:
         keys = list(_theme.THEMES)

@@ -14,6 +14,8 @@ active theme, so render-time code follows live switches.
 
 from __future__ import annotations
 
+import re
+
 # Tray/logo brand colours (theme-independent)
 C_TRAY_BASE = "#453a7a"
 C_TRAY_EAR = "#8a7bf0"
@@ -113,7 +115,7 @@ QTabBar::tab {
     padding: 6px 18px; margin-right: 3px; font-weight: 700;
 }
 QTabBar::tab:selected { background: #e6e2d6; }
-QPushButton#iconbtn { font-size: 20px; padding: 2px 0; }
+QPushButton#iconbtn { font-size: 15px; padding: 0 4px; }
 """
 
 _STYLES["noir"] = """
@@ -179,7 +181,7 @@ QTabBar::tab {
     padding: 6px 18px; margin-right: 3px; font-weight: 700;
 }
 QTabBar::tab:selected { background: #37332c; color: #f0ede4; }
-QPushButton#iconbtn { font-size: 20px; padding: 2px 0; }
+QPushButton#iconbtn { font-size: 15px; padding: 0 4px; }
 """
 
 THEMES = {
@@ -208,8 +210,28 @@ def set_theme(key: str) -> None:
     _globals["STYLESHEET"] = info["css"]
 
 
+ZOOM = 1.0   # user zoom multiplier; call set_zoom() before styling
+
+
+def set_zoom(zoom: float) -> None:
+    global ZOOM
+    ZOOM = max(0.5, float(zoom))
+
+
+def zoom_px(n) -> int:
+    """n logical px -> px at the active zoom (for inline setStyleSheet)."""
+    return int(round(n * ZOOM))
+
+
+def _zoom_css(css: str) -> str:
+    return re.sub(r"(font-size:\s*)(\d+(?:\.\d+)?)px",
+                  lambda m: f"{m.group(1)}{int(float(m.group(2)) * ZOOM)}px",
+                  css)
+
+
 def stylesheet() -> str:
-    return THEMES[_ACTIVE]["css"]
+    css = THEMES[_ACTIVE]["css"]
+    return css if abs(ZOOM - 1.0) < 1e-9 else _zoom_css(css)
 
 
 def risk_color(risk_pct: float) -> str:
