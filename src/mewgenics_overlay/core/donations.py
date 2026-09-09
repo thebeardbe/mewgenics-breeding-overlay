@@ -2,17 +2,17 @@
 
 Major NPCs level up by receiving a specific *type* of cat. Each day the
 player decides which cats to send. This module inspects the live roster and,
-for every donation NPC, lists the cats that currently qualify — ranked from
-"give away first" to "keep" — so the daily cull is a few clicks instead of
+for every donation NPC, lists the cats that currently qualify - ranked from
+"give away first" to "keep" - so the daily cull is a few clicks instead of
 manual scanning.
 
 Detection uses what the save exposes:
 
-  * Tink          — kittens: age 1 (born that day)
-  * Tracy         — seniors: age >= 5
-  * Dr. Beanies   — cats carrying mutations, birth defects, disorders
+  * Tink          - kittens: age 1 (born that day)
+  * Tracy         - seniors: age >= 5
+  * Dr. Beanies   - cats carrying mutations, birth defects, disorders
                     (parasites are not parsed from the save yet)
-  * Frank         — retired: survived an adventure (MBM's heuristic: strong
+  * Frank         - retired: survived an adventure (MBM's heuristic: strong
                     ability count + stat growth from level-ups)
 
 Not yet decodable from the save: injuries (Baby Jack), chapter progress
@@ -53,7 +53,7 @@ KEEPER_PERCENTILE = 0.75
 
 # donation matrix weights (positive = keep, negative = donate)
 # Rationale: each weight multiplies a roster-relative or per-cat signal and
-# was tuned against real saves — the full reasoning lives in git history
+# was tuned against real saves - the full reasoning lives in git history
 # (commit subjects like 'weight nightly chance strongly') and SCORING notes;
 # change numbers deliberately, never ad-hoc.
 W_STRENGTH = 2.0      # roster-relative strength (bell curve)
@@ -99,7 +99,7 @@ NPC_ORDER = list(NPC_PROFILES)
 # NPCs whose requirements the save format can't express yet.
 UNSUPPORTED = [
     ("Butch", "cats that reached far chapters",
-     "per-cat chapter progress is not stored in the save — only an "
+     "per-cat chapter progress is not stored in the save - only an "
      "adventure heuristic exists"),
 ]
 
@@ -180,7 +180,7 @@ def _pair_value(a, b, kinship_memo: dict) -> float:
 
 
 def _breeding_keepers(cats) -> set:
-    """Cats that are a top-tier mate for someone — donating them hurts the
+    """Cats that are a top-tier mate for someone - donating them hurts the
     breeding pool. Kept deliberately simple: their best pairing score must
     beat the 75th percentile of the roster's scores."""
     scores: list = []
@@ -217,7 +217,7 @@ class DonationAdvice:
     ``candidates`` list (advice[i] explains candidates[i]).
 
     Computed fresh on every ``donation_report`` call and never stored on the
-    cats themselves — no hidden/stale state left behind on parser objects.
+    cats themselves - no hidden/stale state left behind on parser objects.
     """
 
     give: List[str]            # reasons to donate (shown first / ranked weak)
@@ -344,8 +344,8 @@ def _assess(cat, sums, effect_of_cat=None):
     """One pass over a cat: (score, reasons_to_donate, reasons_to_keep).
 
     LOWER score = give away first. Merges what used to be two separate
-    functions (score + reason builder) so the expensive shared inputs —
-    roster percentile, living offspring, line strength, defect sign — are
+    functions (score + reason builder) so the expensive shared inputs -
+    roster percentile, living offspring, line strength, defect sign - are
     computed ONCE per cat per report instead of twice.
     """
     base = _base_sum(cat)
@@ -368,9 +368,9 @@ def _assess(cat, sums, effect_of_cat=None):
         give.append(f"Inbred (COI {coi * 100:.0f}%)")
     if living:
         give.append(f"Has {living} direct child(ren) still living (from any "
-                    f"mate) — its line already continues")
+                    f"mate) - its line already continues")
     else:
-        keep.append("No direct children left living — donating would end "
+        keep.append("No direct children left living - donating would end "
                     "its line")
     if line >= 0.6:
         keep.append("Comes from a strong recent line")
@@ -381,7 +381,7 @@ def _assess(cat, sums, effect_of_cat=None):
     elif bias < 0:
         give.append("Carries negative-stats birth defects")
     if getattr(cat, "lovers", None):
-        keep.append("Is in love — keep with their partner")
+        keep.append("Is in love - keep with their partner")
     if getattr(cat, "must_breed", False):
         keep.append("Marked must-breed")
     if getattr(cat, "is_pinned", False):
@@ -420,7 +420,7 @@ def donation_report(cats, active: Optional[set] = None,
     keepers = _breeding_keepers(cats)
     sums = _roster_ctx(cats)
     # A cat can qualify for several NPCs, but its score/reasons depend only on
-    # the roster — assess each cat once per report and reuse the result.
+    # the roster - assess each cat once per report and reuse the result.
     assessed: dict = {}
 
     def _assessment_of(c) -> tuple:
@@ -481,27 +481,27 @@ def rating_why(rating: str) -> List[str]:
     ``_assess``, so they never hit this path.
     """
     if rating == "Keep":
-        return ["Among the strongest here — more valuable kept for breeding."]
+        return ["Among the strongest here - more valuable kept for breeding."]
     if rating == "Maybe":
-        return ["Not clearly expendable nor essential — donate if you "
+        return ["Not clearly expendable nor essential - donate if you "
                 "need the space."]
-    return ["One of the weakest / least useful here — a fine donation."]
+    return ["One of the weakest / least useful here - a fine donation."]
 
 
 def recommendation_lines(cat, keep_for_breeding: bool = False) -> List[str]:
     """Short human lines explaining why a cat is a candidate.
 
-    ``keep_for_breeding`` comes from the matching ``DonationAdvice`` — the
+    ``keep_for_breeding`` comes from the matching ``DonationAdvice`` - the
     caller knows it, a bare cat never carries it.
     """
     lines: List[str] = []
     age = _age(cat)
     if age is not None and age <= TINK_MAX_AGE:
-        lines.append("born today — Tink wants kittens")
+        lines.append("born today - Tink wants kittens")
     if age is not None and age >= TRACY_MIN_AGE:
-        lines.append("senior cat — Tracy will take them")
+        lines.append("senior cat - Tracy will take them")
     if _is_retired(cat):
-        lines.append("survived an adventure — Frank will take them")
+        lines.append("survived an adventure - Frank will take them")
     if _has_any_mutation_or_condition(cat):
         bits = []
         if getattr(cat, "defects", None):
@@ -511,15 +511,15 @@ def recommendation_lines(cat, keep_for_breeding: bool = False) -> List[str]:
         if any(e and not e.get("is_defect")
                for e in (getattr(cat, "visual_mutation_entries", None) or [])):
             bits.append("mutations")
-        lines.append("carries " + ", ".join(bits) + " — Dr. Beanies wants these")
+        lines.append("carries " + ", ".join(bits) + " - Dr. Beanies wants these")
     if _injured_stat_count(cat) >= 1:
-        lines.append("stat penalties suggest an injury — Baby Jack will take "
+        lines.append("stat penalties suggest an injury - Baby Jack will take "
                      "them")
     if keep_for_breeding:
-        lines.append("valuable for breeding (a top mate for someone) — "
+        lines.append("valuable for breeding (a top mate for someone) - "
                      "donate only if you really need to")
     if getattr(cat, "is_dead", False):
-        lines.append("deceased — the Organ Grinder takes the dead")
+        lines.append("deceased - the Organ Grinder takes the dead")
     if not lines:
         lines.append(f"currently {display_location(cat)}")
     return lines

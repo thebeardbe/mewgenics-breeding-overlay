@@ -2,7 +2,7 @@
 
 Given two cats (any objects exposing ``parent_a`` / ``parent_b`` and
 ``generation``), describe how they are related in one short human label plus
-the generation gap. Pure functions, no Qt, no save parsing — unit-tested with
+the generation gap. Pure functions, no Qt, no save parsing - unit-tested with
 stub family graphs in tests/test_kinship.py.
 
 Relationship scope is limited to shared ancestry within ``MAX_DEPTH``

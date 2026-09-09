@@ -100,7 +100,7 @@ class SaveWatcher:
                         self.on_change()
                     except Exception:
                         # Never kill the watcher thread on a callback bug, but
-                        # do leave a trace — silent reload-kills are the worst
+                        # do leave a trace - silent reload-kills are the worst
                         # kind of failure.
                         log.exception("SaveWatcher change callback failed")
             self._stop.wait(self.poll)

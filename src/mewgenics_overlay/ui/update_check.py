@@ -1,7 +1,7 @@
 """Release update check for the overlay.
 
 Read-only network call on a background thread: asks GitHub for the latest
-release tag and returns (version, release_url). Never downloads anything —
+release tag and returns (version, release_url). Never downloads anything -
 the UI offers a link to the release page. Failures are quiet (debug-level),
 so a missing network connection never bothers the user.
 
@@ -52,7 +52,7 @@ def latest_release(url: str = UPDATE_API_URL,
 
     Primary: the GitHub API. Fallback: the plain /releases/latest page
     (follows the redirect to the tag URL), which is not subject to the API
-    rate limit — so a rate-limited check still tells the user an update
+    rate limit - so a rate-limited check still tells the user an update
     exists instead of silently going quiet.
     """
     if url == UPDATE_API_URL:

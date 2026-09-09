@@ -2,7 +2,7 @@
 
 Non-widget half of the partner table (constants + text building) so the
 interactive PartnerTableWidget (step 2b) stays focused on Qt rendering.
-Pure functions only — no Qt widgets here.
+Pure functions only - no Qt widgets here.
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ _COL_TIP_PARAS = [
         "The partner cat being compared. 📌 = pinned (kept for breeding). "
         "Icons right after the name: ♂/♀/? = gender · ❤️ straight · 💗 bi · 🌈 "
         "gay (orientation).",
-        "Rows marked ✗ can't breed with the cat you picked — the Note "
+        "Rows marked ✗ can't breed with the cat you picked - the Note "
         "column says why.",
         "Double-click a row to look at things from that cat's side instead.",
         "Tip: click any header to sort, click again to reverse, and a third "
@@ -44,7 +44,7 @@ _COL_TIP_PARAS = [
         "Shown as simple names: parent/child, sibling, aunt/uncle, "
         "1st cousin, … or 'unrelated'.",
         "Shared family history is what drives inbreeding (the Risk column).",
-        "Very distant shared ancestors barely count — each generation back "
+        "Very distant shared ancestors barely count - each generation back "
         "halves the effect, so ~5 generations back is effectively nothing.",
     ],
     # Gen delta
@@ -69,18 +69,18 @@ _COL_TIP_PARAS = [
         "a birth defect), as a percentage.",
         "Two strangers sit near the base ~2%.",
         "The closer the parents are related, the higher it climbs.",
-        "Colour key — green: low (≤ 5%) · amber: medium (5–12%) · "
+        "Colour key - green: low (≤ 5%) · amber: medium (5–12%) · "
         "red: high (> 12%).",
     ],
     # Chance (Nightly)
     [
-        "How likely the pair is to breed on a given night — one number that "
+        "How likely the pair is to breed on a given night - one number that "
         "already folds in the game's two nightly rolls.",
         "A higher room Comfort nudges it up a little.",
         "Below 5% the game won't even attempt the pair.",
-        "Very high Comfort saturates the per-roll odds — the tool shows those "
+        "Very high Comfort saturates the per-roll odds - the tool shows those "
         "as ≥95% instead of promising a 100% chance.",
-        "Colour key — green: ≈5%+ chance per night · amber: below that "
+        "Colour key - green: ≈5%+ chance per night · amber: below that "
         "(the game may still attempt pairs above its own 0.05 compat line).",
     ],
     # Exp/stat
@@ -101,8 +101,8 @@ _COL_TIP_PARAS = [
     [
         "The birth defects these parents already carry, and whether the "
         "kitten will inherit them.",
-        "✓ = both parents carry it — the kitten will get it.",
-        "A % = one parent carries it — that's the kitten's chance at the "
+        "✓ = both parents carry it - the kitten will get it.",
+        "A % = one parent carries it - that's the kitten's chance at the "
         "selected room's Stimulation.",
         "Hover a cell to see which side/part it affects, whether it comes "
         "from one shared family line, and what the defect actually does.",
@@ -133,7 +133,7 @@ def _cat_glyphs(cat) -> str:
     """Compact gender + orientation icons shown beside a partner's name.
 
     Gender: ♂ male · ♀ female · ? neutral. Orientation (only for male /
-    female cats): ❤️ straight · 💗 bi · 🌈 gay — see the Cat column header
+    female cats): ❤️ straight · 💗 bi · 🌈 gay - see the Cat column header
     tooltip for the legend. Purely cosmetic; sorting ignores the glyphs.
     """
     g = _theme.gender_badge(getattr(cat, "gender", "?"))
@@ -162,7 +162,7 @@ def _note_text(row, kids: list[str]) -> str:
 
 def _kittens_label(row) -> str:
     """e.g. '1 kitten', '3 kittens', '3 kittens, 1 available',
-    '3 kittens, none available' — 'available' means still in the house /
+    '3 kittens, none available' - 'available' means still in the house /
     on adventures (dead or donated/gone kittens are excluded)."""
     total = int(getattr(row, "kitty_total", 0) or 0)
     if total <= 0:
@@ -183,7 +183,7 @@ def _defect_rows_of(row, stimulation: float = 50.0):
     """Inheritance rows for a partner row's carried defects.
 
     The background worker precomputes these once per pair (``row.defect_rows``
-    — pure function of the parents + COI + room Stimulation) and every
+    - pure function of the parents + COI + room Stimulation) and every
     render/tooltip/recommend pass reuses them instead of re-walking shared
     ancestry on the UI thread. Fresh computation here is only a fallback for
     rows that never went through the worker.
@@ -224,7 +224,7 @@ def _fmt_compat(v: float) -> str:
 
 
 def _fmt_chance(v: float, comfort: float = 0.0) -> str:
-    """Nightly breeding chance % — both of the game's rolls folded into one.
+    """Nightly breeding chance % - both of the game's rolls folded into one.
 
     Comfort-rich rooms can saturate the per-roll odds (chance → 100 % in the
     model); we display those as "≥95 %" rather than promising a guarantee.
@@ -422,18 +422,18 @@ class PartnerTableWidget(QTableWidget):
             )
 
             it_room = QTableWidgetItem(display_location(p))
-            it_risk = QTableWidgetItem(f"{row.risk_pct:.1f}%" if ok else "—")
+            it_risk = QTableWidgetItem(f"{row.risk_pct:.1f}%" if ok else "-")
             it_comp = QTableWidgetItem(
                 _fmt_chance(row.game_compat, self._comfort)
-                if ok else "—")
-            it_exp = QTableWidgetItem(f"{row.expected_avg:.2f}" if ok else "—")
-            it_7 = QTableWidgetItem(f"{row.seven_plus_total:.1f}" if ok else "—")
+                if ok else "-")
+            it_exp = QTableWidgetItem(f"{row.expected_avg:.2f}" if ok else "-")
+            it_7 = QTableWidgetItem(f"{row.seven_plus_total:.1f}" if ok else "-")
             if not getattr(row, "defect_rows_ok", True):
                 # Compute failed in the worker: show a distinct marker, not
                 # an identical empty cell ("we don't know" vs "no defects").
-                it_defects = QTableWidgetItem("—")
+                it_defects = QTableWidgetItem("-")
                 it_defects.setToolTip(_theme.wrap_tooltip(
-                    "Defect information is unavailable for this pair — "
+                    "Defect information is unavailable for this pair - "
                     "scoring failed (details in the log). The Risk column "
                     "remains the safer guide here."))
             else:
@@ -453,12 +453,12 @@ class PartnerTableWidget(QTableWidget):
                 it_comp.setToolTip(_theme.wrap_tooltip(
                     f"Nightly breeding chance: "
                     f"{_fmt_chance(row.game_compat, _comfort)}.\n"
-                    "That's the answer to 'will they breed tonight?' — the "
+                    "That's the answer to 'will they breed tonight?' - the "
                     "game's two rolls are already folded in."
                     + ("\nAbove the game's compat line (0.05) so the game "
-                       "will try it — but amber below means under 5% per "
+                       "will try it - but amber below means under 5% per "
                        "night despite that." if row.game_compat > 0.05
-                       else "\nBelow the game's compat line (0.05) — the "
+                       else "\nBelow the game's compat line (0.05) - the "
                             "game won't attempt it.")
                 ))
                 proj = row.pair_factors.projection
@@ -483,7 +483,7 @@ class PartnerTableWidget(QTableWidget):
                 )
             else:
                 for it in (it_risk, it_comp, it_exp, it_7):
-                    it.setToolTip("No values — this pair cannot breed. "
+                    it.setToolTip("No values - this pair cannot breed. "
                                   "Reason is in the Note column.")
             it_room.setToolTip(f"Current location of {p.name}.")
             it_note.setToolTip(
@@ -500,7 +500,7 @@ class PartnerTableWidget(QTableWidget):
                 specials[COL_RISK] = _theme.risk_color(row.risk_pct)
                 # Colour tracks the chance actually shown: green ≈ ≥5% per
                 # night, amber below it (the game's own 0.05 *compat* gate is
-                # separate — it only decides whether attempts happen at all).
+                # separate - it only decides whether attempts happen at all).
                 specials[COL_CHANCE] = (_theme.C_GOOD
                                         if _night_chance(
                                             row.game_compat,
@@ -529,12 +529,12 @@ class PartnerTableWidget(QTableWidget):
                 close += f" (of {rel.shared_ancestors} in total)"
             lines.append(close)
             if row.direct_family:
-                lines.append("Direct family — the game stops this pairing.")
+                lines.append("Direct family - the game stops this pairing.")
             else:
-                lines.append("Related, but allowed — this shared history "
+                lines.append("Related, but allowed - this shared history "
                              "is what raises the Risk %.")
         else:
-            lines.append("No shared family history that matters — the "
+            lines.append("No shared family history that matters - the "
                          "safest kind of pairing.")
         lines.append("Longer explanation: hover the Family heading above.")
         return _theme.wrap_tooltip("\n".join(lines))
@@ -611,7 +611,7 @@ class PartnerTableWidget(QTableWidget):
             asym = drow.group in ASYMMETRIC_GROUPS
             if len(drow.carriers) == 2:
                 if not asym:
-                    lines.append(f"→ {drow.name}: both parents carry it — "
+                    lines.append(f"→ {drow.name}: both parents carry it - "
                                  f"the kitten gets it (≈100%)")
                 elif drow.same_line:
                     lines.append(

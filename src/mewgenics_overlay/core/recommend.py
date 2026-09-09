@@ -3,16 +3,16 @@
 Picks the single strongest breeding candidate for the focused cat from three
 signals:
 
-  * ≥7 stats — the *highest-weighted* factor: how many kitten stats are
+  * ≥7 stats - the *highest-weighted* factor: how many kitten stats are
     expected to land on 7 (each counts 6 points, so a full litter of 7s
     dominates everything else).
-  * Existing birth defects — each defect's in-game effect is read from
+  * Existing birth defects - each defect's in-game effect is read from
     resources.gpak and parsed for stat deltas. Defects that grant **+stats
     are a positive effect** and add to the score; defects that cost stats
     subtract. Defects with no numeric effect (pure appearance/flavour) get a
     small penalty, and shared (both parents carry it → guaranteed) defects
     weigh more than single-carrier ones.
-  * Risk — the pair's birth-defect risk % (new-defect roll from inbreeding),
+  * Risk - the pair's birth-defect risk % (new-defect roll from inbreeding),
     subtracted.
 
 Additive and transparent:

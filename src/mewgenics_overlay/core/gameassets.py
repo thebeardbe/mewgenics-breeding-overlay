@@ -4,7 +4,7 @@ The save file stores each mutation/defect as (body part, numeric id). The
 human-readable *effect* description (e.g. "+1 CON", "adds a bruise") lives in
 the game's ``resources.gpak`` (``data/mutations/<part>.gon`` + text CSVs).
 The vendored parser already knows how to read those (``GameData.from_gpak``),
-so we reuse it — but only on machines where the game is installed.
+so we reuse it - but only on machines where the game is installed.
 
 When the gpak is missing, everything degrades gracefully: no effect text,
 no error. Loading happens once, off the UI thread (the gpak is several GB,

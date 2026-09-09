@@ -104,7 +104,7 @@ def main(argv=None) -> int:
 
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-    # The vendored parser logs per-cat defect detection at INFO — too chatty
+    # The vendored parser logs per-cat defect detection at INFO - too chatty
     # for an overlay. Keep our own loggers at INFO, vendors at WARNING.
     for noisy in ("mewgenics.parser", "mewgenics.breeding"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
@@ -136,14 +136,14 @@ def main(argv=None) -> int:
 
     # QT_QPA_PLATFORMTHEME=gtk3 (common on NixOS/Hyprland) makes Qt's file
     # dialog initialise GTK/GIO, which aborts with 'No GSettings schemas are
-    # installed on the system' when the schemas aren't in XDG_DATA_DIRS — a
+    # installed on the system' when the schemas aren't in XDG_DATA_DIRS - a
     # hard crash the moment the 📁 picker opens. Fall back to the generic
     # theme for this app so dialogs stay pure Qt.
     if sys.platform.startswith("linux") and os.environ.get(
             "QT_QPA_PLATFORMTHEME", "").lower() == "gtk3":
         os.environ["QT_QPA_PLATFORMTHEME"] = "generic"
         logging.info("QT_QPA_PLATFORMTHEME=gtk3 would crash file dialogs "
-                     "without GSettings schemas — using generic")
+                     "without GSettings schemas - using generic")
 
     # Respect fractional monitor scales (125/150%): Qt6 rounds up to 1
     # unless told to pass through, which makes the overlay tiny on HiDPI.

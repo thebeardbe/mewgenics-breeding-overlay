@@ -1,4 +1,4 @@
-"""FocusedCatPanel — the summary card for the cat being analysed.
+"""FocusedCatPanel - the summary card for the cat being analysed.
 
 Extracted from ``PaletteWindow`` (refactor step 3): owns the name / meta /
 stats / lovers / health labels and their rendering. The window feeds it a
@@ -6,7 +6,7 @@ cat plus an optional gpak-effect lookup; it has no knowledge of the rest of
 the overlay.
 
 Security rule (unchanged): every label that can hold save-derived text is
-set to PlainText — never rich text — so hostile cat/disorder/defect names
+set to PlainText - never rich text - so hostile cat/disorder/defect names
 can never render as HTML. ``_stats_html`` is the only rich label and builds
 its own markup from stat values only.
 """
@@ -57,9 +57,9 @@ class FocusedCatPanel(QWidget):
         self.restyle()
         self._cat_health.setToolTip(_theme.wrap_tooltip(
             "Things this cat carries that can be passed on to kittens.\n"
-            "• Disorders — a 15% chance per parent that carries one of "
+            "• Disorders - a 15% chance per parent that carries one of "
             "passing a random disorder to the kitten.\n"
-            "• Birth defects — kittens inherit these per body part; pick a "
+            "• Birth defects - kittens inherit these per body part; pick a "
             "partner to see the exact odds for that pairing."
         ))
 
@@ -98,7 +98,7 @@ class FocusedCatPanel(QWidget):
         _gender = (cat.gender or "?").lower()
         _sex = sexuality_label(getattr(cat, "sexuality_raw", None)) \
             if _gender in ("male", "female") else None
-        meta = f"{_theme.gender_badge(cat.gender)} {cat.gender}" + \
+        meta = f"{_theme.gender_badge(cat.gender)} {_theme.gender_label(cat.gender)}" + \
             (f" · {_sex}" if _sex else "") + \
             f" · {display_location(cat)} · {gen}"
         if cat.age is not None:
@@ -114,19 +114,19 @@ class FocusedCatPanel(QWidget):
         ))
         self._cat_meta.setText(meta)
         self._cat_meta.setToolTip(_theme.wrap_tooltip(
-            f"{cat.gender} · {display_location(cat)} · "
+            f"{_theme.gender_label(cat.gender)} · {display_location(cat)} · "
             f"generation {cat.generation} (0 = stray, each generation adds "
             f"depth and shared ancestry)"
             + (f"\nSexuality: {_sex}. "
                "Bi/gay cats can breed with the same sex." if _sex else "")
             + (f" · age {cat.age} days" if cat.age is not None else "")
             + (f"\nInbreeding coefficient {cat.inbredness * 100:.1f}% = kinship "
-               "of this cat's parents — flagged above 3%."
+               "of this cat's parents - flagged above 3%."
                if cat.inbredness > 0.03 else "")
         ))
         self._cat_stats.setText(_stats_html(cat))
         self._cat_stats.setToolTip(_theme.wrap_tooltip(
-            "Base stats (STR DEX CON INT SPD CHA LCK, 0–7) — the birth stats "
+            "Base stats (STR DEX CON INT SPD CHA LCK, 0–7) - the birth stats "
             "kittens inherit from. Green = 7. These drive breeding math; "
             "gear/mod bonuses are not shown here."
         ))
@@ -166,10 +166,10 @@ class FocusedCatPanel(QWidget):
         lines = [f"{cat.name} carries:"]
         if disorders:
             lines.append("• disorders: " + ", ".join(disorders)
-                         + " — each parent with a disorder has a 15% chance "
+                         + " - each parent with a disorder has a 15% chance "
                            "to pass one")
         if own_defects:
-            lines.append("• birth defects (odds depend on the partner — "
+            lines.append("• birth defects (odds depend on the partner - "
                          "select one to see them):")
             seen: set = set()
             for e in (getattr(cat, "visual_mutation_entries", None) or []):
@@ -181,5 +181,5 @@ class FocusedCatPanel(QWidget):
                 seen.add(name)
                 eff = (effect_for(e.get("group_key"), e.get("mutation_id"))
                        if effect_for is not None else "")
-                lines.append("    · " + name + (f" — {eff}" if eff else ""))
+                lines.append("    · " + name + (f" - {eff}" if eff else ""))
         return "\n".join(lines)

@@ -2,18 +2,18 @@
 
 Game rules (mewgenics.wiki.gg/wiki/Breeding, kitten birth process):
 
-  * Disorders — the kitten makes one roll per parent: 15 % to inherit one
+  * Disorders - the kitten makes one roll per parent: 15 % to inherit one
     random disorder from that parent. Independent per parent.
-  * Visual birth defects — inherited as *appearance*, per body part (birth
+  * Visual birth defects - inherited as *appearance*, per body part (birth
     step 7). Each part (with left/right slots for legs, arms, eyes,
     eyebrows, ears) inherits one parent's version; a bias depends on
     Stimulation and the kitten's inbreeding:
         ordinary vs defect: p(ordinary) = 50 + 50*(Stim−2·Inbreed%)/
                                            (200+|Stim−2·Inbreed%|)
     If BOTH parents carry the same defect:
-        * same ancestral line (a shared ancestor also carries it) — the
+        * same ancestral line (a shared ancestor also carries it) - the
           kitten gets it on the same part/side (~100 %).
-        * different lines — we cannot pin the side: the kitten gets it on
+        * different lines - we cannot pin the side: the kitten gets it on
           the same side as either parent's or the opposite side (~100 %).
     Single-carrier odds use the formula above (other side assumed normal).
 
@@ -143,7 +143,7 @@ def _groups_carried(cat) -> Set[str]:
 
 def shared_defect_line(a, b, group: str, max_depth: int = LINEAGE_DEPTH) -> bool:
     """True when a single common ancestor of *a* and *b* carries a defect of
-    this part group — i.e. the defect reaches both parents down the same line."""
+    this part group - i.e. the defect reaches both parents down the same line."""
     ancestors = get_all_ancestors(a, depth=max_depth) \
         & get_all_ancestors(b, depth=max_depth)
     return any(group in _groups_carried(anc) for anc in ancestors)
@@ -186,9 +186,9 @@ def defect_inheritance_rows(
 ) -> List[DefectRow]:
     """Per-defect pass information for a pair.
 
-    * Same defect on both parents — guaranteed (~100 %). Whether the side is
+    * Same defect on both parents - guaranteed (~100 %). Whether the side is
       deterministic depends on `same_line` (see module docstring).
-    * Single parent carrier — 100 % − p(ordinary), which rises with the
+    * Single parent carrier - 100 % − p(ordinary), which rises with the
       pair's inbreeding and falls with Stimulation.
     """
     map_a, map_b = defect_map(a), defect_map(b)

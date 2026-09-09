@@ -27,17 +27,17 @@ from mewgenics_overlay.ui.theme import wrap_tooltip as _wt
 _COLS = ["Cat", "Status", "Age", "Stats", "Donate?", "Why donate"]
 _COL_TIPS = [
     "The cat's name. 📌 = pinned (kept for breeding). Hover a row for the full story.",
-    "kitten — born today, can't breed yet · retired — went on an adventure "
-    "· normal — a regular adult.",
+    "kitten - born today, can't breed yet · retired - went on an adventure "
+    "· normal - a regular adult.",
     "Age in days. Kittens (1) go to Tink; seniors (5+) to Tracy.",
     "Just its strength: the sum of the 7 birth stats (0–49). It is NOT the "
-    "donation advice — use the 'Donate?' column for that.",
+    "donation advice - use the 'Donate?' column for that.",
     "Give-away order, weakest first: Donate = safe to part with · Maybe = "
     "borderline · Keep = worth holding on to (breeding-valuable, pinned or "
     "must-breed). Colours: green = donate · amber = maybe · grey = keep. "
     "The Why column explains each rating.",
     "Why this cat qualifies for this NPC. Cats valuable for breeding (or "
-    "pinned / must-breed) sink to the bottom — donate them only if you must.",
+    "pinned / must-breed) sink to the bottom - donate them only if you must.",
 ]
 
 
@@ -123,7 +123,7 @@ class DonationsTab(QWidget):
         butch_unlocked = any(f.startswith("butch") for f in flags)
         if butch_unlocked:
             self._butch_note.setText(
-                "Butch is unlocked — we can't yet tell which cats he'd take: "
+                "Butch is unlocked - we can't yet tell which cats he'd take: "
                 "the save doesn't record per-cat adventure/chapter progress."
             )
             self._butch_note.setVisible(True)
@@ -135,7 +135,7 @@ class DonationsTab(QWidget):
             effect_of_cat=getattr(self, "_effect_of_cat", None)) \
             if (cats or dead) else []
         # Spoiler guard: locked (or unsupported/undetectable) NPCs must never
-        # appear — that would give away who exists and what they want.
+        # appear - that would give away who exists and what they want.
         self._slots = [s for s in report if s.supported and s.active]
         self._rebuild_combo()
         self._restore_npc(previous)
@@ -165,7 +165,7 @@ class DonationsTab(QWidget):
             self._on_npc_selected(0)
         else:
             self._summary.setText(
-                "No donation NPCs unlocked yet — the list fills in as you "
+                "No donation NPCs unlocked yet - the list fills in as you "
                 "meet them."
             )
             self._hint.setText("")
@@ -232,7 +232,7 @@ class DonationsTab(QWidget):
             return
         cat = cats[index.row()]
         menu = QMenu(self)
-        label = ("Unpin — allow donation" if getattr(cat, "is_pinned", False)
+        label = ("Unpin - allow donation" if getattr(cat, "is_pinned", False)
                  else "Pin for breeding")
         action = menu.addAction(label)
         chosen = menu.exec(self._table.viewport().mapToGlobal(pos))
@@ -279,7 +279,7 @@ class DonationsTab(QWidget):
         self._table.setSortingEnabled(True)
         self._hint.setText(
             "Ordered weakest → strongest. Pinned, must-breed and breeding-"
-            "valuable cats are marked Keep — donate them only if you must."
+            "valuable cats are marked Keep - donate them only if you must."
         )
 
     @staticmethod
@@ -297,7 +297,7 @@ class DonationsTab(QWidget):
         aggression = getattr(cat, "aggression", None)
         if aggression is not None:
             lines.append(f"Aggression: {float(aggression) * 100:.0f}% "
-                         "(marked for fighters — not a donation factor)")
+                         "(marked for fighters - not a donation factor)")
         if injured:
             lines.append(f"{injured} stat(s) with an injury penalty")
         lines.append(f"Suitable for: {slot.npc} ({slot.wants})")

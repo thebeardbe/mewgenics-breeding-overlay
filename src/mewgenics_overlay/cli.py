@@ -106,7 +106,7 @@ def cmd_donate(sess: Session, args) -> int:
                              current_day=getattr(sess, "current_day", None))
     for slot in report:
         if not slot.supported:
-            print(f"— {slot.npc}: not supported (no save data) · {slot.unlock_note}")
+            print(f"- {slot.npc}: not supported (no save data) · {slot.unlock_note}")
             continue
         print(f"{slot.npc} ({slot.wants}): {slot.count} qualifying")
         for cat in slot.candidates[: args.limit]:

@@ -10,7 +10,7 @@ exposes focused queries for the overlay:
 
 Pair evaluation uses the vendored `score_pair` (game compatibility formula,
 birth-defect risk via coefficient of inbreeding, expected-offspring stat
-projection, lover/haters/family blocking) — identical math to MBM.
+projection, lover/haters/family blocking) - identical math to MBM.
 """
 
 from __future__ import annotations
@@ -49,7 +49,7 @@ def display_location(cat) -> str:
     """Human-friendly location label.
 
     Cats with status 'In House' but no assigned room/adventure box are simply
-    standing on screen — they are NOT inside a room, so label them
+    standing on screen - they are NOT inside a room, so label them
     'Outside house' rather than implying they can breed from a room.
     """
     status = getattr(cat, "status", "") or ""
@@ -182,7 +182,7 @@ class Session:
 
     @property
     def dead_cats(self) -> list[Cat]:
-        """Cats that have died (is_dead flag) — candidates for the Organ
+        """Cats that have died (is_dead flag) - candidates for the Organ
         Grinder, who takes the dead."""
         return [c for c in self.cats if getattr(c, "is_dead", False)]
 
@@ -218,10 +218,10 @@ class Session:
 
         ``order`` controls how compatible pairs are sorted:
 
-          * ``"risk"`` (default) — safe partners first (risk <= 8 %), then
+          * ``"risk"`` (default) - safe partners first (risk <= 8 %), then
             higher-risk ones, each tier by quality. Best for the overlay's
             "which pair should I actually use now" question.
-          * ``"quality"`` — MBM's full quality score (expected stats minus
+          * ``"quality"`` - MBM's full quality score (expected stats minus
             risk/variance penalties, plus lover bonuses).
 
         ``stimulation`` is the breeding room's furniture Stimulation value
@@ -235,7 +235,7 @@ class Session:
         # overlap heavily, so a shared memo turns each fresh deep-lineage
         # walk into dict lookups (the vendored engine documents this use).
         kinship_memo: dict = {}
-        # The focused cat's ancestry is identical for every partner — trace
+        # The focused cat's ancestry is identical for every partner - trace
         # it once and reuse it for every relation label.
         focus_depths = depths_of(cat)
 
@@ -256,7 +256,7 @@ class Session:
             )
             family = is_direct_family_pair(cat, b, parent_map)
             # Same-sex pairs are already rejected by the vendored can_breed
-            # (1.1 rule: they mate but never produce a kitten — they raise
+            # (1.1 rule: they mate but never produce a kitten - they raise
             # the Gay-Stray chance instead), so no extra gate is needed here.
             ok = bool(factors.compatible and not family)
             if not ok:
@@ -329,7 +329,7 @@ def _read_aux_save_data(save_path: str) -> tuple[Optional[int], set]:
     Both live in the same read-only sqlite database the parser already opened
     (``properties/current_day`` and the ``files/npc_progress`` blob), so they
     are read together in ONE connection. On any problem returns
-    ``(None, empty set)`` — the overlay degrades gracefully without them.
+    ``(None, empty set)`` - the overlay degrades gracefully without them.
     """
     try:
         conn = sqlite3.connect(f"file:{save_path}?mode=ro", uri=True)

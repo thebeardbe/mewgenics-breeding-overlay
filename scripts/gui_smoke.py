@@ -64,8 +64,9 @@ def main() -> int:
         vals = []
         for r in range(pal._table.rowCount()):
             it = pal._table.item(r, 4)       # Risk column
-            txt = it.text() if it else "—"
-            if txt != "—":
+            txt = it.text() if it else ""
+            # skip placeholders (blocked rows show "-") and parse real %
+            if txt.endswith("%"):
                 vals.append(float(txt.rstrip("%")))
         return vals
 

@@ -3,10 +3,10 @@
 The overlay is summoned with a global hotkey (Ctrl+Shift+B) after clicking a
 cat in the game.
 
-  * Windows — RegisterHotKey + a QAbstractNativeEventFilter. Works with the
+  * Windows - RegisterHotKey + a QAbstractNativeEventFilter. Works with the
     game in any window mode. This is the primary target (most Mewgenics
     players are on Windows).
-  * Linux — no portable global-grab API exists that works on both X11 and
+  * Linux - no portable global-grab API exists that works on both X11 and
     Wayland without swallowing keys, so `install()` returns an *inactive*
     hotkey and the app falls back to a system-tray toggle. (Pluggable
     extension point: implement a native X11/pyinput backend here later.)

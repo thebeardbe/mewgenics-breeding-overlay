@@ -1,9 +1,9 @@
 """Theme registry for the overlay.
 
-Two film-noir looks — high-key ("bright") and low-key ("dark") monochrome:
+Two film-noir looks - high-key ("bright") and low-key ("dark") monochrome:
 
-  * ``film``  — Noir · Bright: silver/ivory stock, ink-black lines.
-  * ``noir``  — Noir · Dark: deep charcoal stock, pale silver lines.
+  * ``film``  - Noir · Bright: silver/ivory stock, ink-black lines.
+  * ``noir``  - Noir · Dark: deep charcoal stock, pale silver lines.
 
 The only chroma allowed is a restrained noir-red (danger, selected). Risk is
 otherwise graded by ink weight: dark = low, mid-grey = medium, red = high.
@@ -285,3 +285,11 @@ HEARTS = "♥♥"
 WARN = "⚠"
 CHECK = "✓"
 APPROX = "≈"
+
+
+def gender_label(gender) -> str:
+    """Spoken form of a gender for text: male / female / neutral."""
+    g = (gender or "?").strip().lower()
+    if g in ("male", "female"):
+        return g
+    return "neutral"

@@ -60,7 +60,7 @@ from mewgenics_overlay.core.session import (
 from mewgenics_overlay.ui.savecontroller import SaveController
 from mewgenics_overlay.ui.focuspanel import FocusedCatPanel
 
-# Partner-table pure core (columns, header tips, cell formatters) — moved to
+# Partner-table pure core (columns, header tips, cell formatters) - moved to
 # ui/partnertable.py so the interactive widget can stay Qt-focused (step 2b).
 from .partnertable import (
     _COL_TIPS,
@@ -129,6 +129,8 @@ class PaletteWindow(QWidget):
         self._asset_lock = threading.Lock()
         self._table: Optional[PartnerTableWidget] = None  # built in _build_ui
         self._ui_busy = False
+        self._suppress_clear_text = False
+        self._opened_by_focus = False
         self._pinned = True               # mirror of the 📌 button state
         self._click_through = False       # mouse passes through to the game
         self._dialog_open = False         # modal dialog (file picker) open
@@ -324,7 +326,7 @@ class PaletteWindow(QWidget):
         self._btn_close = QPushButton("✕")
         self._btn_close.setObjectName("iconbtn")
         self._btn_close.setFixedSize(46, 26)
-        self._btn_close.setToolTip("Hide (Ctrl+Shift+B / tray) — quits when "
+        self._btn_close.setToolTip("Hide (Ctrl+Shift+B / tray) - quits when "
                                    "no tray is available")
         self._btn_close.clicked.connect(self._on_close_clicked)
         head.addWidget(self._btn_pin)
@@ -336,8 +338,13 @@ class PaletteWindow(QWidget):
         self._search = QLineEdit()
         self._search.setPlaceholderText("Click a cat in-game, then type its name here…")
         self._search.setClearButtonEnabled(True)
+        # down-arrow affordance: opens the full-cat dropdown
+        self._dropdown_action = self._search.addAction(
+            self._arrow_icon(), QLineEdit.ActionPosition.TrailingPosition)
+        self._dropdown_action.setToolTip("Show all cats")
+        self._dropdown_action.triggered.connect(self._open_search_dropdown)
         self._search.setToolTip(_wt(
-            "Find a cat by typing part of its name — the list comes from "
+            "Find a cat by typing part of its name - the list comes from "
             "your latest save and refreshes on its own whenever the game "
             "saves.\n"
             "Then pick who to analyse for breeding."
@@ -356,9 +363,9 @@ class PaletteWindow(QWidget):
         room_lbl.setToolTip(_wt(
             "The room where you plan to breed.\n"
             "Its furniture changes two things in the numbers:\n"
-            "• Stimulation — decides how often kittens inherit the better "
+            "• Stimulation - decides how often kittens inherit the better "
             "stat, and how likely a lone defect is to pass.\n"
-            "• Comfort — decides how often a breeding attempt actually "
+            "• Comfort - decides how often a breeding attempt actually "
             "succeeds each night.\n"
             "Until a room is chosen, a neutral Stimulation of 50 is assumed."
         ))
@@ -397,7 +404,7 @@ class PaletteWindow(QWidget):
             "less), so you only breed pairs that are unlikely to produce a "
             "defective kitten.\n"
             "If no partner is that safe, the normal 7s-first pick is shown "
-            "instead — clearly labelled."
+            "instead - clearly labelled."
         ))
         self._btn_safe.setVisible(False)
         best_row.addWidget(self._btn_best, 1)
@@ -413,7 +420,7 @@ class PaletteWindow(QWidget):
         self._detail = QLabel("Select a partner row for inheritance detail.")
         self._detail.setWordWrap(True)
         self._detail.setObjectName("muted")
-        # can embed partner names (save-derived) — never auto-rich-text them
+        # can embed partner names (save-derived) - never auto-rich-text them
         self._detail.setTextFormat(Qt.TextFormat.PlainText)
         self._detail.setToolTip(_wt(
             "Information about the row you have highlighted:\n"
@@ -478,6 +485,7 @@ class PaletteWindow(QWidget):
 
     def _wire_ui(self) -> None:
         self._search.textChanged.connect(self._on_search_text)
+        self._search.installEventFilter(self)
         self._search.returnPressed.connect(self._on_search_enter)
         self._results.itemClicked.connect(self._on_result_clicked)
         self._results.itemActivated.connect(self._on_result_clicked)
@@ -503,7 +511,7 @@ class PaletteWindow(QWidget):
             self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint,
                                self._pinned)
             self.show()
-        # Hyprland: stacking is controlled by compositor rules — visual only.
+        # Hyprland: stacking is controlled by compositor rules - visual only.
 
     def _set_topmost_win32(self, on: bool) -> None:
         """Set/unset always-on-top without touching window flags (no HWND
@@ -695,6 +703,13 @@ class PaletteWindow(QWidget):
         # The palette carries its own stylesheet (it shadows the app-wide
         # one), so it must be refreshed too or nothing visually changes.
         self.setStyleSheet(_theme.stylesheet())
+        from mewgenics_overlay.ui.comboarrow import style_combo
+        if getattr(self, "_room_combo", None) is not None:
+            style_combo(self._room_combo, _theme.C_MUTED)
+        donations = getattr(self, "_donations_tab", None)
+        npc_combo = getattr(donations, "_combo", None)
+        if npc_combo is not None:
+            style_combo(npc_combo, _theme.C_MUTED)
         self._refresh_theme()
 
     def _refresh_theme(self) -> None:
@@ -762,11 +777,11 @@ class PaletteWindow(QWidget):
             f"<ul>"
             f"<li>Save parser &amp; genetics engine: "
             f"<a href='https://github.com/frankieg33/MewgenicsBreedingManager'>"
-            f"MewgenicsBreedingManager</a> (MIT, © 2026 frankieg33) — "
+            f"MewgenicsBreedingManager</a> (MIT, © 2026 frankieg33) - "
             f"vendored; provenance in <code>vendor/_VENDORED.md</code></li>"
             f"<li>1.1 breeding-model sync: "
             f"<a href='https://github.com/whyayala/MewgenicsBreedingManager'>"
-            f"whyayala's maintained fork</a> (v5.9.5) — same-sex rule, "
+            f"whyayala's maintained fork</a> (v5.9.5) - same-sex rule, "
             f"gender-role compat gate, neutral-sexuality fix</li>"
             f"<li>Save-format research: "
             f"<a href='https://github.com/pzx521521/mewgenics-save-editor'>"
@@ -777,14 +792,14 @@ class PaletteWindow(QWidget):
             f"<a href='https://gist.github.com/SciresM/95a9dbba22937420e75d4da617af1397'>"
             f"SciresM's game-code analysis</a>, cross-checked against "
             f"<a href='https://mewgenics.wiki.gg/wiki/Breeding'>wiki.gg's "
-            f"datamined tables</a> — pinned by tests/test_wiki_math.py</li>"
+            f"datamined tables</a> - pinned by tests/test_wiki_math.py</li>"
             f"<li>Game mechanics reference: "
             f"<a href='https://mewgenics.wiki.gg/wiki/Mewgenics'>"
             f"Mewgenics Wiki</a></li>"
             f"</ul>"
-            f"<p>Licensed MIT. Saves are read-only — this tool never "
+            f"<p>Licensed MIT. Saves are read-only - this tool never "
             f"modifies them.</p>"
-            f"<p>Found a problem? Use <b>🐞 Report a problem</b> below — "
+            f"<p>Found a problem? Use <b>🐞 Report a problem</b> below - "
             f"no account needed.</p>"
         )
         dialog = QDialog(self)
@@ -802,7 +817,7 @@ class PaletteWindow(QWidget):
         row = QHBoxLayout(actions)
         row.setContentsMargins(0, 0, 0, 0)
         report = QPushButton("🐞 Report a problem")
-        report.setToolTip("Open the bug-report form in your browser — no account needed.")
+        report.setToolTip("Open the bug-report form in your browser - no account needed.")
         report.clicked.connect(self._open_report)
         copy_info = QPushButton("📋 Copy debug info")
         copy_info.setToolTip("Copies version + save + theme to the clipboard so a "
@@ -820,7 +835,7 @@ class PaletteWindow(QWidget):
         """Where the About-box report button points (see config.report_url)."""
         url = (self._settings.get("report_url")
                or "https://github.com/thebeardbe/mewgenics-breeding-overlay/issues")
-        # Only ever hand an http(s) URL to the OS browser — never a custom
+        # Only ever hand an http(s) URL to the OS browser - never a custom
         # scheme from a config file (file:, or registered protocol handlers).
         if isinstance(url, str) and url.lower().startswith(("http://",
                                                            "https://")):
@@ -851,7 +866,7 @@ class PaletteWindow(QWidget):
             f"Save: {save or '(none loaded)'}",
         ])
         QApplication.clipboard().setText(text)
-        self._set_status("debug info copied — paste it into a bug report")
+        self._set_status("debug info copied - paste it into a bug report")
 
     # ── save loading ───────────────────────────────────────────────────────
     def _load_last_save(self) -> None:
@@ -863,7 +878,7 @@ class PaletteWindow(QWidget):
         if path:
             self.open_save(path)
         else:
-            self._set_status("no save found — use 📁 to locate one")
+            self._set_status("no save found - use 📁 to locate one")
 
     @staticmethod
     def _file_exists(path: str) -> bool:
@@ -907,7 +922,7 @@ class PaletteWindow(QWidget):
     def _pick_save(self) -> None:
         """Open a file picker and load the chosen save.
 
-        Uses Qt's own dialog (not the OS-native one) — the native dialog is
+        Uses Qt's own dialog (not the OS-native one) - the native dialog is
         the usual suspect for platform crashes here. The dialog is modal, so
         auto click-through is suspended while it is open.
         """
@@ -931,7 +946,7 @@ class PaletteWindow(QWidget):
         self._settings["save_path"] = path
         cfg.save(self._settings)
         base = path.split('/')[-1].split(chr(92))[-1]
-        self._title.setText(f"🐈 Overlay — {base}")
+        self._title.setText(f"🐈 Overlay - {base}")
         if getattr(self, "_settings_tab", None) is not None:
             self._settings_tab.set_current(path)
         self._start_watcher(path)
@@ -942,14 +957,14 @@ class PaletteWindow(QWidget):
         self._save.start_watcher(path, on_change=self._save_changed.emit)
 
     def _on_save_changed(self) -> None:
-        """Run on the UI thread via the ``_save_changed`` signal — the watcher
+        """Run on the UI thread via the ``_save_changed`` signal - the watcher
         thread only emits, it never touches Qt widgets."""
         try:
-            self._set_status("save changed — reloading…")
+            self._set_status("save changed - reloading…")
             self._schedule_reload()
         except Exception:
             log.exception("save-change handler failed")
-            self._set_status("⚠ save changed but reload failed — see the log")
+            self._set_status("⚠ save changed but reload failed - see the log")
 
     def _set_status(self, text: str) -> None:
         self._status.setText(text)
@@ -1000,7 +1015,7 @@ class PaletteWindow(QWidget):
                 if token >= token_now:
                     # Keep the previous roster; never leave the UI hanging on
                     # a corrupt/hostile save.
-                    self._set_status("⚠ could not read save — keeping the "
+                    self._set_status("⚠ could not read save - keeping the "
                                      "previous cats")
                     log.warning("save reload failed: %s", result)
             elif kind == "partners":
@@ -1011,7 +1026,7 @@ class PaletteWindow(QWidget):
             elif kind == "partners_error":
                 # raw exception already logged in the worker; show a
                 # friendly line, never a Python traceback in the UI.
-                self._set_status("⚠ partner scoring failed — see the log; "
+                self._set_status("⚠ partner scoring failed - see the log; "
                                  "try selecting another cat")
 
     def _adopt_session(self, sess: Optional[Session]) -> None:
@@ -1072,11 +1087,11 @@ class PaletteWindow(QWidget):
         self._room_combo.blockSignals(True)
         self._room_combo.clear()
         self._room_items = []
-        self._room_combo.addItem("— Stim 50 (no room)")
+        self._room_combo.addItem("- Stim 50 (no room)")
         self._room_items.append(None)
         for room in sorted(rooms_env, key=lambda r: -rooms_env[r][0]):
             stim, comfort = float(rooms_env[room][0]), float(rooms_env[room][1])
-            label = f"{room} — Stim {stim:g}"
+            label = f"{room} - Stim {stim:g}"
             if comfort:
                 label += f", Comf {comfort:g}"
             self._room_combo.addItem(label)
@@ -1129,7 +1144,9 @@ class PaletteWindow(QWidget):
 
     def set_focus(self, cat: Cat) -> None:
         self._focus = cat
+        self._suppress_clear_text = True
         self._search.setText("")
+        self._suppress_clear_text = False
         self._search.clearFocus()
         self._show_focus(cat)
         self._schedule_partners()
@@ -1149,18 +1166,74 @@ class PaletteWindow(QWidget):
                 if self._ga is not None else ""
         self._focus_panel.show_cat(cat, effect_for=_gpak_effect)
 
-    def _on_search_text(self, text: str) -> None:
-        if not text.strip():
+    def _arrow_icon(self):
+        """Tiny down-arrow QIcon in the current theme's muted colour."""
+        from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
+        pm = QPixmap(12, 12)
+        pm.fill(QColor(0, 0, 0, 0))
+        pnt = QPainter(pm)
+        pnt.setRenderHint(QPainter.RenderHint.Antialiasing)
+        pen = QPen(QColor(_theme.C_MUTED), 2)
+        pnt.setPen(pen)
+        pnt.drawLine(1, 4, 6, 9)
+        pnt.drawLine(6, 9, 11, 4)
+        pnt.end()
+        return QIcon(pm)
+
+    def _open_search_dropdown(self) -> None:
+        """Arrow click: open the dropdown, or close it if already open.
+        Never clears the current selection/table. A click that merely focuses
+        the box (which itself opens the list) must not close it again."""
+        if self._opened_by_focus:
+            self._opened_by_focus = False
+            if self._session is not None and not self._results.isVisible():
+                self._fill_dropdown(self._search.text())
+                self._results.setVisible(True)
+            return
+        if self._results.isVisible():
             self._results.setVisible(False)
             return
         if self._session is None:
             return
-        hits = self._session.search(text, limit=100)
-        truncated = len(hits) > 60
-        if truncated:
-            hits = hits[:60]
+        self._fill_dropdown(self._search.text())
+        self._results.setVisible(True)
+
+    def eventFilter(self, watched, event):  # noqa: N802 (Qt API)
+        """Show the full cat dropdown when the user actively focuses the
+        search box (click, Tab or keyboard shortcut). Pure window activation
+        on Wayland/Hyprland does NOT open it."""
+        if watched is self._search and event.type() == QEvent.Type.FocusIn:
+            reason = event.reason()
+            explicit = reason in (
+                QEvent.FocusReason.MouseFocusReason,
+                QEvent.FocusReason.TabFocusReason,
+                QEvent.FocusReason.ShortcutFocusReason,
+            )
+            if explicit and self._session is not None:
+                self._opened_by_focus = True
+                self._fill_dropdown(self._search.text())
+                self._results.setVisible(True)
+        return super().eventFilter(watched, event)
+
+    def _fill_dropdown(self, text: str) -> None:
+        """Fill and show the results list; no side effects (does not clear
+        the current cat/table). Opening via the arrow or focusing the box
+        must never behave like the user pressing the clear X."""
         self._results.clear()
-        for c in hits:
+        if self._session is None:
+            self._results.setVisible(False)
+            return
+        text = text.strip()
+        if text:
+            hits = self._session.search(text, limit=100)
+            truncated = len(hits) > 60
+            if truncated:
+                hits = hits[:60]
+        else:
+            hits = sorted(self._session.alive,
+                          key=lambda c: c.name.lower())
+            truncated = len(hits) > 60
+        for c in hits[:60]:
             item = QListWidgetItem(
                 f"{c.name}   · {display_location(c)}   · {c.gender}   · "
                 f"sum {sum(c.base_stats.values())}"
@@ -1168,10 +1241,19 @@ class PaletteWindow(QWidget):
             item.setData(Qt.ItemDataRole.UserRole, c.db_key)
             self._results.addItem(item)
         if truncated:
-            more = QListWidgetItem("… more matches — type more of the name")
+            more = QListWidgetItem("… more matches - type more of the name")
             more.setFlags(Qt.ItemFlag.NoItemFlags)
             self._results.addItem(more)
-        self._results.setVisible(True)
+        self._results.setVisible(bool(hits) or truncated)
+
+    def _on_search_text(self, text: str) -> None:
+        """Typing/clearing. A manual clear (built-in X / backspace on the
+        focused box) also resets the current cat and its table."""
+        if not text.strip() and not self._suppress_clear_text \
+                and self._search.hasFocus() \
+                and (self._focus is not None or self._table.rowCount()):
+            self._clear_focus()
+        self._fill_dropdown(text)
 
     def _on_result_clicked(self, item: QListWidgetItem) -> None:
         key = item.data(Qt.ItemDataRole.UserRole)
@@ -1179,6 +1261,7 @@ class PaletteWindow(QWidget):
             cat = self._session.by_key.get(key)
             if cat is not None:
                 self.set_focus(cat)
+        self._opened_by_focus = False
         self._results.setVisible(False)
 
     def _on_search_enter(self) -> None:
@@ -1247,7 +1330,7 @@ class PaletteWindow(QWidget):
         elif fallback:
             prefix = "⭐ Best (no ≤15% risk partner)"
         text = (
-            f"{prefix}: {partner.name} — Risk {chosen.row.risk_pct:.1f}% · "
+            f"{prefix}: {partner.name} - Risk {chosen.row.risk_pct:.1f}% · "
             f"≥7 ≈{chosen.row.seven_plus_total:.1f} · "
             f"COI {chosen.row.coi * 100:.1f}%"
         )
@@ -1352,7 +1435,7 @@ class PaletteWindow(QWidget):
             return
         partner = data[0].partner
         menu = QMenu(self)
-        label = ("Unpin — allow donation" if getattr(partner, "is_pinned", False)
+        label = ("Unpin - allow donation" if getattr(partner, "is_pinned", False)
                  else "Pin for breeding")
         action = menu.addAction(label)
         chosen = menu.exec(self._table.viewport().mapToGlobal(pos))
