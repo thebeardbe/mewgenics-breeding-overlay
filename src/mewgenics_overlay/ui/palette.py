@@ -282,7 +282,10 @@ class PaletteWindow(QWidget):
         head.addWidget(about)
         head.addWidget(self._btn_theme)
         head.addWidget(close)
-        root.addLayout(head)
+        # header lives ABOVE the tabs (insertLayout(0)) so the chrome stays
+        # visible on every tab — it used to live inside the Breeding page
+        # and vanished on Donations.
+        outer.insertLayout(0, head)
 
         # search
         self._search = QLineEdit()

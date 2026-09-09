@@ -376,11 +376,13 @@ class PartnerTableWidget(QTableWidget):
         rev = self.sort_dir == "desc"
         good = [e for e in self.rows if e[0].compatible]
         blocked = [e for e in self.rows if not e[0].compatible]
-        good.sort(key=lambda e: self._col_key(self.sort_col, e[0], e[1]), reverse=rev)
-        # blocked rows keep a readable fixed order (text columns only)
-        if self.sort_col in (COL_CAT, COL_FAMILY, COL_DEFECTS, COL_NOTE):
-            blocked.sort(key=lambda e: self._col_key(self.sort_col, e[0], e[1]),
-                         reverse=rev)
+        good.sort(key=lambda e: self._col_key(self.sort_col, e[0], e[1]),
+                  reverse=rev)
+        # Blocked rows follow the same asc/desc sort as the rest, so a
+        # column click behaves consistently for everyone (they previously
+        # kept a fixed order unless a text column was active).
+        blocked.sort(key=lambda e: self._col_key(self.sort_col, e[0], e[1]),
+                     reverse=rev)
         return good + blocked
 
     def redraw(self, stimulation: float = 50.0, comfort: float = 0.0,

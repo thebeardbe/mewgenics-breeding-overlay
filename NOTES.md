@@ -4,20 +4,11 @@ Informal backlog for the overlay. Nothing here is scheduled unless it says so.
 
 ## Bugs (small)
 
-- **Blocked-cat sorting:** blocked rows sorted by GenΔ or Room don't follow
-  asc / desc / third-click-default correctly (text columns are fine; numeric
-  blocked rows keep a fixed order). Fix together with the Donations /
-  blocked-row pass.
 - **Scaling on large resolutions:** at big monitor resolutions the overlay
   (and its text) renders tiny, even when Mewgenics itself is set to a lower
   resolution. Ideas: a button to scale the window 2×/4×, and/or
   `Ctrl + mouse-wheel` zooming (scale the root layout).
-- **Donations table headers aren't sortable** (columns never had header
-  clicks wired there) — probably fine, but decide if the Donations list
-  should sort like the Breeding table.
-- **Top-right window buttons (pin/click-through/theme/close) don't show
-  while the Donations tab is active** — the header row with those buttons
-  disappears on tab 2. Pre-existing; needs a layout pass.
+
 
 ## Future features
 

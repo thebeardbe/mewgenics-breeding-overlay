@@ -41,6 +41,16 @@ _COL_TIPS = [
 ]
 
 
+class _NumItem(QTableWidgetItem):
+    """QTableWidgetItem that sorts numerically (Age/Stats columns)."""
+
+    def __lt__(self, other) -> bool:
+        try:
+            return float(self.text()) < float(other.text())
+        except ValueError:
+            return super().__lt__(other)
+
+
 class DonationsTab(QWidget):
     """Pick which NPC you're feeding, see today's candidates with reasons."""
 
@@ -231,6 +241,7 @@ class DonationsTab(QWidget):
             self.refresh(palette._session)
 
     def _render_slot(self, slot) -> None:
+        self._table.setSortingEnabled(False)
         self._table.setRowCount(0)
         cats = slot.candidates
         total = len(cats)
@@ -259,11 +270,13 @@ class DonationsTab(QWidget):
             cells = [f"{_pin}{cat.name}", cat_status(cat), str(getattr(cat, "age", "?")),
                      str(base), rating, why]
             for c_i, text in enumerate(cells):
-                it = QTableWidgetItem(text)
+                it = (_NumItem(text) if c_i in (2, 3)
+                      else QTableWidgetItem(text))
                 it.setToolTip(self._row_tip(cat, slot, base, inj, rating, advice))
                 if c_i == 4:
                     it.setForeground(QColor(rating_colour[rating]))
                 self._table.setItem(r_i, c_i, it)
+        self._table.setSortingEnabled(True)
         self._hint.setText(
             "Ordered weakest → strongest. Pinned, must-breed and breeding-"
             "valuable cats are marked Keep — donate them only if you must."
