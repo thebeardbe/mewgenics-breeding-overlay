@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QCheckBox,
     QHBoxLayout,
     QLabel,
     QPushButton,
@@ -117,6 +118,14 @@ class SettingsTab(QWidget):
             zoom_row.addWidget(reset_btn)
             zoom_row.addStretch(1)
             lay.addLayout(zoom_row)
+
+            self._update_check = QCheckBox("Check for updates on start")
+            self._update_check.setToolTip(
+                "Ask GitHub for a newer release when the app starts and "
+                "show a download button if one exists. No data is sent.")
+            self._update_check.toggled.connect(
+                lambda on: actions["set_check_updates"](on))
+            lay.addWidget(self._update_check)
 
         # About & support section
         root.addWidget(self._heading("About & support"))
@@ -246,6 +255,9 @@ class SettingsTab(QWidget):
         for k, b in self._theme_buttons.items():
             b.setChecked(k == key)
         self._restyle()
+
+    def set_check_updates(self, on: bool) -> None:
+        self._update_check.setChecked(bool(on))
 
     def set_zoom(self, pct: int) -> None:
         self._zoom_label.setText(f"{pct}%")

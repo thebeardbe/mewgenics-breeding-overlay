@@ -97,6 +97,12 @@ PYTHONPATH=src python -m mewgenics_overlay.cli donate
 | Compat | Game compatibility: `0.15 × charisma × libido × lover × sexuality`, pass line at 0.05. |
 | Exp/stat, ≥7 | Expected kitten stat average, and how many stats land at 7. |
 
+## Update check
+
+On start (and every few hours while running) the app asks GitHub whether a
+newer release exists and shows a download button if so. It sends no data and never downloads anything automatically - you can turn it off in
+**Settings → Check for updates on start**.
+
 ## Save safety
 
 Never writes to a save. The parser opens SQLite read-only; the live-watch path parses a temp copy of the file. Pinned by a test that fingerprints a save before/after an engine pass.

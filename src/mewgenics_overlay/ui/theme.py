@@ -210,6 +210,11 @@ def set_theme(key: str) -> None:
     _globals["STYLESHEET"] = info["css"]
 
 
+# Zoom is applied through THREE separate paths that read this value:
+# (1) the stylesheet font-size regex below, (2) palette.py
+# _scale_icon_buttons, (3) partnertable.py scale_columns. A new
+# widget that must zoom needs its own hookup - do not assume the
+# stylesheet regex covers it.
 ZOOM = 1.0   # user zoom multiplier; call set_zoom() before styling
 
 

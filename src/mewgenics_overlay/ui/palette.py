@@ -217,8 +217,14 @@ class PaletteWindow(QWidget):
             self._table.sort_dir = d
 
     # ── update availability check (read-only; no download) ────────────────
+    def _set_update_check(self, on: bool) -> None:
+        self._settings["check_for_updates"] = bool(on)
+        cfg.save(self._settings)
+
     def _start_update_check(self) -> None:
         """Ask GitHub for the newest release at most once per window."""
+        if not self._settings.get("check_for_updates", True):
+            return
         if not _updates.due(self._settings.get("last_update_check")):
             return
         now = time.time()
@@ -465,6 +471,7 @@ class PaletteWindow(QWidget):
                 "zoom_reset": self._zoom_default,
                 "about": self._show_about,
                 "report": self._open_report,
+                "set_check_updates": self._set_update_check,
             },
             titles={k: _theme.THEMES[k]["title"] for k in _theme.THEMES},
         )
@@ -799,6 +806,9 @@ class PaletteWindow(QWidget):
             f"</ul>"
             f"<p>Licensed MIT. Saves are read-only - this tool never "
             f"modifies them.</p>"
+            f"<p>Update check: on start the app asks GitHub for the newest "
+            f"release and shows a download button if one exists - no data is "
+            f"sent. Disable it in Settings.</p>"
             f"<p>Found a problem? Use <b>🐞 Report a problem</b> below - "
             f"no account needed.</p>"
         )
@@ -1201,7 +1211,11 @@ class PaletteWindow(QWidget):
     def eventFilter(self, watched, event):  # noqa: N802 (Qt API)
         """Show the full cat dropdown when the user actively focuses the
         search box (click, Tab or keyboard shortcut). Pure window activation
-        on Wayland/Hyprland does NOT open it."""
+        on Wayland/Hyprland does NOT open it.
+
+        If another widget ever needs filtering, dispatch on ``watched`` in a
+        separate method - do not stack more ``if watched is ...`` branches
+        here."""
         if watched is self._search and event.type() == QEvent.Type.FocusIn:
             reason = event.reason()
             explicit = reason in (

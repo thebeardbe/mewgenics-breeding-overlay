@@ -19,6 +19,11 @@ Informal backlog for the overlay. Nothing here is scheduled unless it says so.
   tray icon always works as a summon fallback. If the tester still can't
   summon in fullscreen, a low-level keyboard-hook backend is the follow-up.
 
+## Review notes
+
+- Zoom scaling has three paths (theme stylesheet regex, _scale_icon_buttons, scale_columns); new zoomable widgets need their own hookup.
+- Search-box interaction state uses two booleans; if a third mode appears, consolidate into a state enum. eventFilter: dispatch by `watched`.
+
 ## Future features
 
 - **Auto-update** — check the latest release on startup; show a confirmation
