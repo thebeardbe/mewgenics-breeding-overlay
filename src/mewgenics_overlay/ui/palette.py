@@ -220,10 +220,14 @@ class PaletteWindow(QWidget):
         now = time.time()
         self._settings["last_update_check"] = now
         cfg.save(self._settings)
+        log.info("checking for a new release (local %s)", __version__)
 
         def work():
             result = _updates.latest_release()
-            QTimer.singleShot(0, lambda: self._show_update_available(result))
+            # Receiver = self (lives on the UI thread). Without a receiver,
+            # the timer is created in THIS worker thread, which has no event
+            # loop, so the update button would never appear.
+            QTimer.singleShot(0, self, lambda: self._show_update_available(result))
 
         threading.Thread(target=work, name="update-check", daemon=True).start()
 
@@ -233,6 +237,7 @@ class PaletteWindow(QWidget):
         remote, url = result
         local = _updates.parse_version(__version__)
         if remote <= local:
+            log.info("no newer release (local %s)", __version__)
             return
         self._update_url = url
         label = f"v{'.'.join(str(x) for x in remote)}"

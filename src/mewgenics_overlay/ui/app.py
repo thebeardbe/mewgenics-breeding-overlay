@@ -89,6 +89,19 @@ def main(argv=None) -> int:
     parser.add_argument("--version", action="version", version=__version__)
     args = parser.parse_args(argv)
 
+    # Headless/systemd Linux runs (no desktop env) may lack the CA bundle the
+    # update check needs. Point OpenSSL at the first cert file that exists.
+    for _env in ("NIX_SSL_CERT_FILE", "SSL_CERT_FILE"):
+        if os.environ.get(_env):
+            break
+    else:
+        for _cand in ("/etc/ssl/certs/ca-certificates.crt",
+                      "/etc/pki/tls/certs/ca-bundle.crt"):
+            if os.path.exists(_cand):
+                os.environ.setdefault("SSL_CERT_FILE", _cand)
+                break
+
+
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     # The vendored parser logs per-cat defect detection at INFO — too chatty

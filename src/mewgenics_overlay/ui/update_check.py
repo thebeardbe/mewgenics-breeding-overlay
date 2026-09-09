@@ -48,21 +48,48 @@ def is_newer(local: str, remote: str) -> bool:
 def latest_release(url: str = UPDATE_API_URL,
                    timeout: float = REQUEST_TIMEOUT
                    ) -> Optional[Tuple[Version, str]]:
-    """Return (version, release_url) for the newest release, or None."""
+    """Return (version, release_url) for the newest release, or None.
+
+    Primary: the GitHub API. Fallback: the plain /releases/latest page
+    (follows the redirect to the tag URL), which is not subject to the API
+    rate limit — so a rate-limited check still tells the user an update
+    exists instead of silently going quiet.
+    """
+    if url == UPDATE_API_URL:
+        tag, html = _api_latest(timeout)
+        if tag is not None:
+            return tag, html
+    # fallback: read the final redirect target of /releases/latest
     try:
         req = urllib.request.Request(
-            url, headers={"User-Agent": "mewgenics-breeding-overlay",
-                          "Accept": "application/vnd.github+json"})
+            RELEASES_URL, headers={"User-Agent": "mewgenics-breeding-overlay"})
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            final = resp.geturl()
+        m = re.search(r"/tag/v?([0-9][A-Za-z0-9._-]*)$", final)
+        if m:
+            log.info("latest release via page: %s", final)
+            return parse_version(m.group(1)), final
+    except Exception as exc:
+        log.debug("update html fallback failed: %s", exc)
+    return None
+
+
+def _api_latest(timeout: float):
+    try:
+        req = urllib.request.Request(
+            UPDATE_API_URL,
+            headers={"User-Agent": "mewgenics-breeding-overlay",
+                     "Accept": "application/vnd.github+json"})
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             data = json.loads(resp.read())
         tag = str(data.get("tag_name") or "")
         html = str(data.get("html_url") or RELEASES_URL)
         if not tag:
-            return None
+            return None, None
         return parse_version(tag), html
-    except Exception as exc:  # offline / rate-limited: stay quiet
-        log.debug("update check failed: %s", exc)
-        return None
+    except Exception as exc:  # offline / rate-limited: fall back quietly
+        log.debug("update API check failed: %s", exc)
+        return None, None
 
 
 def due(last_check: Optional[float], now: Optional[float] = None) -> bool:
