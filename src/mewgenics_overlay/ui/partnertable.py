@@ -9,27 +9,16 @@ from __future__ import annotations
 
 from mewgenics_overlay.core.maladies import (
     ASYMMETRIC_GROUPS,
-    _side_text,
     defect_inheritance_rows,
     disorder_summary,
     sexuality_label,
+    side_text,
 )
-from mewgenics_overlay.core.session import PartnerRow, display_location
-from mewgenics_overlay.ui.theme import (
-    APPROX,
-    BLOCK_MARK,
-    CHECK,
-    PIN,
-    gender_badge,
-    risk_color,
-    wrap_tooltip as _wt,
-)
+from mewgenics_overlay.core.session import STAT_NAMES, PartnerRow, display_location
 from . import theme as _theme
 from mewgenics_overlay.vendor.save_parser import (
     _stimulation_inheritance_weight as _better_stat_weight,
 )
-
-STAT_NAMES = ["STR", "DEX", "CON", "INT", "SPD", "CHA", "LCK"]
 
 _COLS = ["Cat", "Family", "GenΔ", "Room", "Risk", "Night", "Exp/stat", "≥7", "Defects", "Note"]
 
@@ -147,7 +136,7 @@ def _cat_glyphs(cat) -> str:
     female cats): ❤️ straight · 💗 bi · 🌈 gay — see the Cat column header
     tooltip for the legend. Purely cosmetic; sorting ignores the glyphs.
     """
-    g = gender_badge(getattr(cat, "gender", "?"))
+    g = _theme.gender_badge(getattr(cat, "gender", "?"))
     if g == "?":
         return g
     label = sexuality_label(getattr(cat, "sexuality_raw", None))
@@ -214,8 +203,8 @@ def _defects_summary(row, stimulation: float = 50.0) -> str:
     parts = []
     for d in _defect_rows_of(row, stimulation):
         short = _defect_short(d.name)
-        parts.append(short + (f" {CHECK}" if len(d.carriers) == 2
-                              else f" {APPROX}{d.chance_pct:.0f}%"))
+        parts.append(short + (f" {_theme.CHECK}" if len(d.carriers) == 2
+                              else f" {_theme.APPROX}{d.chance_pct:.0f}%"))
     return "; ".join(parts)
 
 
@@ -408,10 +397,10 @@ class PartnerTableWidget(QTableWidget):
         for r_i, (row, kids) in enumerate(ordered):
             p = row.partner
             ok = row.compatible
-            _pin = f"{PIN} " if getattr(p, "is_pinned", False) else ""
+            _pin = f"{_theme.PIN} " if getattr(p, "is_pinned", False) else ""
             glyphs = _cat_glyphs(p)
             nm = f"{_pin}{p.name} {glyphs}"
-            name = nm if ok else f"{nm}  ({BLOCK_MARK})"
+            name = nm if ok else f"{nm}  ({_theme.BLOCK_MARK})"
             rel = row.relation
 
             it_name = QTableWidgetItem(name)
@@ -437,7 +426,7 @@ class PartnerTableWidget(QTableWidget):
                 # Compute failed in the worker: show a distinct marker, not
                 # an identical empty cell ("we don't know" vs "no defects").
                 it_defects = QTableWidgetItem("—")
-                it_defects.setToolTip(_wt(
+                it_defects.setToolTip(_theme.wrap_tooltip(
                     "Defect information is unavailable for this pair — "
                     "scoring failed (details in the log). The Risk column "
                     "remains the safer guide here."))
@@ -445,7 +434,7 @@ class PartnerTableWidget(QTableWidget):
                 defects_text = _defects_summary(row, self._stim)
                 it_defects = QTableWidgetItem(defects_text)
                 it_defects.setToolTip(
-                    _wt("\n".join(self._pair_malady_lines(row, self._stim))
+                    _theme.wrap_tooltip("\n".join(self._pair_malady_lines(row, self._stim))
                         or "Both parents clean.")
                 )
             it_note = QTableWidgetItem(_note_text(row, kids))
@@ -455,7 +444,7 @@ class PartnerTableWidget(QTableWidget):
                     f"Birth-defect risk for this pair: {row.risk_pct:.1f}%."
                 )
                 _comfort = self._comfort
-                it_comp.setToolTip(_wt(
+                it_comp.setToolTip(_theme.wrap_tooltip(
                     f"Nightly breeding chance: "
                     f"{_fmt_chance(row.game_compat, _comfort)}.\n"
                     "That's the answer to 'will they breed tonight?' — the "
@@ -502,7 +491,7 @@ class PartnerTableWidget(QTableWidget):
             if ok:
                 if rel.is_family:
                     specials[COL_FAMILY] = _theme.C_FAMILY      # related, breedable
-                specials[COL_RISK] = risk_color(row.risk_pct)
+                specials[COL_RISK] = _theme.risk_color(row.risk_pct)
                 # Colour tracks the chance actually shown: green ≈ ≥5% per
                 # night, amber below it (the game's own 0.05 *compat* gate is
                 # separate — it only decides whether attempts happen at all).
@@ -542,7 +531,7 @@ class PartnerTableWidget(QTableWidget):
             lines.append("No shared family history that matters — the "
                          "safest kind of pairing.")
         lines.append("Longer explanation: hover the Family heading above.")
-        return _wt("\n".join(lines))
+        return _theme.wrap_tooltip("\n".join(lines))
 
     def _partner_tooltip(self, row: PartnerRow, kids: list[str]) -> str:
         p = row.partner
@@ -587,7 +576,7 @@ class PartnerTableWidget(QTableWidget):
             if label:
                 lines.append(f"   ({label})")
         lines.append("Double-click to analyse breeding from this cat.")
-        return _wt("\n".join(lines))
+        return _theme.wrap_tooltip("\n".join(lines))
 
     def _pair_malady_lines(self, row: PartnerRow,
                            stimulation: float = 50.0,
@@ -631,13 +620,13 @@ class PartnerTableWidget(QTableWidget):
                         f"parent OR the opposite side (≈100%)"
                     )
                 if asym:
-                    sa = _side_text(drow.slots_a)
-                    sb = _side_text(drow.slots_b)
+                    sa = side_text(drow.slots_a)
+                    sb = side_text(drow.slots_b)
                     if sa and sb:
                         lines.append(f"    ({a.name}: {sa} · {b.name}: {sb})")
             else:
                 who = a.name if drow.carriers[0] == "a" else b.name
-                where = _side_text(drow.slots_a or drow.slots_b)
+                where = side_text(drow.slots_a or drow.slots_b)
                 loc = f", on {where}" if where else ""
                 lines.append(
                     f"→ {drow.name} (carried by {who} only{loc}): "

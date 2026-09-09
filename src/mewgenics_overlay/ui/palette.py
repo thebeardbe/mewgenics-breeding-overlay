@@ -45,6 +45,7 @@ from PySide6.QtWidgets import (
 )
 
 from mewgenics_overlay.core.session import (
+    STAT_NAMES,
     Cat,
     Session,
     display_location,
@@ -55,7 +56,6 @@ from mewgenics_overlay.ui.focuspanel import FocusedCatPanel
 # Partner-table pure core (columns, header tips, cell formatters) — moved to
 # ui/partnertable.py so the interactive widget can stay Qt-focused (step 2b).
 from .partnertable import (
-    STAT_NAMES,
     _COL_TIPS,
     _better_stat_expectation,
     _night_chance,

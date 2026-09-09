@@ -153,7 +153,7 @@ def side_label(slot: str) -> str:
     return _SLOT_SIDE_LABEL.get(slot, slot)
 
 
-def _side_text(slots: FrozenSet[str]) -> str:
+def side_text(slots: FrozenSet[str]) -> str:
     labels = sorted(side_label(s) for s in slots if s)
     if not labels:
         return ""

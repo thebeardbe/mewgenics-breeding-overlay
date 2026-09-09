@@ -39,6 +39,8 @@ log = logging.getLogger("mewgenics_overlay.session")
 
 ALIVE_STATUSES = ("In House", "Adventure")
 
+STAT_NAMES = ["STR", "DEX", "CON", "INT", "SPD", "CHA", "LCK"]
+
 RISK_SAFE_TIER = 8.0   # partners at/below this risk % sort above riskier ones
                       # (see the "risk" order in rank_partners)
 

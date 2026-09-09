@@ -17,16 +17,8 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
 from mewgenics_overlay.core.maladies import defect_lines, sexuality_label
-from mewgenics_overlay.core.session import Cat, display_location
+from mewgenics_overlay.core.session import STAT_NAMES, Cat, display_location
 from mewgenics_overlay.ui import theme as _theme
-from mewgenics_overlay.ui.theme import (
-    HEART,
-    PIN,
-    WARN,
-    gender_badge,
-    wrap_tooltip as _wt,
-)
-from mewgenics_overlay.ui.partnertable import STAT_NAMES
 
 
 def _stats_html(cat: Cat) -> str:
@@ -64,7 +56,7 @@ class FocusedCatPanel(QWidget):
         self._cat_health.setWordWrap(True)
         self._cat_health.setStyleSheet(
             f"color:{_theme.C_WARN}; font-size:11px;")
-        self._cat_health.setToolTip(_wt(
+        self._cat_health.setToolTip(_theme.wrap_tooltip(
             "Things this cat carries that can be passed on to kittens.\n"
             "• Disorders — a 15% chance per parent that carries one of "
             "passing a random disorder to the kitten.\n"
@@ -98,22 +90,22 @@ class FocusedCatPanel(QWidget):
         _gender = (cat.gender or "?").lower()
         _sex = sexuality_label(getattr(cat, "sexuality_raw", None)) \
             if _gender in ("male", "female") else None
-        meta = f"{gender_badge(cat.gender)} {cat.gender}" + \
+        meta = f"{_theme.gender_badge(cat.gender)} {cat.gender}" + \
             (f" · {_sex}" if _sex else "") + \
             f" · {display_location(cat)} · {gen}"
         if cat.age is not None:
             meta += f" · {cat.age}d"
         if cat.inbredness > 0.03:
             meta += f" · inbred {cat.inbredness * 100:.0f}%"
-        pin = f"{PIN} " if getattr(cat, "is_pinned", False) else ""
+        pin = f"{_theme.PIN} " if getattr(cat, "is_pinned", False) else ""
         self._cat_name.setText(f"{pin}{cat.name}")
-        self._cat_name.setToolTip(_wt(
+        self._cat_name.setToolTip(_theme.wrap_tooltip(
             f"{cat.name}  (save id {cat.db_key})\n"
             "The cat you are analysing. Double-click a partner to switch "
             "the analysis to them."
         ))
         self._cat_meta.setText(meta)
-        self._cat_meta.setToolTip(_wt(
+        self._cat_meta.setToolTip(_theme.wrap_tooltip(
             f"{cat.gender} · {display_location(cat)} · "
             f"generation {cat.generation} (0 = stray, each generation adds "
             f"depth and shared ancestry)"
@@ -125,17 +117,17 @@ class FocusedCatPanel(QWidget):
                if cat.inbredness > 0.03 else "")
         ))
         self._cat_stats.setText(_stats_html(cat))
-        self._cat_stats.setToolTip(_wt(
+        self._cat_stats.setToolTip(_theme.wrap_tooltip(
             "Base stats (STR DEX CON INT SPD CHA LCK, 0–7) — the birth stats "
             "kittens inherit from. Green = 7. These drive breeding math; "
             "gear/mod bonuses are not shown here."
         ))
         lover_txt = ", ".join(l.name for l in getattr(cat, "lovers", []))
         self._cat_lovers.setText(
-            f"{HEART} in love with: {lover_txt}"
+            f"{_theme.HEART} in love with: {lover_txt}"
             if lover_txt else "no lovers"
         )
-        self._cat_lovers.setToolTip(_wt(
+        self._cat_lovers.setToolTip(_theme.wrap_tooltip(
             "In-game relationships.\n"
             "Being lovers gives the pair a bonus when breeding.\n"
             "If a cat already loves someone else, picking a different "
@@ -151,10 +143,10 @@ class FocusedCatPanel(QWidget):
         if own_defects:
             health_bits.append("birth defects: " + ", ".join(own_defects))
         self._cat_health.setText(
-            f"{WARN} " + " · ".join(health_bits)
+            f"{_theme.WARN} " + " · ".join(health_bits)
             if health_bits else ""
         )
-        self._cat_health.setToolTip(_wt(
+        self._cat_health.setToolTip(_theme.wrap_tooltip(
             self._health_tooltip(cat, disorders, own_defects, effect_for)))
 
     def _health_tooltip(self, cat: Cat, disorders, own_defects,
