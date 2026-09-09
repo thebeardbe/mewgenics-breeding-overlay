@@ -235,8 +235,9 @@ class PaletteWindow(QWidget):
         if remote <= local:
             return
         self._update_url = url
-        self._btn_update.setText(
-            f"⬇ v{'.'.join(str(x) for x in remote)} available")
+        label = f"v{'.'.join(str(x) for x in remote)}"
+        log.info("update available: %s -> %s", __version__, label)
+        self._btn_update.setText(f"\u2b07 {label} available")
         self._btn_update.setVisible(True)
 
     def _open_update(self) -> None:
