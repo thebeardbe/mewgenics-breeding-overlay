@@ -19,7 +19,13 @@ from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 from mewgenics_overlay.core.maladies import defect_lines, sexuality_label
 from mewgenics_overlay.core.session import Cat, display_location
 from mewgenics_overlay.ui import theme as _theme
-from mewgenics_overlay.ui.theme import gender_badge, wrap_tooltip as _wt
+from mewgenics_overlay.ui.theme import (
+    HEART,
+    PIN,
+    WARN,
+    gender_badge,
+    wrap_tooltip as _wt,
+)
 from mewgenics_overlay.ui.partnertable import STAT_NAMES
 
 
@@ -99,7 +105,7 @@ class FocusedCatPanel(QWidget):
             meta += f" · {cat.age}d"
         if cat.inbredness > 0.03:
             meta += f" · inbred {cat.inbredness * 100:.0f}%"
-        pin = "📌 " if getattr(cat, "is_pinned", False) else ""
+        pin = f"{PIN} " if getattr(cat, "is_pinned", False) else ""
         self._cat_name.setText(f"{pin}{cat.name}")
         self._cat_name.setToolTip(_wt(
             f"{cat.name}  (save id {cat.db_key})\n"
@@ -126,7 +132,8 @@ class FocusedCatPanel(QWidget):
         ))
         lover_txt = ", ".join(l.name for l in getattr(cat, "lovers", []))
         self._cat_lovers.setText(
-            f"♥ in love with: {lover_txt}" if lover_txt else "no lovers"
+            f"{HEART} in love with: {lover_txt}"
+            if lover_txt else "no lovers"
         )
         self._cat_lovers.setToolTip(_wt(
             "In-game relationships.\n"
@@ -144,7 +151,8 @@ class FocusedCatPanel(QWidget):
         if own_defects:
             health_bits.append("birth defects: " + ", ".join(own_defects))
         self._cat_health.setText(
-            "⚠ " + " · ".join(health_bits) if health_bits else ""
+            f"{WARN} " + " · ".join(health_bits)
+            if health_bits else ""
         )
         self._cat_health.setToolTip(_wt(
             self._health_tooltip(cat, disorders, own_defects, effect_for)))

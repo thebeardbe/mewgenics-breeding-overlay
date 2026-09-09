@@ -251,3 +251,15 @@ def wrap_tooltip(text: str, width: int = 88) -> str:
 
 
 set_theme(DEFAULT_THEME)
+
+
+# ── display glyphs ─────────────────────────────────────────────────────────
+# Single re-skin point for the icon-heavy UI strings (swap emoji for an icon
+# font later without grepping the whole UI).
+PIN = "📌"
+BLOCK_MARK = "✗"
+HEART = "♥"
+HEARTS = "♥♥"
+WARN = "⚠"
+CHECK = "✓"
+APPROX = "≈"

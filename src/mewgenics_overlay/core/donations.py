@@ -211,7 +211,7 @@ def _breeding_keepers(cats) -> set:
     return {id(a) for a, v in scores if v > threshold}
 
 
-@dataclass
+@dataclass(slots=True)
 class DonationAdvice:
     """Why one candidate ranks where it does, parallel to the slot's
     ``candidates`` list (advice[i] explains candidates[i]).
@@ -226,7 +226,7 @@ class DonationAdvice:
     score: float = 0.0         # the sort score (lower = give away first)
 
 
-@dataclass
+@dataclass(slots=True)
 class DonationSlot:
     """Qualified cats for one NPC, ranked worst-kept first.
 

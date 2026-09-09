@@ -1072,9 +1072,6 @@ class PaletteWindow(QWidget):
         self._table.toggle_sort(col)
         self._redraw_table()
 
-    def _update_sort_indicator(self) -> None:
-        self._table.show_sort_indicator()
-
     # ── table rendering ────────────────────────────────────────────────────
     def _redraw_table(self) -> None:
         """Render the partner rows via PartnerTableWidget."""

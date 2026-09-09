@@ -16,6 +16,10 @@ from mewgenics_overlay.core.maladies import (
 )
 from mewgenics_overlay.core.session import PartnerRow, display_location
 from mewgenics_overlay.ui.theme import (
+    APPROX,
+    BLOCK_MARK,
+    CHECK,
+    PIN,
     gender_badge,
     risk_color,
     wrap_tooltip as _wt,
@@ -210,8 +214,8 @@ def _defects_summary(row, stimulation: float = 50.0) -> str:
     parts = []
     for d in _defect_rows_of(row, stimulation):
         short = _defect_short(d.name)
-        parts.append(short + (" ✓" if len(d.carriers) == 2
-                              else f" ≈{d.chance_pct:.0f}%"))
+        parts.append(short + (f" {CHECK}" if len(d.carriers) == 2
+                              else f" {APPROX}{d.chance_pct:.0f}%"))
     return "; ".join(parts)
 
 
@@ -404,10 +408,10 @@ class PartnerTableWidget(QTableWidget):
         for r_i, (row, kids) in enumerate(ordered):
             p = row.partner
             ok = row.compatible
-            _pin = "📌 " if getattr(p, "is_pinned", False) else ""
+            _pin = f"{PIN} " if getattr(p, "is_pinned", False) else ""
             glyphs = _cat_glyphs(p)
             nm = f"{_pin}{p.name} {glyphs}"
-            name = nm if ok else f"{nm}  (✗)"
+            name = nm if ok else f"{nm}  ({BLOCK_MARK})"
             rel = row.relation
 
             it_name = QTableWidgetItem(name)

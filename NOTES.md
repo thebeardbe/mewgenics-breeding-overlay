@@ -12,6 +12,12 @@ Informal backlog for the overlay. Nothing here is scheduled unless it says so.
   (and its text) renders tiny, even when Mewgenics itself is set to a lower
   resolution. Ideas: a button to scale the window 2×/4×, and/or
   `Ctrl + mouse-wheel` zooming (scale the root layout).
+- **Donations table headers aren't sortable** (columns never had header
+  clicks wired there) — probably fine, but decide if the Donations list
+  should sort like the Breeding table.
+- **Top-right window buttons (pin/click-through/theme/close) don't show
+  while the Donations tab is active** — the header row with those buttons
+  disappears on tab 2. Pre-existing; needs a layout pass.
 
 ## Future features
 
@@ -33,5 +39,7 @@ Informal backlog for the overlay. Nothing here is scheduled unless it says so.
 - Step 2 done: `PartnerTableWidget` (config/sort/render/tooltips) +
   Defects tri-state.
 - Step 3 done: `FocusedCatPanel` extracted (ui/focuspanel.py).
-- Step 4 next: thin-coordinator cleanup + mechanical tidy (slots=True,
-  glyph constants in theme.py).
+- Step 4 done: coordinator cleanup + mechanical tidy (slots=True on
+  donation dataclasses, glyph constants in theme.py).
+- Refactor complete: PaletteWindow is now a thin coordinator over
+  SaveController / PartnerTableWidget / FocusedCatPanel.
