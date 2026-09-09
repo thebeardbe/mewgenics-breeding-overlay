@@ -38,7 +38,6 @@ from PySide6.QtWidgets import (
     QMenu,
     QPushButton,
     QSystemTrayIcon,
-    QTableWidget,
     QTableWidgetItem,
     QTabWidget,
     QVBoxLayout,
@@ -67,7 +66,6 @@ from .partnertable import (
     COL_ROOM,
     COL_SEVEN,
     STAT_NAMES,
-    _COLS,
     _COL_TIPS,
     _any_defect_guaranteed,
     _better_stat_expectation,
@@ -78,6 +76,7 @@ from .partnertable import (
     _kittens_label,
     _night_chance,
     _note_text,
+    PartnerTableWidget,
 )
 
 from . import config as cfg
@@ -150,6 +149,7 @@ class PaletteWindow(QWidget):
         self._focus: Optional[Cat] = None
         self._save = SaveController()   # session state + background queue + watcher
         self._asset_lock = threading.Lock()
+        self._table: Optional[PartnerTableWidget] = None  # built in _build_ui
         self._ui_busy = False
         self._pinned = True               # mirror of the 📌 button state
         self._click_through = False       # mouse passes through to the game
@@ -195,6 +195,34 @@ class PaletteWindow(QWidget):
     @_session.setter
     def _session(self, sess: Optional[Session]) -> None:
         self._save.session = sess
+
+    # ── partner-table data + sort state (delegated to PartnerTableWidget) ──
+    @property
+    def _rows(self) -> list:
+        return self._table.rows if self._table is not None else []
+
+    @_rows.setter
+    def _rows(self, rows) -> None:
+        if self._table is not None:
+            self._table.set_rows(rows)
+
+    @property
+    def _sort_col(self) -> Optional[int]:
+        return self._table.sort_col if self._table is not None else None
+
+    @_sort_col.setter
+    def _sort_col(self, col: Optional[int]) -> None:
+        if self._table is not None:
+            self._table.sort_col = col
+
+    @property
+    def _sort_dir(self) -> str:
+        return self._table.sort_dir if self._table is not None else "asc"
+
+    @_sort_dir.setter
+    def _sort_dir(self, d: str) -> None:
+        if self._table is not None:
+            self._table.sort_dir = d
 
     def _maybe_start_assets(self) -> None:
         """Load resources.gpak effect tables off the UI thread (once)."""
@@ -393,28 +421,8 @@ class PaletteWindow(QWidget):
         root.addLayout(best_row)
 
         # partners
-        self._table = QTableWidget(0, len(_COLS))
-        self._table.setHorizontalHeaderLabels(_COLS)
-        # Per-section explanation tooltips on the header items — QHeaderView
-        # natively shows these on hover (works on every platform).
-        for i, tip in enumerate(_COL_TIPS):
-            item = self._table.horizontalHeaderItem(i)
-            if item is not None:
-                item.setToolTip(_wt(tip))
-        self._table.verticalHeader().setVisible(False)
-        self._table.setAlternatingRowColors(True)
-        self._table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self._table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
-        self._table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        hdr = self._table.horizontalHeader()
-        hdr.setStretchLastSection(True)
-        for i, w in enumerate([130, 104, 66, 74, 56, 58, 88, 40, 132]):
-            self._table.setColumnWidth(i, w)
-        # manual sorting (headers clickable; tri-state per column)
-        self._table.setSortingEnabled(False)
-        self._rows: list = []          # currently rendered (row, kids) pairs
-        self._sort_col: Optional[int] = None
-        self._sort_dir = "asc"
+        self._table = PartnerTableWidget(self)
+        self._table.set_header_tooltips(_COL_TIPS, _wt)
         root.addWidget(self._table, 1)
 
         # detail strip
@@ -1249,25 +1257,11 @@ class PaletteWindow(QWidget):
 
     def _on_header_clicked(self, col: int) -> None:
         """Tri-state sort: asc -> desc -> back to default order."""
-        if self._sort_col == col:
-            if self._sort_dir == "asc":
-                self._sort_dir = "desc"
-            else:
-                self._sort_col = None       # third click: default order
-        else:
-            self._sort_col = col
-            self._sort_dir = "asc"
+        self._table.toggle_sort(col)
         self._redraw_table()
 
     def _update_sort_indicator(self) -> None:
-        hdr = self._table.horizontalHeader()
-        if self._sort_col is None:
-            hdr.setSortIndicatorShown(False)
-            return
-        order = (Qt.SortOrder.AscendingOrder if self._sort_dir == "asc"
-                 else Qt.SortOrder.DescendingOrder)
-        hdr.setSortIndicatorShown(True)
-        hdr.setSortIndicator(self._sort_col, order)
+        self._table.show_sort_indicator()
 
     # ── table rendering ────────────────────────────────────────────────────
     def _redraw_table(self) -> None:

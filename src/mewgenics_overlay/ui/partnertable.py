@@ -269,3 +269,74 @@ def _better_stat_expectation(row, stimulation: float = 50.0):
     return expected, differing
 
 
+
+
+# ── interactive partner table (step 2b) ─────────────────────────────────────
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QTableWidget
+
+# column widths, in _COLS order (GenΔ & Exp wide enough for headers/icons)
+_COL_WIDTHS = [130, 104, 66, 74, 56, 58, 88, 40, 132]
+
+
+class PartnerTableWidget(QTableWidget):
+    """The partners table: owns its configuration, rendered rows and the
+    tri-state per-column sort.
+
+    Step 2b (part 1): creation/config + row storage + sort state live here;
+    rendering & tooltip building still live in PaletteWindow and call back
+    through ``set_rows``/``toggle_sort``/``show_sort_indicator``. The next
+    pass moves the rendering itself into this class.
+    """
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(0, len(_COLS), parent)
+        self.setHorizontalHeaderLabels(_COLS)
+        self.verticalHeader().setVisible(False)
+        self.setAlternatingRowColors(True)
+        self.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        self.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        hdr = self.horizontalHeader()
+        hdr.setStretchLastSection(True)
+        for i, w in enumerate(_COL_WIDTHS):
+            self.setColumnWidth(i, w)
+        self.setSortingEnabled(False)          # manual tri-state sort
+        self.rows: list = []                   # currently rendered (row, kids)
+        self.sort_col: int | None = None
+        self.sort_dir: str = "asc"
+
+    def set_header_tooltips(self, tips, wrap) -> None:
+        for i, tip in enumerate(tips):
+            item = self.horizontalHeaderItem(i)
+            if item is not None:
+                item.setToolTip(wrap(tip))
+
+    def set_rows(self, rows) -> None:
+        self.rows = list(rows)
+
+    def reset_sort(self) -> None:
+        """New data → back to the engine's default order."""
+        self.sort_col = None
+        self.sort_dir = "asc"
+
+    def toggle_sort(self, col: int) -> None:
+        """Tri-state: asc → desc → default order."""
+        if self.sort_col == col:
+            if self.sort_dir == "asc":
+                self.sort_dir = "desc"
+            else:
+                self.reset_sort()
+        else:
+            self.sort_col = col
+            self.sort_dir = "asc"
+
+    def show_sort_indicator(self) -> None:
+        hdr = self.horizontalHeader()
+        if self.sort_col is None:
+            hdr.setSortIndicatorShown(False)
+            return
+        order = (Qt.SortOrder.AscendingOrder if self.sort_dir == "asc"
+                 else Qt.SortOrder.DescendingOrder)
+        hdr.setSortIndicatorShown(True)
+        hdr.setSortIndicator(self.sort_col, order)
