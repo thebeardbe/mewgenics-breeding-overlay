@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 from mewgenics_overlay.core.donations import (
     cat_status,
     donation_report,
+    rating_why,
 )
 import mewgenics_overlay.ui.theme as _theme
 from PySide6.QtGui import QColor
@@ -196,17 +197,6 @@ class DonationsTab(QWidget):
             return "Maybe"
         return "Keep"
 
-    @staticmethod
-    def _display_reasons(advice) -> list:
-        """(give, keep) reason lists for a candidate, including the
-        breeding-pool note when the cat is a top mate for someone (kept out
-        of the core assessment so cats never carry that state)."""
-        give = list(advice.give)
-        keep = list(advice.keep)
-        if advice.keep_for_breeding and not any(
-                "Top breeding mate" in line for line in keep):
-            keep.append("Top breeding mate for another cat")
-        return give, keep
 
     @staticmethod
     def _group_reasons(give, keep) -> list:
@@ -220,21 +210,6 @@ class DonationsTab(QWidget):
         if not lines:
             lines.append("No strong reasons either way")
         return lines
-
-    @staticmethod
-    def _advice_lines(cat, rating: str) -> list:
-        """Why this rating? Human-readable reason per Donate? verdict."""
-        if rating == "Keep":
-            if getattr(cat, "is_pinned", False):
-                return ["Pinned — you marked this cat to keep."]
-            if getattr(cat, "must_breed", False):
-                return ["Marked as must-breed — kept for breeding."]
-            return ["Among the strongest here — more valuable kept for "
-                    "breeding."]
-        if rating == "Maybe":
-            return ["Not clearly expendable nor essential — donate if you "
-                    "need the space."]
-        return ["One of the weakest / least useful here — a fine donation."]
 
     def _show_row_menu(self, pos) -> None:
         index = self._table.indexAt(pos)
@@ -271,13 +246,14 @@ class DonationsTab(QWidget):
                       if (getattr(cat, "total_stats", {}) or {}).get(s, v) < v)
             rating = self._donate_rating(cat, r_i, total,
                                          keep_for_breeding=advice.keep_for_breeding)
-            give, keep = self._display_reasons(advice)
-            if not give and not keep:
-                advice_lines = self._advice_lines(cat, rating)
+            give = list(advice.give)
+            keep = list(advice.keep)
+            if not give and not keep:   # no specific reasons -> generic copy
+                generic = rating_why(rating)
                 if rating == "Keep":
-                    keep = advice_lines
+                    keep = generic
                 else:
-                    give = advice_lines
+                    give = generic
             why = "\n".join(self._group_reasons(give, keep))
             _pin = "📌 " if getattr(cat, "is_pinned", False) else ""
             cells = [f"{_pin}{cat.name}", cat_status(cat), str(getattr(cat, "age", "?")),
@@ -301,10 +277,9 @@ class DonationsTab(QWidget):
             lines.append(f"Donate? → {rating}")
         give, keep = [], []
         if advice is not None:
-            give, keep = DonationsTab._display_reasons(advice)
+            give, keep = list(advice.give), list(advice.keep)
         if not give and not keep:
-            advice_lines = DonationsTab._advice_lines(cat, rating)
-            (keep if rating == "Keep" else give).extend(advice_lines)
+            (keep if rating == "Keep" else give).extend(rating_why(rating))
         lines += ["  " + line for line in DonationsTab._group_reasons(give, keep)]
         aggression = getattr(cat, "aggression", None)
         if aggression is not None:

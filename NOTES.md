@@ -41,5 +41,8 @@ Informal backlog for the overlay. Nothing here is scheduled unless it says so.
 - Step 3 done: `FocusedCatPanel` extracted (ui/focuspanel.py).
 - Step 4 done: coordinator cleanup + mechanical tidy (slots=True on
   donation dataclasses, glyph constants in theme.py).
+- Work-order item 2 done: donation reason copy consolidated into
+  core/donations.py (keeper note at report time + rating_why()); the
+  Donations tab only formats engine output.
 - Refactor complete: PaletteWindow is now a thin coordinator over
   SaveController / PartnerTableWidget / FocusedCatPanel.

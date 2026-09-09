@@ -453,9 +453,17 @@ def donation_report(cats, active: Optional[set] = None,
             scored.append((protected, keeper, score, give, keep, c))
         scored.sort(key=lambda t: (int(t[0]) * 2 + int(t[1]), t[2]))
         slot.candidates = [t[5] for t in scored]
-        slot.advice = [DonationAdvice(give=t[3], keep=t[4],
-                                      keep_for_breeding=t[1], score=t[2])
-                       for t in scored]
+        # Single source of the keeper-note copy lives HERE (not in the UI):
+        # every reason string a player sees originates from core/donations.
+        slot.advice = []
+        for t in scored:
+            give = list(t[3])
+            keep = list(t[4])
+            if t[1] and not any("Top breeding mate" in line for line in keep):
+                keep.append("Top breeding mate for another cat")
+            slot.advice.append(DonationAdvice(give=give, keep=keep,
+                                              keep_for_breeding=t[1],
+                                              score=t[2]))
         slot.ranks = list(range(1, len(scored) + 1))
         slots.append(slot)
 
@@ -463,6 +471,21 @@ def donation_report(cats, active: Optional[set] = None,
         slots.append(DonationSlot(npc=name, wants=wants, supported=False,
                                    unlock_note=why))
     return slots
+
+
+def rating_why(rating: str) -> List[str]:
+    """Generic rating copy shown when a cat has no specific give/keep reasons.
+
+    Single source for the Donate/Maybe/Keep boilerplate so the UI never forks
+    this wording; pinned/must-breed cats always carry real reasons from
+    ``_assess``, so they never hit this path.
+    """
+    if rating == "Keep":
+        return ["Among the strongest here — more valuable kept for breeding."]
+    if rating == "Maybe":
+        return ["Not clearly expendable nor essential — donate if you "
+                "need the space."]
+    return ["One of the weakest / least useful here — a fine donation."]
 
 
 def recommendation_lines(cat, keep_for_breeding: bool = False) -> List[str]:
