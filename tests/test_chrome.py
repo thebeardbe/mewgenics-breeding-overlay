@@ -298,3 +298,38 @@ def test_grip_and_title_are_drag_labels_with_open_hand_cursor(make_bar):
     assert isinstance(bar._title, _DragLabel)
     for label in (bar._grip, bar._title):
         assert label.cursor().shape() == Qt.CursorShape.OpenHandCursor
+
+
+# ── hotkey tooltip follows the configured combo (spec: chrome.py) ──────────
+# The click-through and hide tooltips name the summon shortcut. With a
+# configurable hotkey they must follow the live description instead of the
+# shipped Ctrl+Shift+B default. ``TopBar`` should expose a ``set_hotkey``
+# (or ``set_hotkey_tooltip``) method for the window to call after a rebind.
+def test_tooltips_follow_the_live_hotkey_description(make_bar):
+    bar = make_bar()
+    setter = (getattr(bar, "set_hotkey", None)
+              or getattr(bar, "set_hotkey_tooltip", None))
+
+    assert setter is not None, (
+        "TopBar has no method to update its tooltips from the live hotkey "
+        "description; click-through/hide still hardcode Ctrl+Shift+B")
+
+    setter("Ctrl+Alt+K")
+
+    for btn in (bar._btn_ct, bar._btn_close):
+        assert "Ctrl+Alt+K" in btn.toolTip()
+        assert "Ctrl+Shift+B" not in btn.toolTip()
+
+
+def test_pin_tooltip_has_no_hotkey_copy(make_bar):
+    # The pin button never names the shortcut; a hotkey refresh must leave it
+    # untouched.
+    bar = make_bar()
+    before = bar._btn_pin.toolTip()
+
+    setter = (getattr(bar, "set_hotkey", None)
+              or getattr(bar, "set_hotkey_tooltip", None))
+    if setter is not None:
+        setter("Ctrl+Alt+K")
+
+    assert bar._btn_pin.toolTip() == before

@@ -2,7 +2,7 @@
 
 A cross-platform companion for [Mewgenics](https://store.steampowered.com/app/686060/Mewgenics/) that answers **"which of my cats is this one compatible with — and is it a safe breed?"** while you play.
 
-Click a cat in-game, summon the overlay (`Ctrl+Shift+B` on Windows, tray icon elsewhere), type its name, and get every partner ranked by what matters:
+Click a cat in-game, summon the overlay (`Ctrl+Shift+B` by default on Windows, configurable in Settings; tray icon elsewhere), type its name, and get every partner ranked by what matters:
 
 - **Risk** — birth-defect chance for the pair, from its inbreeding coefficient (COI)
 - **Compat** — the game's actual compatibility value (needs > 0.05 to breed)
@@ -28,7 +28,7 @@ No Python or install step is needed for the binary builds — download, run, don
 
 1. Download **`MewgenicsOverlay.exe`** from the [download section](https://mewgenics.thebeard.be/#download) of the project website (the files themselves are hosted on GitHub Releases).
 2. Double-click it and press **Run anyway** when prompted (see below).
-3. Launch Mewgenics, and summon the overlay from anywhere with **`Ctrl+Shift+B`** — or right-click its tray icon.
+3. Launch Mewgenics, and summon the overlay from anywhere with **`Ctrl+Shift+B`** — or right-click its tray icon. The combo is configurable in **Settings → Global hotkey** (Ctrl/Alt/Shift + one letter); there is no hidden fallback, so if another app already owns the combo the overlay says so and you pick a different one.
 
 > **Security warning — please read.** The exe is **not code-signed**, so Windows will show **“Windows protected your PC” (SmartScreen)** on first launch, and Defender/AV software may flag it. This is expected for small open-source projects: a code-signing certificate costs money. It is **not** a sign of malware. To run it: click **More info → Run anyway**. The project is MIT-licensed and fully open source — you can inspect the code, or build the exe yourself from source (below) if you prefer not to trust the release artifact.
 

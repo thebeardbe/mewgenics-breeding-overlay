@@ -191,8 +191,9 @@ class WindowController(QObject):
     def on_change(self, event) -> None:
         """The moment the window loses focus (user clicks the game), stop
         intercepting mouse input: switch to click-through automatically so the
-        game always receives clicks in this area. Summon it again with
-        Ctrl+Shift+B / tray to interact. Skipped while a modal dialog is open."""
+        game always receives clicks in this area. Summon it again with the
+        configured global hotkey / tray to interact. Skipped while a modal
+        dialog is open."""
         if (event.type() == QEvent.Type.WindowDeactivate
                 and not self._dialog_open
                 and self._window.isVisible()

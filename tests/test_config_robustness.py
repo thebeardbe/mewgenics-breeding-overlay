@@ -84,3 +84,50 @@ def test_runtime_owned_keys_pass_through(isolated_cfg):
 def test_missing_file_returns_defaults(isolated_cfg):
     data = cfg.load()
     assert data == cfg.DEFAULTS
+
+
+# ── global hotkey coercion ──────────────────────────────────────────────────
+def test_hotkey_default_is_the_shipped_combo():
+    from mewgenics_overlay.ui import hotkeybinding
+
+    assert cfg.DEFAULTS["hotkey"] == hotkeybinding.DEFAULT_TEXT
+    assert cfg.DEFAULTS["hotkey"] == "Ctrl+Shift+B"
+
+
+def test_missing_hotkey_falls_back_to_the_default(isolated_cfg):
+    isolated_cfg({})
+    assert cfg.load()["hotkey"] == "Ctrl+Shift+B"
+
+
+@pytest.mark.parametrize("saved,canonical", [
+    ("Ctrl+Shift+B", "Ctrl+Shift+B"),
+    ("ctrl+shift+b", "Ctrl+Shift+B"),        # lower case
+    ("Ctrl + Shift + b", "Ctrl+Shift+B"),    # odd spacing + lower key
+    ("  Ctrl+Alt+K  ", "Ctrl+Alt+K"),        # surrounding whitespace
+    ("Control+Z", "Ctrl+Z"),                 # Windows alias
+    ("B+Shift+Ctrl", "Ctrl+Shift+B"),        # token order canonicalised
+    ("alt+a", "Alt+A"),
+])
+def test_hotkey_is_validated_and_canonicalised(isolated_cfg, saved, canonical):
+    isolated_cfg({"hotkey": saved})
+    assert cfg.load()["hotkey"] == canonical
+
+
+@pytest.mark.parametrize("junk", [
+    123, None, [], {}, True,
+    "", "   ", "B", "Ctrl", "Ctrl+", "Ctrl+Shift+1",
+    "Ctrl+Shift+AB", "Ctrl+Ctrl+B", "Ctrl+Shift+?", "no modifier",
+])
+def test_junk_hotkey_falls_back_to_the_default(isolated_cfg, junk):
+    isolated_cfg({"hotkey": junk})
+    assert cfg.load()["hotkey"] == "Ctrl+Shift+B"
+
+
+def test_invalid_hotkey_is_logged_when_replaced(isolated_cfg, caplog):
+    isolated_cfg({"hotkey": "not a combo"})
+
+    with caplog.at_level("WARNING", logger="mewgenics_overlay.config"):
+        cfg.load()
+
+    assert any("hotkey" in r.message and "invalid" in r.message.lower()
+               for r in caplog.records)

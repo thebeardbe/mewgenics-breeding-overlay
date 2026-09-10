@@ -121,7 +121,10 @@ src/mewgenics_overlay/
                           Donate?/Maybe/Keep ratings + reasons, pin context menu
     app.py                bootstrap: theme-from-config, tray, hotkey install,
                           file logger + excepthook, Hyprland/xcb + gtk3-theme fix
-    hotkey.py             Windows global Ctrl+Shift+B via RegisterHotKey
+    hotkey.py             Windows global hotkey: RegisterHotKey + native filter
+                          (both MSG event types), rebind, WinError reporting
+    hotkeybinding.py      pure hotkey combo model (parse/format/vk/mods)
+    hotkeyctl.py          HotkeyController: install/rebind/persist + QShortcut
     config.py             per-user settings (theme, save path, pinned map, …)
 ```
 
@@ -195,8 +198,13 @@ Plus `scripts/gui_smoke.py` for the real UI offscreen.
 ## 7. Hard-won gotchas (read before touching UI/threading)
 
 - **PySide6 native event filter**: the Win32 message is a `Shiboken.VoidPtr`;
-  decode with `ctypes.wintypes.MSG.from_address(int(message))` — **never**
-  `message[0]` (crashes the Windows app).
+  decode it with the cross-platform `MSG` struct in `ui/hotkey.py` (never
+  `message[0]`, which crashes the Windows app).
+- **Global hotkey delivery**: `RegisterHotKey(hwnd=NULL)` posts `WM_HOTKEY` to
+  the *thread* queue, which Qt hands to the native-event filter as
+  `windows_dispatcher_MSG`, not `windows_generic_MSG`. A filter that accepts
+  only the latter registers successfully and then silently never fires. The
+  filter now accepts both and registers against a hidden helper window.
 - **QMessageBox has no `setOpenExternalLinks`** in PySide6. About dialog is a
   `QDialog` + rich-text `QLabel` instead.
 - **Theme switching**: the palette applies its own `setStyleSheet`, which
@@ -223,7 +231,7 @@ Plus `scripts/gui_smoke.py` for the real UI offscreen.
 
 ## 8. Status / roadmap
 
-- Latest release: **v0.2.0** (website download/report links; complete PaletteWindow refactor). Next: **v0.2.1** with the Windows tester's outstanding remark.
+- Latest release: **v0.2.1** (configurable global hotkey; fixes the silent Windows hotkey failure). Next: v0.2.2 / v0.3.0 as tester feedback lands.
 - Known gaps: per-NPC donation counters and Butch chapter progress are not
   recoverable from the save; Frank/retired is heuristic (abilities+stat
   gains); aggression is displayed for future fighter-room optimisation but

@@ -7,7 +7,7 @@ Run with:
 
 Behaviour:
   * Creates a palette window, a system-tray toggle (when a tray exists) and,
-    on Windows, a global Ctrl+Shift+B hotkey.
+    on Windows, the user-configured global hotkey (default Ctrl+Shift+B).
   * Watches the live save and re-parses on change (background thread).
   * `--save <path>` opens a specific save; otherwise the most recent one is
     used; the first-run flow lets you browse if none is found.
@@ -26,7 +26,6 @@ from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
 from mewgenics_overlay import __version__
 from mewgenics_overlay.ui import config as ui_config
-from mewgenics_overlay.ui import hotkey as hotkey_mod
 from mewgenics_overlay.ui import theme as _theme
 from mewgenics_overlay.ui.palette import PaletteWindow
 
@@ -48,6 +47,14 @@ def _make_tray_icon() -> QIcon:
     p.drawPolygon([QPoint(46, 24), QPoint(42, 4), QPoint(28, 18)])
     p.end()
     return QIcon(pm)
+
+
+def _tray_tooltip(description: str, active: bool) -> str:
+    """Tray tooltip naming the live hotkey, or the fallback wording."""
+    if active:
+        return f"Mewgenics Breeding Overlay - global hotkey {description}"
+    return ("Mewgenics Breeding Overlay - use the tray icon to toggle "
+            "(hotkey works while the overlay is focused)")
 
 
 def _build_tray(app: QApplication, palette: PaletteWindow):
@@ -160,12 +167,20 @@ def main(argv=None) -> int:
     app.setStyleSheet(_theme.stylesheet())
 
     palette = PaletteWindow()
-    hotkey = hotkey_mod.install(app, palette.toggle_activate)
-    if not hotkey.active:
-        logging.info("global hotkey unavailable; use the tray icon to toggle")
     tray = None
     if not args.no_tray:
         tray = _build_tray(app, palette)
+
+    # The palette owns the hotkey (config -> registration + focused-window
+    # shortcut); the tray tooltip follows every accepted change.
+    def _on_hotkey_changed(description: str) -> None:
+        if tray is not None:
+            tray.setToolTip(_tray_tooltip(description,
+                                         palette.hotkey_active))
+
+    palette.install_hotkey(app, on_change=_on_hotkey_changed)
+    if not palette.hotkey_active:
+        logging.info("global hotkey unavailable; use the tray icon to toggle")
     app.aboutToQuit.connect(palette._save_geometry)
 
     if args.save:
@@ -176,7 +191,7 @@ def main(argv=None) -> int:
     code = app.exec()
 
     palette.shutdown()
-    hotkey.uninstall()
+    palette.uninstall_hotkey()
     if tray is not None:
         tray.hide()
     return code

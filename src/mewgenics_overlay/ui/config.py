@@ -13,11 +13,14 @@ import os
 import tempfile
 from pathlib import Path
 
+from mewgenics_overlay.ui import hotkeybinding
+
 log = logging.getLogger("mewgenics_overlay.config")
 
 _KEY = "mewgenics-overlay"
 DEFAULTS = {
     "theme": "noir",            # UI theme: film (bright) | noir (dark)
+    "hotkey": hotkeybinding.DEFAULT_TEXT,  # global toggle, e.g. Ctrl+Shift+B
     "zoom": 1.0,               # user zoom multiplier (Ctrl+wheel/buttons)
     "check_for_updates": True, # ask GitHub for a newer release on start
     "save_path": None,            # last save shown
@@ -99,6 +102,18 @@ def _coerce(saved: dict) -> dict:
     for key, v in saved.items():
         if key == "window_rect":
             data[key] = _rect(v)
+            continue
+        if key == "hotkey":
+            # A tampered combo must never reach RegisterHotKey (or the
+            # focused-window shortcut); an unusable value falls back to the
+            # shipped default with a warning, like the other keys.
+            binding = hotkeybinding.parse(v)
+            if binding is None:
+                log.warning("ignoring invalid global hotkey %r; using %s",
+                            v, DEFAULTS["hotkey"])
+                data[key] = DEFAULTS["hotkey"]
+            else:
+                data[key] = binding.format()
             continue
         if key == "report_url":
             # URL defaults are validated once here: only http(s) is ever

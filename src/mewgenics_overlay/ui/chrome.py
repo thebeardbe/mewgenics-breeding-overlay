@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 )
 
 from mewgenics_overlay.ui import theme as _theme
+from mewgenics_overlay.ui.hotkeybinding import DEFAULT_TEXT
 
 _HEAD_SPACING = 12              # gap between grip / title / status / buttons
 _HEAD_MARGINS = (4, 2, 6, 2)    # header padding inside the palette frame
@@ -33,6 +34,17 @@ _BTN_BASE_W = 46                # icon-button width at 100% zoom
 _BTN_BASE_H = 26                # icon-button height at 100% zoom
 _BTN_MIN_W = 38                 # narrowest the buttons may shrink to
 _BTN_MIN_H = 22                 # shortest the buttons may shrink to
+
+
+def _click_through_tip(hotkey: str) -> str:
+    """Click-through tooltip, naming the combo that summons the overlay."""
+    return ("Click-through: let mouse clicks reach Mewgenics. "
+            f"{hotkey} / tray to interact.")
+
+
+def _close_tip(hotkey: str) -> str:
+    """Hide-button tooltip, naming the combo that summons the overlay."""
+    return f"Hide ({hotkey} / tray) - quits when no tray is available"
 
 
 class _DragLabel(QLabel):
@@ -112,13 +124,11 @@ class TopBar(QWidget):
         self._btn_pin.clicked.connect(self._emit_pin)
         self._btn_ct = self._icon_button(
             _CT_TEXT,
-            "Click-through: let mouse clicks reach Mewgenics. "
-            "Ctrl+Shift+B / tray to interact.",
+            _click_through_tip(DEFAULT_TEXT),
             checkable=True, checked=bool(click_through))
         self._btn_ct.clicked.connect(self._emit_click_through)
         self._btn_close = self._icon_button(
-            _CLOSE_TEXT,
-            "Hide (Ctrl+Shift+B / tray) - quits when no tray is available")
+            _CLOSE_TEXT, _close_tip(DEFAULT_TEXT))
         self._btn_close.clicked.connect(self._emit_hide)
         head.addWidget(self._btn_pin)
         head.addWidget(self._btn_ct)
@@ -163,6 +173,11 @@ class TopBar(QWidget):
 
     def set_status(self, text: str) -> None:
         self._status.setText(text)
+
+    def set_hotkey(self, description: str) -> None:
+        """Rewrite the tooltips that name the summon combo to *description*."""
+        self._btn_ct.setToolTip(_click_through_tip(description))
+        self._btn_close.setToolTip(_close_tip(description))
 
     # ── button state ──────────────────────────────────────────────────────
     def set_pinned(self, on: bool) -> None:

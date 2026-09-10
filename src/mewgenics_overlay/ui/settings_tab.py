@@ -21,12 +21,14 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QPushButton,
     QScrollArea,
     QVBoxLayout,
     QWidget,
 )
 
+from mewgenics_overlay.ui import hotkeybinding
 from mewgenics_overlay.ui import theme as _theme
 
 
@@ -46,6 +48,9 @@ class SettingsTab(QWidget):
         self._zoom_minus = None
         self._zoom_plus = None
         self._current = ""
+        self._hotkey_hint = None
+        self._hotkey_hint_text = f"Global hotkey: {hotkeybinding.DEFAULT_TEXT}"
+        self._hotkey_hint_error = False
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -109,6 +114,34 @@ class SettingsTab(QWidget):
             self._update_check.toggled.connect(
                 lambda on: actions["set_check_updates"](on))
             lay.addWidget(self._update_check)
+
+        # Global hotkey section: the combo is applied through the injected
+        # set_hotkey action, which owns registration and persistence.
+        root.addWidget(self._heading("Global hotkey"))
+        with self._frame(root) as lay:
+            hk_row = QHBoxLayout()
+            self._hotkey_mods = {}
+            for name in ("ctrl", "alt", "shift"):
+                cb = QCheckBox(name.capitalize())
+                cb.toggled.connect(self._apply_hotkey)
+                self._hotkey_mods[name] = cb
+                hk_row.addWidget(cb)
+            hk_row.addWidget(QLabel("Key:"))
+            self._hotkey_key = QLineEdit()
+            self._hotkey_key.setMaxLength(1)
+            self._hotkey_key.setFixedWidth(48)
+            self._hotkey_key.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self._hotkey_key.setToolTip(
+                "One letter A to Z (stored uppercase).\n"
+                "The combination also needs at least one modifier.")
+            self._hotkey_key.textChanged.connect(self._on_hotkey_letter)
+            hk_row.addWidget(self._hotkey_key)
+            hk_row.addStretch(1)
+            lay.addLayout(hk_row)
+            self._hotkey_hint = QLabel(self._hotkey_hint_text)
+            self._hotkey_hint.setObjectName("muted")
+            self._hotkey_hint.setWordWrap(True)
+            lay.addWidget(self._hotkey_hint)
 
         # About & support section
         root.addWidget(self._heading("About & support"))
@@ -180,7 +213,17 @@ class SettingsTab(QWidget):
                     f"solid {grip}; border-radius: 6px; font-size: 17px; "
                     f"padding: 0; }}\n"
                     f"QPushButton:hover {{ border-color: {muted}; }}")
+        self._restyle_hotkey_hint()
         self._save_panel.restyle()
+
+    def _restyle_hotkey_hint(self) -> None:
+        """Colour the hotkey hint: risk colour for an inline error, muted
+        otherwise. Re-run by ``_restyle`` on every theme switch."""
+        if self._hotkey_hint is None:
+            return
+        colour = _hex("RISK_HIGH") if self._hotkey_hint_error else _hex("C_MUTED")
+        self._hotkey_hint.setText(self._hotkey_hint_text)
+        self._hotkey_hint.setStyleSheet(f"color: {colour};\n")
 
     # ── state updates from the window ─────────────────────────────────────
     def set_active_theme(self, key: str) -> None:
@@ -201,3 +244,66 @@ class SettingsTab(QWidget):
 
     def set_zoom(self, pct: int) -> None:
         self._zoom_label.setText(f"{pct}%")
+
+    # ── global hotkey ─────────────────────────────────────────────────────
+    def _hotkey_text(self) -> str:
+        parts = [name.capitalize() for name, cb in self._hotkey_mods.items()
+                 if cb.isChecked()]
+        parts.append(self._hotkey_key.text().strip().upper())
+        return "+".join(parts)
+
+    def _on_hotkey_letter(self, text: str) -> None:
+        """Force the key field to a single uppercase letter, then apply."""
+        upper = text.upper()
+        if upper != text:
+            blocked = self._hotkey_key.blockSignals(True)
+            self._hotkey_key.setText(upper)
+            self._hotkey_key.blockSignals(blocked)
+        self._apply_hotkey()
+
+    def _apply_hotkey(self) -> None:
+        """Validate the widgets and ask the window to apply the combo.
+
+        Invalid input (no modifier, no letter, digits/symbols) never reaches
+        the window: the previous binding stays and the hint says why.
+        """
+        binding = hotkeybinding.parse(self._hotkey_text())
+        if binding is None:
+            self._set_hotkey_hint(
+                "Global hotkey needs at least one modifier (Ctrl, Alt or "
+                "Shift) and one letter A to Z.", error=True)
+            return
+        apply = self._actions.get("set_hotkey")
+        if apply is None:
+            return
+        ok, error = apply(binding.format())
+        if ok:
+            self.set_hotkey(binding.format())
+        else:
+            self._set_hotkey_hint(
+                error or "That combination is not available.", error=True)
+
+    def set_hotkey(self, text: str) -> None:
+        """Sync the widgets with *text* (startup / after a successful apply).
+
+        Signals are blocked so this stays a state update: it must not call
+        the window's set_hotkey action again.
+        """
+        binding = hotkeybinding.parse(text)
+        if binding is None:
+            return
+        widgets = [self._hotkey_mods["ctrl"], self._hotkey_mods["alt"],
+                   self._hotkey_mods["shift"], self._hotkey_key]
+        blocked = [w.blockSignals(True) for w in widgets]
+        self._hotkey_mods["ctrl"].setChecked(binding.ctrl)
+        self._hotkey_mods["alt"].setChecked(binding.alt)
+        self._hotkey_mods["shift"].setChecked(binding.shift)
+        self._hotkey_key.setText(binding.key)
+        for widget, previous in zip(widgets, blocked):
+            widget.blockSignals(previous)
+        self._set_hotkey_hint(f"Global hotkey: {binding.format()}")
+
+    def _set_hotkey_hint(self, text: str, error: bool = False) -> None:
+        self._hotkey_hint_text = text
+        self._hotkey_hint_error = error
+        self._restyle_hotkey_hint()

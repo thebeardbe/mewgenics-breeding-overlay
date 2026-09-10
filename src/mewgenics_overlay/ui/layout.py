@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
 )
 
 from mewgenics_overlay.ui import config as cfg
+from mewgenics_overlay.ui import hotkeybinding
 from mewgenics_overlay.ui import windowstate as _win_state
 from mewgenics_overlay.ui.bestmatch import BestMatchBar, SAFE_CAP_DEFAULT
 from mewgenics_overlay.ui.chrome import TopBar
@@ -247,6 +248,7 @@ def _build_settings(window, tabs: QTabWidget, outer: QVBoxLayout) -> None:
             "about": window._show_about,
             "report": window._open_report,
             "set_check_updates": window._set_update_check,
+            "set_hotkey": window._set_hotkey,
         },
         window._save_panel,
         titles={k: _theme.THEMES[k]["title"] for k in _theme.THEMES},
@@ -257,6 +259,10 @@ def _build_settings(window, tabs: QTabWidget, outer: QVBoxLayout) -> None:
     # this never writes the unchanged value back to disk.
     window._settings_tab.set_check_updates(
         bool(window._settings.get("check_for_updates", True)))
+    # Sync the hotkey widgets with the persisted combo (validated at load
+    # time); the setter blocks its signals so it never rebinds at startup.
+    window._settings_tab.set_hotkey(
+        window._settings.get("hotkey", hotkeybinding.DEFAULT_TEXT))
     # resize handle in the bottom-right corner (frameless window)
     size_row = QHBoxLayout()
     size_row.setContentsMargins(6, 0, 6, 4)

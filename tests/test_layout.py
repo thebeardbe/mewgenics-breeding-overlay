@@ -127,6 +127,16 @@ class FakePalette(QWidget):
     def _set_update_check(self, on):
         self.calls.append(("check_updates", on))
 
+    def _set_hotkey(self, text):
+        # layout.build wires this into the Settings tab's set_hotkey action;
+        # the real PaletteWindow returns (ok, error) from HotkeyController.
+        self.calls.append(("set_hotkey", text))
+        return (True, "")
+
+    @property
+    def hotkey_active(self):
+        return False
+
     def open_save(self, path):
         self.calls.append(("open_save", path))
 
@@ -279,6 +289,33 @@ def test_toggling_the_update_checkbox_notifies_the_host(make_host):
     host._settings_tab._update_check.setChecked(False)
 
     assert ("check_updates", False) in host.calls
+
+
+def test_hotkey_widgets_sync_from_persisted_settings(make_host):
+    host = make_host(settings={"hotkey": "Ctrl+Alt+K"})
+
+    assert host._settings_tab._hotkey_mods["ctrl"].isChecked() is True
+    assert host._settings_tab._hotkey_mods["alt"].isChecked() is True
+    assert host._settings_tab._hotkey_mods["shift"].isChecked() is False
+    assert host._settings_tab._hotkey_key.text() == "K"
+
+
+def test_hotkey_change_reaches_the_host_callback(make_host):
+    host = make_host(settings={"hotkey": "Ctrl+Shift+B"})
+
+    host._settings_tab._hotkey_key.setText("k")
+
+    assert ("set_hotkey", "Ctrl+Shift+K") in host.calls
+
+
+def test_invalid_hotkey_change_never_reaches_the_host(make_host):
+    host = make_host(settings={"hotkey": "Ctrl+B"})
+
+    # Remove the only modifier: a bare key is not a valid combo, so the tab
+    # must reject it itself instead of calling the host action.
+    host._settings_tab._hotkey_mods["ctrl"].setChecked(False)
+
+    assert not any(c[0] == "set_hotkey" for c in host.calls)
 
 
 # ── 3. signal wiring reaches the host and its coordinator ──────────────────

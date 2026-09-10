@@ -60,6 +60,7 @@ from .aboutdialog import (
 from .zoom import ZoomController
 
 from . import config as cfg
+from .hotkeyctl import HotkeyController
 from .pinning import PinningStore
 from .reloader import ReloadCoordinator
 
@@ -106,6 +107,16 @@ class PaletteWindow(QWidget):
             self._apply_theme_styles,
             self._refresh_theme,
             on_active=self._on_theme_active,
+            parent=self,
+        )
+        # Global hotkey (ui/hotkeyctl.py): the platform grab, the
+        # focused-window shortcut and their persistence. Installed by
+        # app.install_hotkey() once the QApplication exists.
+        self._hotkey_ctl = HotkeyController(
+            self._settings,
+            lambda: cfg.save(self._settings),
+            self._set_status,
+            self.toggle_activate,
             parent=self,
         )
         self._save = SaveController()   # session state + background queue + watcher
@@ -358,6 +369,45 @@ class PaletteWindow(QWidget):
 
     def _set_status(self, text: str) -> None:
         self._chrome.set_status(text)
+
+    # ── global hotkey (delegated to HotkeyController) ──────────────────────
+    def install_hotkey(self, app, on_change=None) -> None:
+        """Register the configured global hotkey plus the focused-window
+        shortcut; *on_change* (optional) receives the active description.
+        """
+        self._hotkey_ctl.install(app, on_change)
+        self._chrome.set_hotkey(self._hotkey_ctl.description)
+
+    def uninstall_hotkey(self) -> None:
+        """Release the global hotkey on quit."""
+        self._hotkey_ctl.uninstall()
+
+    @property
+    def hotkey_active(self) -> bool:
+        """True when the global (system-wide) grab is live."""
+        return self._hotkey_ctl.active
+
+    @property
+    def hotkey_description(self) -> str:
+        """Canonical text of the combo currently in force."""
+        return self._hotkey_ctl.description
+
+    def _set_hotkey(self, text: str) -> tuple[bool, str]:
+        """Apply a hotkey chosen in the Settings tab: validate, rebind,
+        persist, update the status line, notify the tray and refresh the
+        header tooltips.
+        """
+        ok, error = self._hotkey_ctl.set_binding(text)
+        # The description is the combo still in force (the controller restores
+        # the previous grab on failure), so the header tooltips stay correct
+        # either way. On failure the Settings widgets must snap back to it as
+        # well, or the card would keep showing the rejected combination.
+        self._chrome.set_hotkey(self._hotkey_ctl.description)
+        if not ok:
+            tab = getattr(self, "_settings_tab", None)
+            if tab is not None:
+                tab.set_hotkey(self._hotkey_ctl.description)
+        return ok, error
 
     def shutdown(self) -> None:
         """Stop background threads before the app exits."""
