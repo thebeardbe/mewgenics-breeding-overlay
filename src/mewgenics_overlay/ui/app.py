@@ -26,6 +26,7 @@ from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
 from mewgenics_overlay import __version__
 from mewgenics_overlay.ui import config as ui_config
+from mewgenics_overlay.ui import singleton
 from mewgenics_overlay.ui import theme as _theme
 from mewgenics_overlay.ui.palette import PaletteWindow
 
@@ -93,6 +94,16 @@ def main(argv=None) -> int:
     parser.add_argument("--no-tray", action="store_true", help="disable the tray icon")
     parser.add_argument("--hidden", action="store_true",
                         help="start hidden (summon with tray/hotkey)")
+    parser.add_argument("--toggle", action="store_true",
+                        help="toggle a running overlay and exit; starts the "
+                             "overlay when none is running (used by a desktop "
+                             "shortcut)")
+    parser.add_argument("--setup-shortcut", action="store_true",
+                        help="install a desktop shortcut for the configured "
+                             "hotkey, then exit")
+    parser.add_argument("--remove-shortcut", action="store_true",
+                        help="remove the desktop shortcut this app installed, "
+                             "then exit")
     parser.add_argument("--version", action="version", version=__version__)
     args = parser.parse_args(argv)
 
@@ -134,6 +145,11 @@ def main(argv=None) -> int:
     except Exception:
         pass
 
+    # Headless desktop-shortcut commands (used by the Settings buttons and
+    # by a copy-pasteable script): print the manager's message and exit.
+    if args.setup_shortcut or args.remove_shortcut:
+        return _shortcut_cli(install=bool(args.setup_shortcut))
+
     # On Hyprland run under XWayland: the always-on-top flag is honoured
     # reliably there, and Hyprland window rules (pin/float) can keep the
     # palette above a fullscreen game. Wayland-native can't guarantee that.
@@ -159,6 +175,22 @@ def main(argv=None) -> int:
         Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
     app = QApplication(sys.argv[:1])
     app.setApplicationName("mewgenics-overlay")
+
+    # Single instance: a second launch, or the desktop shortcut's --toggle,
+    # forwards a toggle to the running overlay and exits without a window.
+    # Nothing is printed; the hand-off is logged at INFO.
+    instance = singleton.SingleInstance()
+    if not instance.try_acquire():
+        # Either a live overlay owns the channel (forward the toggle) or the
+        # channel was unavailable. Exit only when the hand-off actually
+        # landed; otherwise start normally so a peer that died between the
+        # probe and the write never leaves a launch doing nothing.
+        if instance.send_toggle():
+            logging.info("another overlay is running; forwarded the toggle")
+            return 0
+        logging.warning("no running overlay answered the toggle; "
+                        "starting a new instance")
+        instance.try_acquire()
     # start with the saved theme (Bleached Film / Noir Ink)
     _theme_key = ui_config.load().get("theme", _theme.DEFAULT_THEME)
     if _theme_key not in _theme.THEMES:
@@ -167,6 +199,7 @@ def main(argv=None) -> int:
     app.setStyleSheet(_theme.stylesheet())
 
     palette = PaletteWindow()
+    instance.listen(palette.toggle_activate)
     tray = None
     if not args.no_tray:
         tray = _build_tray(app, palette)
@@ -194,7 +227,26 @@ def main(argv=None) -> int:
     palette.uninstall_hotkey()
     if tray is not None:
         tray.hide()
+    instance.close()
     return code
+
+
+def _shortcut_cli(install: bool) -> int:
+    """Run the desktop-shortcut manager headlessly for the CLI flags.
+
+    Prints the manager's message to stdout (including manual instructions on
+    failure) and returns 0 on success, 1 when the action did not complete.
+    """
+    from mewgenics_overlay.ui import desktopshortcut, hotkeybinding
+
+    if install:
+        binding = hotkeybinding.binding_or_default(
+            ui_config.load().get("hotkey"))
+        ok, message = desktopshortcut.install(binding)
+    else:
+        ok, message = desktopshortcut.remove()
+    print(message)
+    return 0 if ok else 1
 
 
 if __name__ == "__main__":

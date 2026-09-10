@@ -80,6 +80,39 @@ class HotkeyBinding:
             flags |= MOD_SHIFT
         return flags
 
+    # ── desktop-environment syntaxes (single source for the conversions) ──
+    # The Linux desktop shortcut manager needs the same combination in the
+    # syntax each environment expects. Keeping the mapping here means the
+    # Windows registration, the GTK/KDE/Hyprland strings and the config all
+    # agree on one representation.
+    def gtk_accelerator(self) -> str:
+        """GTK accelerator syntax (GNOME custom keybindings), e.g.
+        ``<Control><Shift>B``."""
+        parts = []
+        if self.ctrl:
+            parts.append("<Control>")
+        if self.alt:
+            parts.append("<Alt>")
+        if self.shift:
+            parts.append("<Shift>")
+        parts.append(self.key)
+        return "".join(parts)
+
+    def kde_shortcut(self) -> str:
+        """KDE global-accelerator syntax, e.g. ``Ctrl+Shift+B``."""
+        return self.format()
+
+    def hypr_combo(self) -> str:
+        """Hyprland ``bind`` combo, e.g. ``CTRL SHIFT, B``."""
+        mods = []
+        if self.ctrl:
+            mods.append("CTRL")
+        if self.alt:
+            mods.append("ALT")
+        if self.shift:
+            mods.append("SHIFT")
+        return f"{' '.join(mods)}, {self.key}"
+
 
 def parse(text: object) -> Optional[HotkeyBinding]:
     """Build a binding from *text*, or return ``None`` if it is not a valid

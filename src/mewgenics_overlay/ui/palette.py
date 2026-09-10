@@ -22,6 +22,7 @@ for the tray, the global hotkey and ``scripts/gui_smoke.py``.
 
 from __future__ import annotations
 
+import logging
 from typing import Optional
 
 from PySide6.QtCore import Qt, QTimer
@@ -60,9 +61,13 @@ from .aboutdialog import (
 from .zoom import ZoomController
 
 from . import config as cfg
+from . import desktopshortcut
+from mewgenics_overlay.ui import hotkeybinding
 from .hotkeyctl import HotkeyController
 from .pinning import PinningStore
 from .reloader import ReloadCoordinator
+
+log = logging.getLogger("mewgenics_overlay.ui")
 
 
 class PaletteWindow(QWidget):
@@ -408,6 +413,26 @@ class PaletteWindow(QWidget):
             if tab is not None:
                 tab.set_hotkey(self._hotkey_ctl.description)
         return ok, error
+
+    # ── desktop shortcut (Linux; the desktop owns the global key) ──────────
+    def _setup_desktop_shortcut(self) -> tuple[bool, str]:
+        """Install the desktop-environment shortcut for the current combo.
+
+        The combination comes from config (already validated); the manager
+        decides the environment and writes only its own entry. Returns the
+        manager's message for the Settings label / CLI.
+        """
+        binding = hotkeybinding.binding_or_default(
+            self._settings.get("hotkey"))
+        ok, message = desktopshortcut.install(binding)
+        log.info("desktop shortcut install: ok=%s (%s)", ok, message)
+        return ok, message
+
+    def _remove_desktop_shortcut(self) -> tuple[bool, str]:
+        """Remove the shortcut the manager installed (idempotent)."""
+        ok, message = desktopshortcut.remove()
+        log.info("desktop shortcut remove: ok=%s (%s)", ok, message)
+        return ok, message
 
     def shutdown(self) -> None:
         """Stop background threads before the app exits."""

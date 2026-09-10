@@ -44,6 +44,27 @@ chmod +x MewgenicsOverlay
 
 The binary bundles Python, Qt and everything else — no dependencies to install. It targets glibc x64 (not musl/Alpine). On Wayland sessions the overlay floats correctly under XWayland (auto-selected, e.g. on Hyprland); full Wayland-native support is not guaranteed.
 
+#### Linux: the global hotkey
+
+Windows gets a real global hotkey through `RegisterHotKey`. Wayland forbids apps from grabbing keys, so on Linux the overlay instead exposes a toggle command and lets the desktop own the shortcut:
+
+```bash
+mewgenics-overlay --toggle           # toggles a running overlay, else starts it
+mewgenics-overlay --setup-shortcut   # auto-configure for GNOME / KDE / Hyprland
+mewgenics-overlay --remove-shortcut  # undo it
+```
+
+**Settings → Global hotkey → Set up desktop shortcut** runs the same setup for you:
+
+| Desktop | What it does |
+|---|---|
+| GNOME | adds one gsettings custom keybinding (`org.gnome.settings-daemon.plugins.media-keys`) that runs `--toggle`; your other custom shortcuts are never rewritten |
+| KDE Plasma | writes a marked `~/.local/share/applications/mewgenics-overlay.desktop` and registers it with KGlobalAccel (falls back to `kwriteconfig`, with the manual commands printed if neither is available) |
+| Hyprland | appends one clearly marked line to `hyprland.conf` (backed up first) and runs `hyprctl reload` |
+| anything else | prints the one-line command to bind yourself |
+
+Any other desktop can simply bind `mewgenics-overlay --toggle` to a key in its own shortcut settings; a second launch always toggles the running instance instead of opening a second window.
+
 ### NixOS
 
 The repository is a flake, so NixOS users install it directly from GitHub — Nix pulls the exact source revision and builds it once (then caches it):

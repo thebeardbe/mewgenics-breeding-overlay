@@ -123,8 +123,14 @@ src/mewgenics_overlay/
                           file logger + excepthook, Hyprland/xcb + gtk3-theme fix
     hotkey.py             Windows global hotkey: RegisterHotKey + native filter
                           (both MSG event types), rebind, WinError reporting
-    hotkeybinding.py      pure hotkey combo model (parse/format/vk/mods)
+    hotkeybinding.py      pure hotkey combo model (parse/format/vk/mods, per-DE syntax)
     hotkeyctl.py          HotkeyController: install/rebind/persist + QShortcut
+    singleton.py          single-instance QLocalServer channel; --toggle forwarding
+    desktopshortcut.py    detect desktop + install/remove the toggle shortcut
+    shortcut_common.py    runner seam, quoting helpers, manual instructions
+    shortcut_backends.py  GNOME (gsettings) + KDE (desktop file/KGlobalAccel) setup
+    shortcut_hyprland.py  Hyprland managed config line + hyprctl reload
+    shortcutworker.py     runs shortcut setup/removal off the UI thread
     config.py             per-user settings (theme, save path, pinned map, …)
 ```
 
@@ -192,6 +198,8 @@ Key invariants:
 | `test_searchbox.py`, `test_chrome.py`, `test_roombar.py` | extracted UI modules: search, top bar, room selector |
 | `test_bestmatch.py`, `test_partneractions.py`, `test_pinning.py`, `test_savepanel.py` | best-match banner, partner row actions, per-save pin store, save slots |
 | `test_windowstate.py`, `test_zoom.py`, `test_themectl.py`, `test_updatenotice.py`, `test_aboutdialog.py` | frameless window state, zoom, themes, update notice, About/report helpers |
+| `test_hotkeybinding.py`, `test_hotkey.py`, `test_hotkeyctl.py`, `test_hotkey_palette.py` | hotkey combo model, Windows filter (both MSG event types), rebind, controller |
+| `test_singleton.py`, `test_desktopshortcut.py`, `test_shortcutworker.py`, `test_app_bootstrap.py` | `--toggle` channel, per-DE shortcut setup, background worker, CLI bootstrap |
 
 Plus `scripts/gui_smoke.py` for the real UI offscreen.
 
@@ -205,6 +213,17 @@ Plus `scripts/gui_smoke.py` for the real UI offscreen.
   `windows_dispatcher_MSG`, not `windows_generic_MSG`. A filter that accepts
   only the latter registers successfully and then silently never fires. The
   filter now accepts both and registers against a hidden helper window.
+- **Linux cannot grab keys under Wayland**: the overlay exposes
+  `mewgenics-overlay --toggle` and lets the desktop own the shortcut (GNOME
+  gsettings entry, KDE KGlobalAccel, Hyprland config line). A second launch or
+  `--toggle` forwards to the running instance over a `QLocalServer` channel.
+- **Hyprland has no `hyprctl keyword bind`** on current versions ("keyword
+  can't work with non-legacy parsers"); the managed line is written to
+  `hyprland.conf` and applied with `hyprctl reload` (then `reload config-only`).
+- **Never rewrite the user's config on a failed read**: GNOME's
+  `custom-keybindings` list is replaced only when `gsettings get` parsed
+  cleanly, and the KDE launcher/accel entry is touched only when the file is
+  ours (marker check). Hyprland config writes are atomic (temp + `os.replace`).
 - **QMessageBox has no `setOpenExternalLinks`** in PySide6. About dialog is a
   `QDialog` + rich-text `QLabel` instead.
 - **Theme switching**: the palette applies its own `setStyleSheet`, which
@@ -231,7 +250,7 @@ Plus `scripts/gui_smoke.py` for the real UI offscreen.
 
 ## 8. Status / roadmap
 
-- Latest release: **v0.2.1** (configurable global hotkey; fixes the silent Windows hotkey failure). Next: v0.2.2 / v0.3.0 as tester feedback lands.
+- Latest release: **v0.2.2** (Linux: configurable hotkey via desktop-owned shortcut + `--toggle` single instance). Next: **v0.3.0** (desktop portal GlobalShortcuts / X11 grab) as tester feedback lands.
 - Known gaps: per-NPC donation counters and Butch chapter progress are not
   recoverable from the save; Frank/retired is heuristic (abilities+stat
   gains); aggression is displayed for future fighter-room optimisation but

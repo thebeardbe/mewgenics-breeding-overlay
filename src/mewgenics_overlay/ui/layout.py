@@ -239,17 +239,25 @@ def _build_settings(window, tabs: QTabWidget, outer: QVBoxLayout) -> None:
 
     window._save_panel = SavePanel(
         window._settings, on_open=window.open_save)
+    actions = {
+        "set_theme": window.apply_theme,
+        "zoom_in": window._zoom_inc,
+        "zoom_out": window._zoom_dec,
+        "zoom_reset": window._zoom_default,
+        "about": window._show_about,
+        "report": window._open_report,
+        "set_check_updates": window._set_update_check,
+        "set_hotkey": window._set_hotkey,
+    }
+    # Desktop-shortcut actions are optional host capabilities: only wire the
+    # keys a given host provides (the real palette always has both).
+    for key, attr in (("setup_desktop_shortcut", "_setup_desktop_shortcut"),
+                      ("remove_desktop_shortcut", "_remove_desktop_shortcut")):
+        handler = getattr(window, attr, None)
+        if handler is not None:
+            actions[key] = handler
     window._settings_tab = SettingsTab(
-        {
-            "set_theme": window.apply_theme,
-            "zoom_in": window._zoom_inc,
-            "zoom_out": window._zoom_dec,
-            "zoom_reset": window._zoom_default,
-            "about": window._show_about,
-            "report": window._open_report,
-            "set_check_updates": window._set_update_check,
-            "set_hotkey": window._set_hotkey,
-        },
+        actions,
         window._save_panel,
         titles={k: _theme.THEMES[k]["title"] for k in _theme.THEMES},
     )

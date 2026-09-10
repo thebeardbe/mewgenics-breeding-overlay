@@ -16,6 +16,8 @@ em-dashes.
 
 from __future__ import annotations
 
+import sys
+
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -28,8 +30,18 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from mewgenics_overlay.ui import desktopshortcut
 from mewgenics_overlay.ui import hotkeybinding
 from mewgenics_overlay.ui import theme as _theme
+from mewgenics_overlay.ui.shortcutworker import ShortcutWorker
+
+
+# Transient result-label text while the background shortcut action runs; it
+# can wait on up to four 15-second subprocess timeouts.
+_SHORTCUT_BUSY = {
+    "setup_desktop_shortcut": "Setting up…",
+    "remove_desktop_shortcut": "Removing…",
+}
 
 
 def _hex(c) -> str:
@@ -51,6 +63,15 @@ class SettingsTab(QWidget):
         self._hotkey_hint = None
         self._hotkey_hint_text = f"Global hotkey: {hotkeybinding.DEFAULT_TEXT}"
         self._hotkey_hint_error = False
+        # Linux-only desktop-shortcut controls (None on Windows, which keeps
+        # today's global-grab combo widgets).
+        self._shortcut_set = None
+        self._shortcut_remove = None
+        self._shortcut_result = None
+        self._shortcut_result_text = ""
+        self._shortcut_result_error = False
+        self._shortcut_worker = ShortcutWorker(self)
+        self.destroyed.connect(self._shortcut_worker.cancel)
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -142,6 +163,10 @@ class SettingsTab(QWidget):
             self._hotkey_hint.setObjectName("muted")
             self._hotkey_hint.setWordWrap(True)
             lay.addWidget(self._hotkey_hint)
+            # On Linux the desktop owns the key: offer an explicit install
+            # action in addition to the focused-window combo widgets.
+            if sys.platform.startswith("linux"):
+                self._build_desktop_shortcut(lay)
 
         # About & support section
         root.addWidget(self._heading("About & support"))
@@ -213,7 +238,11 @@ class SettingsTab(QWidget):
                     f"solid {grip}; border-radius: 6px; font-size: 17px; "
                     f"padding: 0; }}\n"
                     f"QPushButton:hover {{ border-color: {muted}; }}")
+        for b in (self._shortcut_set, self._shortcut_remove):
+            if b is not None:
+                b.setStyleSheet(card)
         self._restyle_hotkey_hint()
+        self._restyle_shortcut_result()
         self._save_panel.restyle()
 
     def _restyle_hotkey_hint(self) -> None:
@@ -224,6 +253,67 @@ class SettingsTab(QWidget):
         colour = _hex("RISK_HIGH") if self._hotkey_hint_error else _hex("C_MUTED")
         self._hotkey_hint.setText(self._hotkey_hint_text)
         self._hotkey_hint.setStyleSheet(f"color: {colour};\n")
+
+    # ── desktop shortcut (Linux) ──────────────────────────────────────────
+    def _build_desktop_shortcut(self, lay: QVBoxLayout) -> None:
+        """Detected desktop label plus Set up / Remove buttons (Linux only).
+
+        The buttons call injected actions; the manager itself is never run
+        from here (the window owns the command and its logging).
+        """
+        label = desktopshortcut.desktop_label()
+        row = QHBoxLayout()
+        row.addWidget(QLabel(f"Desktop shortcut ({label}):"))
+        self._shortcut_set = QPushButton("Set up desktop shortcut")
+        self._shortcut_set.setMinimumWidth(200)
+        self._shortcut_set.setToolTip(
+            "Ask your desktop to run this app with --toggle on the chosen "
+            "combination. Nothing is written until you click this.")
+        self._shortcut_set.clicked.connect(
+            lambda: self._run_shortcut("setup_desktop_shortcut"))
+        self._shortcut_remove = QPushButton("Remove")
+        self._shortcut_remove.setMinimumWidth(90)
+        self._shortcut_remove.setToolTip(
+            "Remove the shortcut this app added. Shortcuts you added "
+            "yourself are left alone.")
+        self._shortcut_remove.clicked.connect(
+            lambda: self._run_shortcut("remove_desktop_shortcut"))
+        row.addWidget(self._shortcut_set)
+        row.addWidget(self._shortcut_remove)
+        row.addStretch(1)
+        lay.addLayout(row)
+        self._shortcut_result = QLabel("")
+        self._shortcut_result.setObjectName("muted")
+        self._shortcut_result.setWordWrap(True)
+        lay.addWidget(self._shortcut_result)
+
+    def _run_shortcut(self, action_key: str) -> None:
+        action = self._actions.get(action_key)
+        if action is None:
+            return
+        # The action may shell out several times with long timeouts; run it
+        # off the UI thread so a stalled session bus never freezes the
+        # overlay, and show a transient busy line until the result lands.
+        self._set_shortcut_result(
+            _SHORTCUT_BUSY.get(action_key, "Working…"), error=False)
+        self._shortcut_worker.run(action, self._on_shortcut_done)
+
+    def _on_shortcut_done(self, ok: bool, message: str) -> None:
+        self._set_shortcut_result(message or ("Done." if ok else "Failed."),
+                                  error=not ok)
+
+    def _set_shortcut_result(self, text: str, error: bool) -> None:
+        self._shortcut_result_text = text
+        self._shortcut_result_error = error
+        self._restyle_shortcut_result()
+
+    def _restyle_shortcut_result(self) -> None:
+        if self._shortcut_result is None:
+            return
+        colour = (_hex("RISK_HIGH") if self._shortcut_result_error
+                  else _hex("C_MUTED"))
+        self._shortcut_result.setText(self._shortcut_result_text)
+        self._shortcut_result.setStyleSheet(f"color: {colour};\n")
 
     # ── state updates from the window ─────────────────────────────────────
     def set_active_theme(self, key: str) -> None:

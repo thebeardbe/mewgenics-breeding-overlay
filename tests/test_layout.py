@@ -19,6 +19,7 @@ asserts that observable behaviour rather than pretending it is a no-op.
 from __future__ import annotations
 
 import os
+import sys
 
 # Must be set before the first QApplication is constructed.
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -42,6 +43,7 @@ from PySide6.QtWidgets import (  # noqa: E402
 from mewgenics_overlay.core import discovery  # noqa: E402
 from mewgenics_overlay.ui import config as _cfg  # noqa: E402
 from mewgenics_overlay.ui import layout as _layout  # noqa: E402
+from mewgenics_overlay.ui import shortcutworker  # noqa: E402
 from mewgenics_overlay.ui.bestmatch import BestMatchBar  # noqa: E402
 from mewgenics_overlay.ui.chrome import TopBar  # noqa: E402
 from mewgenics_overlay.ui.donations_tab import DonationsTab  # noqa: E402
@@ -165,13 +167,58 @@ class FakePalette(QWidget):
         self.calls.append(("header", col))
 
 
+def _attach_shortcut_actions(host, ok=True, message="done"):
+    """Give *host* the optional desktop-shortcut capability layout wires."""
+
+    def setup():
+        host.calls.append(("setup_shortcut",))
+        return ok, message
+
+    def remove():
+        host.calls.append(("remove_shortcut",))
+        return ok, message
+
+    host._setup_desktop_shortcut = setup
+    host._remove_desktop_shortcut = remove
+
+
+class _InlineThread:
+    """Run a worker target inline so its queued UI callback is predictable."""
+
+    def __init__(self, target=None, name=None, daemon=None, **kwargs):
+        self._target = target
+
+    def start(self):
+        if self._target is not None:
+            self._target()
+
+
 @pytest.fixture
-def make_host(qapp):
+def inline_shortcut_threads(monkeypatch):
+    monkeypatch.setattr(shortcutworker, "threading",
+                        SimpleNamespace(Thread=_InlineThread))
+
+
+def _pump(qapp, predicate, attempts=400):
+    """Process events until *predicate* holds (bounded, never sleeps)."""
+    for _ in range(attempts):
+        if predicate():
+            return True
+        qapp.processEvents()
+    return predicate()
+
+
+@pytest.fixture
+def make_host(qapp, inline_shortcut_threads):
     """Build a fake host window; tear it (and its tree) down afterwards."""
     hosts = []
 
-    def _make(settings=None, build=True):
+    def _make(settings=None, build=True, with_shortcut=False,
+              shortcut_ok=True, shortcut_message="done"):
         host = FakePalette(settings)
+        if with_shortcut:
+            _attach_shortcut_actions(host, ok=shortcut_ok,
+                                     message=shortcut_message)
         hosts.append(host)
         if build:
             _layout.build(host)
@@ -398,3 +445,73 @@ def test_second_build_does_not_raise_but_replaces_the_tree(make_host):
     assert host._focus_panel is not first_panel
     assert host._tabs.count() == 3
     assert host._tabs.tabText(0) == "Breeding"
+
+
+# ── 5. optional desktop-shortcut host capability ───────────────────────────
+# The Settings tab exposes Linux-only buttons that call injected actions. The
+# real palette always provides both; a host without them must still build,
+# and the settings actions must not appear in the injected map.
+def test_shortcut_actions_are_wired_when_the_host_exposes_them(make_host):
+    host = make_host(with_shortcut=True)
+
+    actions = host._settings_tab._actions
+    assert actions["setup_desktop_shortcut"] is host._setup_desktop_shortcut
+    assert actions["remove_desktop_shortcut"] is host._remove_desktop_shortcut
+
+
+def test_shortcut_buttons_reach_the_host(make_host, qapp):
+    if not sys.platform.startswith("linux"):
+        pytest.skip("desktop-shortcut controls are Linux-only")
+    host = make_host(with_shortcut=True)
+
+    host._settings_tab._shortcut_set.click()
+    host._settings_tab._shortcut_remove.click()
+
+    # The worker serializes, so the Remove action only starts after the Set up
+    # result was processed; pump the event loop until both have run.
+    assert _pump(qapp,
+                 lambda: ("remove_shortcut",) in host.calls) is True
+    assert ("setup_shortcut",) in host.calls
+    assert _pump(qapp, lambda: host._settings_tab._shortcut_result.text()
+                 == "done") is True
+
+
+def test_shortcut_setup_shows_a_busy_label_until_the_worker_finishes(
+        make_host, qapp):
+    if not sys.platform.startswith("linux"):
+        pytest.skip("desktop-shortcut controls are Linux-only")
+    host = make_host(with_shortcut=True)
+
+    host._settings_tab._shortcut_set.click()
+    assert host._settings_tab._shortcut_result.text() == "Setting up\u2026"
+
+    assert _pump(qapp, lambda: host._settings_tab._shortcut_result.text()
+                 == "done") is True
+
+
+def test_shortcut_failure_is_reflected_in_the_settings_hint(make_host, qapp):
+    if not sys.platform.startswith("linux"):
+        pytest.skip("desktop-shortcut controls are Linux-only")
+    host = make_host(with_shortcut=True, shortcut_ok=False,
+                     shortcut_message="could not install")
+
+    host._settings_tab._shortcut_set.click()
+    assert _pump(qapp, lambda: host._settings_tab._shortcut_result.text()
+                 == "could not install") is True
+
+    assert ("setup_shortcut",) in host.calls
+    assert host._settings_tab._shortcut_result_error is True
+    assert host._settings_tab._shortcut_result.text() == "could not install"
+
+
+def test_build_is_safe_when_the_host_lacks_shortcut_actions(make_host):
+    host = make_host()                      # default: no shortcut methods
+
+    actions = host._settings_tab._actions
+    assert "setup_desktop_shortcut" not in actions
+    assert "remove_desktop_shortcut" not in actions
+    if sys.platform.startswith("linux"):
+        # The Linux controls exist but are inert without the action.
+        host._settings_tab._shortcut_set.click()
+        host._settings_tab._shortcut_remove.click()
+    assert host._settings_tab is not None

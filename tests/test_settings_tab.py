@@ -10,6 +10,8 @@ colours the hint with the active theme.
 from __future__ import annotations
 
 import os
+import sys
+from types import SimpleNamespace  # noqa: E402
 
 # Must be set before the first QApplication is constructed.
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -18,8 +20,10 @@ import pytest  # noqa: E402
 
 pytest.importorskip("PySide6")
 
+from PySide6.QtCore import QEvent  # noqa: E402
 from PySide6.QtWidgets import QApplication, QWidget  # noqa: E402
 
+from mewgenics_overlay.ui import shortcutworker  # noqa: E402
 from mewgenics_overlay.ui import theme as _theme  # noqa: E402
 from mewgenics_overlay.ui.settings_tab import SettingsTab  # noqa: E402
 
@@ -81,6 +85,9 @@ def make_tab(qapp):
         tab.hide()
         tab.close()
         tab.deleteLater()
+    # Flush the deferred deletes now; left pending, a later test's event loop
+    # destroys these widgets while its own hooks are patched.
+    qapp.sendPostedEvents(None, QEvent.Type.DeferredDelete)
     qapp.processEvents()
 
 
@@ -293,3 +300,284 @@ def test_theme_switch_restyles_an_error_hint(make_tab):
     assert _theme.RISK_HIGH in tab._hotkey_hint.styleSheet()
     # The card frame and the save panel restyle too.
     assert tab._save_panel.restyles >= 1
+
+
+# ── 6. desktop shortcut (Linux-only) ───────────────────────────────────────
+# On Linux the desktop environment owns the key, so the card offers Set up /
+# Remove buttons; on Windows they do not exist and the combo widgets remain.
+# The window owns the real commands, so the tab only calls injected actions.
+# The actions now run on a background ShortcutWorker; these tests run the
+# worker's thread inline and pump the QTimer hop, so the delivery (and the
+# transient busy label) is deterministic with no sleeps.
+class _InlineThread:
+    """Run a worker target inline so its queued UI callback is predictable."""
+
+    def __init__(self, target=None, name=None, daemon=None, **kwargs):
+        self._target = target
+        self.name = name
+        self.daemon = daemon
+
+    def start(self):
+        if self._target is not None:
+            self._target()
+
+
+@pytest.fixture
+def inline_shortcut_threads(monkeypatch):
+    monkeypatch.setattr(shortcutworker, "threading",
+                        SimpleNamespace(Thread=_InlineThread))
+
+
+def _drain(qapp):
+    """Deliver the shortcut worker's queued UI-thread callback."""
+    qapp.processEvents()
+
+
+def _pump(qapp, predicate, attempts=400):
+    """Process events until *predicate* holds (bounded, never sleeps)."""
+    for _ in range(attempts):
+        if predicate():
+            return True
+        qapp.processEvents()
+    return predicate()
+
+
+def _idle(qapp, tab):
+    """Pump the worker until its result label leaves the busy state."""
+    return _pump(qapp, lambda: tab._shortcut_result.text()
+                 not in ("Setting up\u2026", "Removing\u2026"))
+
+
+@pytest.fixture
+def make_shortcut_tab(qapp, inline_shortcut_threads):
+    tabs = []
+
+    def _make(result=(True, "done"), with_setup=True, with_remove=True,
+              setup_result=None, remove_result=None):
+        calls = []
+
+        def setup():
+            calls.append("setup")
+            return result if setup_result is None else setup_result
+
+        def remove():
+            calls.append("remove")
+            return result if remove_result is None else remove_result
+
+        actions = {
+            "set_theme": lambda key: None,
+            "zoom_in": lambda: None,
+            "zoom_out": lambda: None,
+            "zoom_reset": lambda: None,
+            "set_check_updates": lambda on: None,
+            "about": lambda: None,
+            "report": lambda: None,
+        }
+        if with_setup:
+            actions["setup_desktop_shortcut"] = setup
+        if with_remove:
+            actions["remove_desktop_shortcut"] = remove
+        tab = SettingsTab(
+            actions, FakeSavePanel(),
+            titles={k: v["title"] for k, v in _theme.THEMES.items()})
+        tabs.append(tab)
+        return tab, calls
+
+    yield _make
+    for tab in tabs:
+        # A test may have destroyed a tab (to exercise cancel-on-destroy), so
+        # teardown must tolerate an already-deleted C++ object.
+        try:
+            tab.hide()
+            tab.close()
+            tab.deleteLater()
+        except RuntimeError:
+            pass
+    qapp.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    qapp.processEvents()
+
+
+def test_linux_shows_the_desktop_shortcut_controls(make_shortcut_tab):
+    if not sys.platform.startswith("linux"):
+        pytest.skip("desktop-shortcut controls are Linux-only")
+
+    tab, calls = make_shortcut_tab()
+
+    assert tab._shortcut_set is not None
+    assert tab._shortcut_remove is not None
+    assert tab._shortcut_result is not None
+    assert not tab._shortcut_set.isHidden()
+    assert not tab._shortcut_remove.isHidden()
+
+
+def test_setup_button_invokes_the_action_and_shows_the_message(
+        make_shortcut_tab, qapp):
+    if not sys.platform.startswith("linux"):
+        pytest.skip("desktop-shortcut controls are Linux-only")
+    tab, calls = make_shortcut_tab(result=(True, "GNOME shortcut installed"))
+
+    tab._shortcut_set.click()
+
+    assert calls == ["setup"]
+    # While the worker runs the label shows a transient busy line.
+    assert tab._shortcut_result.text() == "Setting up\u2026"
+    _drain(qapp)
+    assert tab._shortcut_result.text() == "GNOME shortcut installed"
+    assert tab._shortcut_result_error is False
+    assert _theme.C_MUTED in tab._shortcut_result.styleSheet()
+    assert _theme.RISK_HIGH not in tab._shortcut_result.styleSheet()
+
+
+def test_failed_setup_shows_the_reason_in_the_risk_colour(
+        make_shortcut_tab, qapp):
+    if not sys.platform.startswith("linux"):
+        pytest.skip("desktop-shortcut controls are Linux-only")
+    tab, calls = make_shortcut_tab(result=(False, "schema is not installed"))
+
+    tab._shortcut_set.click()
+    _drain(qapp)
+
+    assert calls == ["setup"]
+    assert tab._shortcut_result.text() == "schema is not installed"
+    assert tab._shortcut_result_error is True
+    assert _theme.RISK_HIGH in tab._shortcut_result.styleSheet()
+    assert _theme.C_MUTED not in tab._shortcut_result.styleSheet()
+
+
+def test_remove_button_invokes_the_remove_action(make_shortcut_tab, qapp):
+    if not sys.platform.startswith("linux"):
+        pytest.skip("desktop-shortcut controls are Linux-only")
+    tab, calls = make_shortcut_tab(result=(True, "removed"))
+
+    tab._shortcut_remove.click()
+
+    assert calls == ["remove"]
+    assert tab._shortcut_result.text() == "Removing\u2026"      # busy line
+    _drain(qapp)
+    assert tab._shortcut_result.text() == "removed"
+    assert tab._shortcut_result_error is False
+
+
+def test_empty_message_falls_back_to_a_generic_result(make_shortcut_tab,
+                                                      qapp):
+    if not sys.platform.startswith("linux"):
+        pytest.skip("desktop-shortcut controls are Linux-only")
+    tab, calls = make_shortcut_tab(result=(False, ""))
+
+    tab._shortcut_set.click()
+    _drain(qapp)
+
+    assert tab._shortcut_result_error is True
+    assert tab._shortcut_result.text()          # never blank
+
+
+def test_successful_empty_message_falls_back_to_done(make_shortcut_tab,
+                                                     qapp):
+    if not sys.platform.startswith("linux"):
+        pytest.skip("desktop-shortcut controls are Linux-only")
+    tab, calls = make_shortcut_tab(result=(True, ""))
+
+    tab._shortcut_set.click()
+    _drain(qapp)
+
+    assert tab._shortcut_result_error is False
+    assert tab._shortcut_result.text() == "Done."
+
+
+def test_a_rapid_setup_then_remove_shows_the_remove_result(
+        make_shortcut_tab, qapp):
+    if not sys.platform.startswith("linux"):
+        pytest.skip("desktop-shortcut controls are Linux-only")
+    tab, calls = make_shortcut_tab(setup_result=(True, "setup done"),
+                                   remove_result=(True, "remove done"))
+
+    tab._shortcut_set.click()          # request 1 (starts running)
+    tab._shortcut_remove.click()       # request 2 (newest pending)
+    assert calls == ["setup"]          # the second request is queued, not run
+    assert tab._shortcut_result.text() == "Removing\u2026"
+
+    assert _idle(qapp, tab) is True
+
+    # Both actions run in order (serialized), and the final label is the
+    # Remove result, not the superseded Set up result.
+    assert calls == ["setup", "remove"]
+    assert tab._shortcut_result.text() == "remove done"
+    assert tab._shortcut_result_error is False
+
+
+def test_destroying_the_tab_cancels_in_flight_delivery(
+        make_shortcut_tab, qapp, monkeypatch):
+    if not sys.platform.startswith("linux"):
+        pytest.skip("desktop-shortcut controls are Linux-only")
+    # Spy on cancel() *before* the tab is built so the destroyed connection
+    # stores the patched bound method: this proves the tab really cancels its
+    # worker on destroy, not merely that a deleted receiver stops receiving.
+    cancelled = []
+    original_cancel = shortcutworker.ShortcutWorker.cancel
+
+    def spy_cancel(self):
+        cancelled.append(self)
+        original_cancel(self)
+
+    monkeypatch.setattr(shortcutworker.ShortcutWorker, "cancel", spy_cancel)
+    # Settle any deferred deletes from earlier tests first, so only this tab's
+    # destroy is observed below.
+    qapp.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    qapp.processEvents()
+    tab, calls = make_shortcut_tab(result=(True, "too late"))
+    worker = tab._shortcut_worker
+    delivered = []
+    tab._on_shortcut_done = lambda ok, msg: delivered.append((ok, msg))
+
+    tab._shortcut_set.click()          # action runs, result queued
+    assert calls == ["setup"]
+
+    # Destroy the tab: the destroyed hook cancels the worker, so the queued
+    # result must never reach the (gone) UI.
+    tab.deleteLater()
+    qapp.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    _drain(qapp)
+    assert _pump(qapp, lambda: bool(delivered)) is False
+
+    assert any(w is worker for w in cancelled)
+    assert delivered == []
+
+
+def test_shortcut_buttons_are_safe_without_the_actions(make_shortcut_tab):
+    tab, calls = make_shortcut_tab(with_setup=False, with_remove=False)
+    if sys.platform.startswith("linux"):
+        tab._shortcut_set.click()
+        tab._shortcut_remove.click()
+
+    assert calls == []
+    assert tab._shortcut_result_text == ""
+
+
+def test_theme_switch_restyles_a_failed_shortcut_result(
+        make_shortcut_tab, qapp):
+    if not sys.platform.startswith("linux"):
+        pytest.skip("desktop-shortcut controls are Linux-only")
+    tab, calls = make_shortcut_tab(result=(False, "failed"))
+    tab._shortcut_set.click()
+    _drain(qapp)
+    other = next(k for k in _theme.THEMES if k != _theme.active_theme())
+
+    tab.set_active_theme(other)
+
+    assert _theme.RISK_HIGH in tab._shortcut_result.styleSheet()
+
+
+def test_windows_hides_the_controls_and_keeps_the_combo(
+        monkeypatch, make_shortcut_tab):
+    monkeypatch.setattr(sys, "platform", "win32")
+    tab, calls = make_shortcut_tab()
+
+    assert tab._shortcut_set is None
+    assert tab._shortcut_remove is None
+    assert tab._shortcut_result is None
+    # The Windows path keeps the global-grab combo widgets.
+    assert set(tab._hotkey_mods) == {"ctrl", "alt", "shift"}
+    assert tab._hotkey_key is not None
+    # Restyling must tolerate the missing Linux widgets.
+    tab._restyle()
+    assert tab._hotkey_hint is not None

@@ -203,3 +203,85 @@ def test_binding_or_default_fallback_is_the_shared_default_object():
     # One source of truth: callers compare against DEFAULT_BINDING.
     assert hb.binding_or_default("junk") is hb.DEFAULT_BINDING
     assert hb.binding_or_default(123) is hb.binding_or_default(None)
+
+
+# ── 7. desktop-environment syntaxes ────────────────────────────────────────
+# The Linux shortcut manager needs the same combination in three syntaxes
+# (GTK accelerator, KDE global accelerator, Hyprland ``bind`` combo). These
+# pin each conversion against the parsed binding so the Windows registration,
+# the config and every Linux desktop agree on one representation.
+@pytest.mark.parametrize("ctrl,alt,shift,key,gtk", [
+    (True, False, False, "B", "<Control>B"),
+    (False, True, False, "A", "<Alt>A"),
+    (False, False, True, "C", "<Shift>C"),
+    (True, True, False, "D", "<Control><Alt>D"),
+    (True, False, True, "E", "<Control><Shift>E"),
+    (False, True, True, "F", "<Alt><Shift>F"),
+    (True, True, True, "G", "<Control><Alt><Shift>G"),
+])
+def test_gtk_accelerator(ctrl, alt, shift, key, gtk):
+    assert HotkeyBinding(ctrl, alt, shift, key).gtk_accelerator() == gtk
+
+
+@pytest.mark.parametrize("ctrl,alt,shift,key,kde", [
+    (True, False, False, "B", "Ctrl+B"),
+    (False, True, False, "A", "Alt+A"),
+    (False, False, True, "C", "Shift+C"),
+    (True, False, True, "E", "Ctrl+Shift+E"),
+    (True, True, False, "D", "Ctrl+Alt+D"),
+    (False, True, True, "F", "Alt+Shift+F"),
+    (True, True, True, "G", "Ctrl+Alt+Shift+G"),
+])
+def test_kde_shortcut_matches_the_canonical_format(ctrl, alt, shift, key, kde):
+    binding = HotkeyBinding(ctrl, alt, shift, key)
+    assert binding.kde_shortcut() == binding.format() == kde
+
+
+@pytest.mark.parametrize("ctrl,alt,shift,key,hypr", [
+    (True, False, False, "B", "CTRL, B"),
+    (False, True, False, "A", "ALT, A"),
+    (False, False, True, "C", "SHIFT, C"),
+    (True, False, True, "E", "CTRL SHIFT, E"),
+    (True, True, False, "D", "CTRL ALT, D"),
+    (False, True, True, "F", "ALT SHIFT, F"),
+    (True, True, True, "G", "CTRL ALT SHIFT, G"),
+])
+def test_hypr_combo(ctrl, alt, shift, key, hypr):
+    assert HotkeyBinding(ctrl, alt, shift, key).hypr_combo() == hypr
+
+
+@pytest.mark.parametrize("text", [
+    "Ctrl+Shift+B", "Ctrl+Alt+K", "Alt+A", "Ctrl+Alt+Shift+Z", "Shift+C",
+    "Ctrl+Q",
+])
+def test_desktop_syntaxes_agree_with_parse_and_format(text):
+    binding = hb.parse(text)
+    assert binding is not None
+
+    # A round-trip through the canonical text keeps every syntax identical.
+    again = hb.parse(binding.format())
+    assert again is not None
+    assert again.gtk_accelerator() == binding.gtk_accelerator()
+    assert again.kde_shortcut() == binding.kde_shortcut()
+    assert again.hypr_combo() == binding.hypr_combo()
+
+    # Each syntax reflects exactly the held modifiers plus the key.
+    gtk = binding.gtk_accelerator()
+    assert ("<Control>" in gtk) is binding.ctrl
+    assert ("<Alt>" in gtk) is binding.alt
+    assert ("<Shift>" in gtk) is binding.shift
+    assert gtk.endswith(binding.key)
+
+    hypr = binding.hypr_combo()
+    assert ("CTRL" in hypr.split(",")[0]) is binding.ctrl
+    assert ("ALT" in hypr.split(",")[0]) is binding.alt
+    assert ("SHIFT" in hypr.split(",")[0]) is binding.shift
+    assert hypr.endswith(f", {binding.key}")
+
+    assert binding.kde_shortcut() == binding.format()
+
+
+def test_desktop_syntaxes_default_binding():
+    assert hb.DEFAULT_BINDING.gtk_accelerator() == "<Control><Shift>B"
+    assert hb.DEFAULT_BINDING.kde_shortcut() == "Ctrl+Shift+B"
+    assert hb.DEFAULT_BINDING.hypr_combo() == "CTRL SHIFT, B"
