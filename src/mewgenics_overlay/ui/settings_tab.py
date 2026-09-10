@@ -1,15 +1,17 @@
 """Settings tab for the overlay.
 
 Set-up actions that used to live in the window header: save selection (the
-three in-game slots side by side + "open another save"), theme (segmented
-choice) and zoom. Play-time toggles (pin, click-through) and ✕ live in the
-header; the update notice lives on the tab row.
+three in-game slots side by side, owned by ``ui/savepanel.py`` and passed in
+by the window), theme (segmented choice) and zoom. Play-time toggles (pin,
+click-through) and ✕ live in the header; the update notice lives on the tab
+row.
 
 Each section is a framed card with a plain QLabel heading above it. QLabel
 headings scale with the user zoom (QGroupBox::title pseudo-elements do not),
 and the card frame stays put. Every control is theme-aware: the window calls
 ``set_active_theme`` and this tab re-derives its styles from the active theme
-colours. User-facing copy avoids em-dashes.
+colours (the save slots restyle themselves). User-facing copy avoids
+em-dashes.
 """
 
 from __future__ import annotations
@@ -26,7 +28,6 @@ from PySide6.QtWidgets import (
 )
 
 from mewgenics_overlay.ui import theme as _theme
-from mewgenics_overlay.ui.theme import wrap_tooltip as _wt
 
 
 def _hex(c) -> str:
@@ -34,13 +35,12 @@ def _hex(c) -> str:
 
 
 class SettingsTab(QWidget):
-    def __init__(self, actions: dict, titles: dict | None = None,
-                 parent=None) -> None:
+    def __init__(self, actions: dict, save_panel: QWidget,
+                 titles: dict | None = None, parent=None) -> None:
         super().__init__(parent)
         self._actions = actions
+        self._save_panel = save_panel
         self._titles = dict(titles or {})
-        self._slot_buttons: list[QPushButton] = []
-        self._slot_paths: list = []
         self._headings: list[QLabel] = []
         self._frames: list[QWidget] = []
         self._zoom_minus = None
@@ -58,28 +58,11 @@ class SettingsTab(QWidget):
         scroll.setWidget(body)
         outer.addWidget(scroll)
 
-        # Save section
+        # Save section: the slot cards + picker are their own widget
+        # (ui/savepanel.py) so the same controls serve the tray menu.
         root.addWidget(self._heading("Save slots"))
         with self._frame(root) as lay:
-            slot_row = QHBoxLayout()
-            for n in range(3):
-                btn = QPushButton(f"Slot {n + 1}\nno save yet")
-                btn.setToolTip(_wt("Load this campaign slot's save. Slots "
-                                   "that don't exist yet are disabled."))
-                btn.setMinimumHeight(58)
-                btn.clicked.connect(
-                    lambda _=False, idx=n: self._actions["load_slot"](idx))
-                btn.setEnabled(False)
-                self._slot_buttons.append(btn)
-                slot_row.addWidget(btn, 1)
-            lay.addLayout(slot_row)
-            open_btn = QPushButton("📁 Open another save file…")
-            open_btn.setMaximumWidth(300)
-            open_btn.clicked.connect(lambda: self._actions["open_save"]())
-            open_row = QHBoxLayout()
-            open_row.addWidget(open_btn)
-            open_row.addStretch(1)
-            lay.addLayout(open_row)
+            lay.addWidget(self._save_panel)
 
         # Appearance section
         root.addWidget(self._heading("Appearance"))
@@ -185,8 +168,6 @@ class SettingsTab(QWidget):
             f"QPushButton:hover {{ border-color: {muted}; }}\n"
             f"QPushButton:disabled {{ color: {muted}; "
             f"border-color: transparent; }}")
-        for btn in self._slot_buttons:
-            btn.setStyleSheet(card)
         for key, b in self._theme_buttons.items():
             b.setStyleSheet(
                 f"{card}\n"
@@ -199,56 +180,7 @@ class SettingsTab(QWidget):
                     f"solid {grip}; border-radius: 6px; font-size: 17px; "
                     f"padding: 0; }}\n"
                     f"QPushButton:hover {{ border-color: {muted}; }}")
-        self._refresh_slot_highlights()
-
-    # ── save slots ────────────────────────────────────────────────────────
-    def set_slots(self, entries) -> None:
-        self._slot_paths = [p for _, p in entries]
-        for i, (label, path) in enumerate(entries):
-            if i >= len(self._slot_buttons):
-                break
-            btn = self._slot_buttons[i]
-            if path:
-                base = str(path).split("/")[-1].split("\\")[-1]
-                btn.setText(f"{label}\n🐈 {base}")
-                btn.setEnabled(True)
-            else:
-                btn.setText(f"{label}\nno save yet")
-                btn.setEnabled(False)
-        self._refresh_slot_highlights()
-
-    def set_current(self, path) -> None:
-        self._current = path or ""
-        self._refresh_slot_highlights()
-
-    def _refresh_slot_highlights(self) -> None:
-        good = _hex("C_GOOD")
-        for i, btn in enumerate(self._slot_buttons):
-            if i >= len(self._slot_paths):
-                break
-            is_current = bool(self._slot_paths[i]) and \
-                str(self._slot_paths[i]) == self._current
-            text = btn.text()
-            head, _, sub = text.partition("\n")
-            sub = sub.replace("  ●", "")
-            if is_current:
-                sub = sub.rstrip() + "  ●"
-                btn.setStyleSheet(
-                    f"QPushButton {{ background: transparent; "
-                    f"border: 1px solid {good}; color: {good}; "
-                    f"border-radius: 8px; padding: 6px 10px; "
-                    f"text-align: center; }}\n"
-                    f"QPushButton:hover {{ border-color: {good}; }}")
-            else:
-                grip, muted = _hex("C_GRIP"), _hex("C_MUTED")
-                btn.setStyleSheet(
-                    f"QPushButton {{ background: transparent; "
-                    f"border: 1px solid {grip}; border-radius: 8px; "
-                    f"padding: 6px 10px; text-align: center; }}\n"
-                    f"QPushButton:hover {{ border-color: {muted}; }}\n"
-                    f"QPushButton:disabled {{ color: {muted}; "
-                    f"border-color: transparent; }}")
-            btn.setText(f"{head}\n{sub}")
+        self._save_panel.restyle()
 
     # ── state updates from the window ─────────────────────────────────────
     def set_active_theme(self, key: str) -> None:
@@ -257,7 +189,15 @@ class SettingsTab(QWidget):
         self._restyle()
 
     def set_check_updates(self, on: bool) -> None:
+        """Reflect the persisted setting in the checkbox (no signal).
+
+        A state update from the window, like ``set_active_theme``: it must
+        not re-fire ``toggled`` or the startup sync would write the unchanged
+        value straight back to the settings file.
+        """
+        blocked = self._update_check.blockSignals(True)
         self._update_check.setChecked(bool(on))
+        self._update_check.blockSignals(blocked)
 
     def set_zoom(self, pct: int) -> None:
         self._zoom_label.setText(f"{pct}%")

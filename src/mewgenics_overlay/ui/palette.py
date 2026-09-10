@@ -17,11 +17,11 @@ inject a cat key the same way `set_focus_key()` does.
 from __future__ import annotations
 
 import logging
-import os
 import threading
+from dataclasses import dataclass
 from typing import Optional
 
-from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtCore import Qt, QTimer
 import mewgenics_overlay.ui.theme as _theme
 from PySide6.QtGui import (
     QKeySequence,
@@ -29,13 +29,11 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import (
     QApplication,
-    QFileDialog,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QSizeGrip,
     QListWidget,
-    QMenu,
     QPushButton,
     QSystemTrayIcon,
     QTableWidgetItem,
@@ -45,7 +43,6 @@ from PySide6.QtWidgets import (
 )
 
 from mewgenics_overlay.core.session import (
-    STAT_NAMES,
     Cat,
     Session,
 )
@@ -60,38 +57,56 @@ from mewgenics_overlay.ui.windowstate import WindowController
 # Partner-table pure core (columns, header tips, cell formatters) - moved to
 # ui/partnertable.py so the interactive widget can stay Qt-focused (step 2b).
 from .partnertable import (
-    _COL_TIPS,
-    _better_stat_expectation,
+    COL_TIPS,
     PartnerTableWidget,
 )
 
 # self-contained panels split out of this window (god-file steps 4 and 5)
 from .bestmatch import BestMatchBar, SAFE_CAP_DEFAULT
+from .partneractions import PartnerActions
+from .themectl import ThemeController
 from .updatenotice import UpdateNotice
 
 # About/report/debug block and the user-zoom machinery (final split steps)
 from .aboutdialog import (
-    copy_debug_to_clipboard,
     open_report,
-    report_url,
     show_about,
 )
 from .zoom import ZoomController
 
 from . import config as cfg
 from .theme import wrap_tooltip as _wt
+from .pinning import PinningStore
+from .savepanel import SavePanel
+from .reloader import ReloadCoordinator
 from mewgenics_overlay.core.gameassets import GameAssets, locate_gpak
-
-log = logging.getLogger("mewgenics_overlay.ui")
 
 _ROOT_SPACING = 6   # shared by the palette root layout and the SearchBox
 
-class PaletteWindow(QWidget):
-    """The overlay palette. Owns the save session, watcher and worker."""
+log = logging.getLogger("mewgenics_overlay.ui")
 
-    # The save watcher fires from its own thread; a signal is the Qt-safe way
-    # to hand that notification back to the UI thread (connected in _wire_ui).
-    _save_changed = Signal()
+
+@dataclass
+class _AssetLoad:
+    """One finished background gpak load: the assets plus any parse error.
+
+    ``_drain_assets`` must tell "no resources.gpak was found" (no load is
+    started, so no result ever arrives) from "the gpak exists but failed to
+    parse" (a result with ``error`` set). The first is a normal optional
+    feature being absent; the second is a compute failure worth a status line.
+    """
+
+    assets: Optional[GameAssets] = None
+    error: Optional[Exception] = None
+
+class PaletteWindow(QWidget):
+    """The overlay palette: the window, its views and the user's selection.
+
+    Save watching, background parsing/ranking and the drain pump live in
+    :class:`~mewgenics_overlay.ui.reloader.ReloadCoordinator`; this window
+    keeps thin delegations (``open_save``, ``shutdown``, …) for the tray
+    menu, the global hotkey and ``scripts/gui_smoke.py``.
+    """
 
     def __init__(self):
         super().__init__()
@@ -107,15 +122,31 @@ class PaletteWindow(QWidget):
             parent=self,
         )
         _theme.set_zoom(self._zoom_ctl.zoom)
+        # The keep-list (per-save pinned cats) persists through the settings
+        # dict; on_change re-renders the tables that show the 📌 marker.
+        self._pins = PinningStore(
+            self._settings,
+            lambda: cfg.save(self._settings),
+            self._refresh_theme,
+        )
+        # Theme choice, persistence and the switch sequence live in the
+        # controller (ui/themectl.py); the callbacks cover the widget-level
+        # restyle and the re-render of what cached theme colours.
+        self._themes = ThemeController(
+            self._settings,
+            lambda: cfg.save(self._settings),
+            self._apply_theme_styles,
+            self._refresh_theme,
+            on_active=self._on_theme_active,
+            parent=self,
+        )
         self._focus: Optional[Cat] = None
         self._save = SaveController()   # session state + background queue + watcher
         self._asset_lock = threading.Lock()
         self._table: Optional[PartnerTableWidget] = None  # built in _build_ui
-        self._ui_busy = False
-        self._flag_applied = False        # non-Windows fallback guard
         self._ga: Optional[GameAssets] = None   # gpak effect tables (async)
         self._assets_started = False
-        self._asset_result: Optional[GameAssets] = None
+        self._asset_result: Optional[_AssetLoad] = None
 
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, False)
         self.resize(880, 600)
@@ -127,10 +158,18 @@ class PaletteWindow(QWidget):
         self.setWindowTitle("Mewgenics Breeding Overlay")
         self.setStyleSheet(_theme.stylesheet())
         self._wire_ui()
-        self._poll = QTimer(self)
-        self._poll.setInterval(120)
-        self._poll.timeout.connect(self._on_poll)
-        self._poll.start()
+        # Watcher -> debounced reload -> background parse -> drain onto the UI
+        # thread, plus partner-job scheduling (ui/reloader.py owns that path).
+        # Built here, exactly where the poll timer it replaces used to start:
+        # the views and their callbacks must exist before the first tick.
+        self._reloader = ReloadCoordinator(
+            self._save,
+            on_session=self._on_session_adopted,
+            on_partners=self._on_partner_rows,
+            on_status=self._set_status,
+            on_tick=self._drain_assets,
+            parent=self,
+        )
         QShortcut(QKeySequence("Ctrl++"), self, activated=self._zoom_inc)
         QShortcut(QKeySequence("Ctrl+-"), self, activated=self._zoom_dec)
         QShortcut(QKeySequence("Ctrl+0"), self, activated=self._zoom_default)
@@ -207,15 +246,22 @@ class PaletteWindow(QWidget):
         self._assets_started = True
         path = locate_gpak()
         if not path:
+            # No gpak on this machine: the optional feature is simply absent.
+            log.info("no resources.gpak found - defect effect text disabled")
             return
 
         def work():
+            result = _AssetLoad()
             try:
-                ga = GameAssets(path)
-            except Exception:
-                ga = None
+                result.assets = GameAssets(path)
+            except Exception as exc:
+                # The gpak exists but failed to parse: log the reason and pass
+                # the failure on so the drain can surface it (compute-failed,
+                # distinct from "no gpak found").
+                log.exception("failed to read resources.gpak %s", path)
+                result.error = exc
             with self._asset_lock:
-                self._asset_result = ga
+                self._asset_result = result
 
         threading.Thread(target=work, name="gpak-assets", daemon=True).start()
 
@@ -291,7 +337,7 @@ class PaletteWindow(QWidget):
             stim_getter=self._stim_value,
             comfort_getter=self._comfort_value,
             malady_lines=lambda row, stim, effect: (
-                self._table._pair_malady_lines(row, stim, effect)),
+                self._table.pair_malady_lines(row, stim, effect)),
             effect_of=self._effect_for_name,
             safe_risk_cap=lambda: self._to_float(
                 self._settings.get("safe_risk_cap", SAFE_CAP_DEFAULT),
@@ -302,7 +348,7 @@ class PaletteWindow(QWidget):
 
         # partners
         self._table = PartnerTableWidget(self)
-        self._table.set_header_tooltips(_COL_TIPS, _wt)
+        self._table.set_header_tooltips(COL_TIPS, _wt)
         root.addWidget(self._table, 1)
 
         # detail strip
@@ -318,6 +364,20 @@ class PaletteWindow(QWidget):
             "• Kittens this pair has already produced together."
         ))
         root.addWidget(self._detail)
+
+        # partner-row interaction: selection detail, right-click pin menu
+        # and double-click re-focus (ui/partneractions.py).
+        self._actions = PartnerActions(
+            self._table,
+            self._detail,
+            self._stim_value,
+            lambda row, stim, effect: self._table.pair_malady_lines(
+                row, stim, effect),
+            self._effect_for_name,
+            on_pin=self.set_pinned,
+            on_focus=self.set_focus,
+            parent=self,
+        )
 
         # Donations tab (last, so it exists before sessions arrive)
         from mewgenics_overlay.ui.donations_tab import DonationsTab
@@ -336,12 +396,14 @@ class PaletteWindow(QWidget):
         cl.addWidget(self._update_notice)
         tabs.setCornerWidget(corner, Qt.Corner.TopRightCorner)
 
-        # ⚙ Settings tab (save / appearance / zoom / help)
+        # ⚙ Settings tab (save / appearance / zoom / help). The save-slot
+        # cards and the picker are their own widget (ui/savepanel.py), built
+        # here where those controls used to live in this window.
         from mewgenics_overlay.ui.settings_tab import SettingsTab
+        self._save_panel = SavePanel(
+            self._settings, on_open=self.open_save)
         self._settings_tab = SettingsTab(
             {
-                "open_save": self._pick_save,
-                "load_slot": self._on_load_slot,
                 "set_theme": self.apply_theme,
                 "zoom_in": self._zoom_inc,
                 "zoom_out": self._zoom_dec,
@@ -350,9 +412,15 @@ class PaletteWindow(QWidget):
                 "report": self._open_report,
                 "set_check_updates": self._set_update_check,
             },
+            self._save_panel,
             titles={k: _theme.THEMES[k]["title"] for k in _theme.THEMES},
         )
         tabs.addTab(self._settings_tab, "⚙ Settings")
+        # Sync the checkbox with the persisted setting (default on) so the UI
+        # matches the config at startup. The setter blocks its own signal, so
+        # this never writes the unchanged value back to disk.
+        self._settings_tab.set_check_updates(
+            bool(self._settings.get("check_for_updates", True)))
         # resize handle in the bottom-right corner (frameless window)
         size_row = QHBoxLayout()
         size_row.setContentsMargins(6, 0, 6, 4)
@@ -363,7 +431,7 @@ class PaletteWindow(QWidget):
         size_row.addWidget(grip_w)
         outer.addLayout(size_row)
 
-        self._refresh_save_slots()
+        self._save_panel.refresh()
 
         self._tabs = tabs
 
@@ -374,8 +442,6 @@ class PaletteWindow(QWidget):
         self._table.customContextMenuRequested.connect(self._show_breeding_menu)
         self._table.horizontalHeader().sectionClicked.connect(self._on_header_clicked)
         self._btn_swap.toggled.connect(self._recompute_partners)
-        # watcher thread -> UI thread (queued automatically by the signal)
-        self._save_changed.connect(self._on_save_changed)
 
     # ── window behaviour (delegated to WindowController) ───────────────────
     @property
@@ -445,9 +511,6 @@ class PaletteWindow(QWidget):
     def _zoom_default(self) -> None:
         self._zoom_ctl.reset()
 
-    def _cycle_zoom(self) -> None:
-        self._zoom_ctl.cycle()
-
     def _on_zoom_label(self, pct: int) -> None:
         """Zoom readout in the Settings tab (absent before _build_ui)."""
         if getattr(self, "_settings_tab", None) is not None:
@@ -474,27 +537,23 @@ class PaletteWindow(QWidget):
             return
         super().wheelEvent(event)
 
-    def _toggle_theme(self) -> None:
-        keys = list(_theme.THEMES)
-        current = _theme.active_theme()
-        nxt = keys[(keys.index(current) + 1) % len(keys)]
-        self.apply_theme(nxt)
-
+    # ── theme (delegated to ThemeController) ───────────────────────────────
     def apply_theme(self, key: str) -> None:
         """Switch the active theme, restyle the app and re-render colours."""
-        if key not in _theme.THEMES:
-            return
-        _theme.set_theme(key)
-        self._settings["theme"] = key
-        cfg.save(self._settings)
+        self._themes.apply_theme(key)
+
+    def _on_theme_active(self, key: str) -> None:
+        """Theme readout in the Settings tab (absent before _build_ui)."""
         if getattr(self, "_settings_tab", None) is not None:
             self._settings_tab.set_active_theme(key)
+
+    def _apply_theme_styles(self, css: str) -> None:
+        """Apply *css* app-wide, to the palette (whose own stylesheet shadows
+        the app-wide one) and to the widgets that carry their own colours."""
         app = QApplication.instance()
         if app is not None:
-            app.setStyleSheet(_theme.stylesheet())
-        # The palette carries its own stylesheet (it shadows the app-wide
-        # one), so it must be refreshed too or nothing visually changes.
-        self.setStyleSheet(_theme.stylesheet())
+            app.setStyleSheet(css)
+        self.setStyleSheet(css)
         from mewgenics_overlay.ui.comboarrow import style_combo
         room_bar = getattr(self, "_room_bar", None)
         if room_bar is not None:
@@ -503,7 +562,6 @@ class PaletteWindow(QWidget):
         npc_combo = getattr(donations, "_combo", None)
         if npc_combo is not None:
             style_combo(npc_combo, _theme.C_MUTED)
-        self._refresh_theme()
 
     def _refresh_theme(self) -> None:
         """Repaint everything that cached theme colours."""
@@ -515,37 +573,14 @@ class PaletteWindow(QWidget):
         if donations is not None:
             donations.refresh(self._session)
 
-    # ── pinning (keep-list) ────────────────────────────────────────────────
-    def _pinned_store(self) -> list:
-        store = self._settings.setdefault("pinned", {})
-        key = self._settings.get("save_path") or ""
-        return store.setdefault(key, [])
-
+    # ── pinning (keep-list, delegated to PinningStore) ─────────────────────
     def _sync_pins(self) -> None:
-        """Apply saved pins and forget any cat that is gone from the save."""
-        if self._session is None:
-            return
-        store = self._pinned_store()
-        present = {c.unique_id for c in self._session.cats
-                   if getattr(c, "status", "") != "Gone"}
-        fresh = [uid for uid in store if uid in present]
-        if len(fresh) != len(store):
-            store[:] = fresh
-            cfg.save(self._settings)
-        for c in self._session.cats:
-            c.is_pinned = c.unique_id in store
+        """Apply the saved keep-list to the live session."""
+        self._pins.sync(self._session)
 
     def set_pinned(self, cat, on: bool) -> None:
         """Pin/unpin a cat (kept as a breeder; Gone cats are pruned)."""
-        store = self._pinned_store()
-        uid = cat.unique_id
-        if on and uid not in store:
-            store.append(uid)
-        elif not on and uid in store:
-            store.remove(uid)
-        cfg.save(self._settings)
-        cat.is_pinned = on
-        self._refresh_theme()
+        self._pins.set_pinned(cat, on)
 
     def defect_text_of(self, cat, name: str) -> str:
         """Effect text for one of *cat*'s defects (for the donation matrix)."""
@@ -564,89 +599,26 @@ class PaletteWindow(QWidget):
         """Credits dialog: who built it and whose research it stands on."""
         show_about(self, self._settings, self._set_status)
 
-    def _report_url(self) -> str:
-        """Where the About-box report button points (see config.report_url)."""
-        return report_url(self._settings.get("report_url"))
-
     def _open_report(self) -> None:
         open_report(self._settings.get("report_url"))
 
-    def _copy_debug(self) -> None:
-        """Copy a compact debug block to the clipboard for bug reports."""
-        copy_debug_to_clipboard(self._settings)
-        self._set_status("debug info copied - paste it into a bug report")
-
-    # ── save loading ───────────────────────────────────────────────────────
+    # ── save loading (slot/file UI delegated to SavePanel) ─────────────────
     def _load_last_save(self) -> None:
-        path = self._settings.get("save_path")
-        if not path or not self._file_exists(path):
-            from mewgenics_overlay.core.discovery import newest_save
-            found = newest_save()
-            path = found["path"] if found else None
-        if path:
-            self.open_save(path)
-        else:
+        """Startup: reopen the remembered save, else the newest on disk."""
+        if self._save_panel.load_last() is None:
             self._set_status("no save found - use 📁 to locate one")
 
-    @staticmethod
-    def _file_exists(path: str) -> bool:
-        import os
-        return bool(path) and os.path.exists(path)
-
-    def _discover_slot_paths(self) -> list:
-        """steamcampaign01..03 saves under the discovered saves folder."""
-        try:
-            from mewgenics_overlay.core.discovery import find_all_saves
-            records = find_all_saves()
-        except Exception:
-            records = []
-        by_num = {}
-        for r in records:
-            raw = str(r.get("path", "") or "")
-            base = raw.split("/")[-1].split(chr(92))[-1]
-            if base.startswith("steamcampaign") and base.endswith(".sav"):
-                try:
-                    n = int(base[len("steamcampaign"):-4])
-                except ValueError:
-                    continue
-                by_num[n] = raw
-        return [by_num.get(n) for n in (1, 2, 3)]
-
-    def _refresh_save_slots(self) -> None:
-        paths = self._discover_slot_paths()
-        self._slot_paths = paths
-        if getattr(self, "_settings_tab", None) is not None:
-            self._settings_tab.set_slots(
-                [(f"Slot {i + 1}", p) for i, p in enumerate(paths)])
-            self._settings_tab.set_current(self._settings.get("save_path"))
-
-    def _on_load_slot(self, index: int) -> None:
-        paths = getattr(self, "_slot_paths", None)
-        if not paths:
-            return
-        if 0 <= index < len(paths) and paths[index]:
-            self.open_save(paths[index])
-
     def _pick_save(self) -> None:
-        """Open a file picker and load the chosen save.
+        """Open the save picker (tray menu / Settings tab).
 
-        Uses Qt's own dialog (not the OS-native one) - the native dialog is
-        the usual suspect for platform crashes here. The dialog is modal, so
-        auto click-through is suspended while it is open.
+        The dialog is modal, so auto click-through is suspended while it is
+        open; the picker itself lives in SavePanel.
         """
         self._dialog_open = True
         try:
-            path, _ = QFileDialog.getOpenFileName(
-                self,
-                "Locate Mewgenics save",
-                os.path.dirname(self._settings.get("save_path") or ""),
-                "Mewgenics saves (*.sav)",
-                options=QFileDialog.Option.DontUseNativeDialog,
-            )
+            self._save_panel.pick()
         finally:
             self._dialog_open = False
-        if path:
-            self.open_save(path)
 
     def open_save(self, path: str) -> None:
         """(Re)load a save file; safe to call repeatedly / from any thread."""
@@ -655,44 +627,33 @@ class PaletteWindow(QWidget):
         cfg.save(self._settings)
         base = path.split('/')[-1].split(chr(92))[-1]
         self._chrome.set_title(f"🐈 Overlay - {base}")
-        if getattr(self, "_settings_tab", None) is not None:
-            self._settings_tab.set_current(path)
-        self._start_watcher(path)
+        self._save_panel.set_current(path)
+        self._reloader.start(path)
         self._set_status("loading save…")
-        self._schedule_reload()
-
-    def _start_watcher(self, path: str) -> None:
-        self._save.start_watcher(path, on_change=self._save_changed.emit)
+        self._reloader.request_reload()
 
     def _on_save_changed(self) -> None:
-        """Run on the UI thread via the ``_save_changed`` signal - the watcher
-        thread only emits, it never touches Qt widgets."""
-        try:
-            self._set_status("save changed - reloading…")
-            self._schedule_reload()
-        except Exception:
-            log.exception("save-change handler failed")
-            self._set_status("⚠ save changed but reload failed - see the log")
+        """The watched save was rewritten: reload it (UI thread).
+
+        Delegated to the coordinator, which owns the watcher signal; kept as
+        a named method because ``scripts/gui_smoke.py`` drives this path.
+        """
+        self._reloader.on_save_changed()
 
     def _set_status(self, text: str) -> None:
         self._chrome.set_status(text)
 
     def shutdown(self) -> None:
         """Stop background threads before the app exits."""
-        self._poll.stop()
-        self._save.stop_watcher()
+        self._reloader.stop()
 
-    # ── background work ────────────────────────────────────────────────────
-    def _schedule_reload(self) -> None:
-        path = self._settings.get("save_path")
-        if path:
-            self._save.schedule_reload(path)
-
+    # ── background work (delegated to ReloadCoordinator) ───────────────────
     def _schedule_partners(self) -> None:
+        """Gather the current view settings and queue a partner ranking."""
         focus = self._focus
-        if self._save.session is None or focus is None:
+        if focus is None:
             return
-        self._save.schedule_partners(
+        self._reloader.schedule_partners(
             focus.db_key,
             int(self._settings.get("max_partners", 100)),
             0 if self._btn_swap.isChecked() else None,
@@ -701,46 +662,46 @@ class PaletteWindow(QWidget):
             self._stim_value(),
         )
 
-    def _on_poll(self) -> None:
-        """Drain completed background jobs on the UI thread (token-guarded)."""
-        items = self._save.drain()
+    def _drain_assets(self) -> None:
+        """Collect a finished gpak load (called by the coordinator's poll)."""
         with self._asset_lock:
-            assets = self._asset_result
+            result = self._asset_result
             self._asset_result = None
-        if assets is not None:
-            self._ga = assets if assets.ok else None
-            self._room_bar.refresh()          # room Stimulation now available
-            if self._rows:
-                self._redraw_table()          # effects now available in tooltips
-            if self._focus is not None:
-                self._show_focus(self._focus)  # refresh health/effect tooltip
-        token_now = self._save.token
-        for token, kind, result in items:
-            if kind == "session":
-                if token >= token_now:
-                    self._adopt_session(result)
-            elif kind == "session_error":
-                if token >= token_now:
-                    # Keep the previous roster; never leave the UI hanging on
-                    # a corrupt/hostile save.
-                    self._set_status("⚠ could not read save - keeping the "
-                                     "previous cats")
-                    log.warning("save reload failed: %s", result)
-            elif kind == "partners":
-                cat_key, rows = result
-                if token >= token_now and self._focus is not None \
-                        and self._focus.db_key == cat_key:
-                    self._render_partners(rows)
-            elif kind == "partners_error":
-                # raw exception already logged in the worker; show a
-                # friendly line, never a Python traceback in the UI.
-                self._set_status("⚠ partner scoring failed - see the log; "
-                                 "try selecting another cat")
+        if result is None:
+            return
+        if result.error is not None:
+            # The gpak was found but unreadable: say so instead of silently
+            # showing no effect text ("no data" vs "compute failed").
+            self._set_status("⚠ could not read resources.gpak - defect "
+                             "effect text unavailable, see the log")
+            return
+        assets = result.assets
+        if assets is None:
+            return
+        self._ga = assets if assets.ok else None
+        self._room_bar.refresh()          # room Stimulation now available
+        if self._rows:
+            self._redraw_table()          # effects now available in tooltips
+        if self._focus is not None:
+            self._show_focus(self._focus)  # refresh health/effect tooltip
+
+    def _on_partner_rows(self, cat_key: int, rows: list) -> None:
+        """Rows for *cat_key* arrived (token already checked): show them if
+        that cat is still the focused one - the selection is ours to know."""
+        if self._focus is not None and self._focus.db_key == cat_key:
+            self._render_partners(rows)
 
     def _adopt_session(self, sess: Optional[Session]) -> None:
-        self._session = sess
-        count = len(sess.alive) if sess else 0
-        self._set_status(f"{count} cats in house/on adventures" if sess else "no save loaded")
+        """Adopt a parsed session (or ``None``) through the coordinator."""
+        self._reloader.adopt_session(sess)
+
+    def _on_session_adopted(self, sess: Optional[Session]) -> None:
+        """Rebuild the views for a newly adopted session.
+
+        Called by the coordinator once the session and the status line are in
+        place; the ordering (focus, room bar, pins, donations) is unchanged
+        from the pre-extraction window.
+        """
         # keep focus if the cat still exists
         if sess is not None and self._focus is not None:
             cat = sess.by_key.get(self._focus.db_key)
@@ -890,61 +851,13 @@ class PaletteWindow(QWidget):
         return ""
 
     def _on_partner_selected(self) -> None:
-        item = self._table.currentItem()
-        if item is None:
-            return
-        data = item.data(Qt.ItemDataRole.UserRole)
-        if not data:
-            return
-        row, kids = data
-        rel = row.relation
-        head = (f"{row.partner.name}: {rel.label} · Δgen {rel.gen_gap:+d}"
-                f" · COI {row.coi * 100:.1f}%")
-        if row.compatible:
-            proj = row.pair_factors.projection
-            text = (
-                head + "\n"
-                + "Kitten stats per parent range: "
-                + "  ".join(
-                    f"{s} {proj.stat_ranges[s][0]}–{proj.stat_ranges[s][1]}"
-                    for s in STAT_NAMES
-                )
-            )
-            better = _better_stat_expectation(row, self._stim_value())
-            if better:
-                text += (f"\nThe kitten takes the higher of the two parents' "
-                         f"values in ≈{better[0]:.1f} of "
-                         f"{better[1]} differing stats")
-            if kids:
-                text += f"   ·   existing kittens: {', '.join(kids)}"
-        else:
-            text = head + f"\nCan't breed: {row.reason or 'blocked'}"
-        malady = self._table._pair_malady_lines(
-            row, self._stim_value(), self._effect_for_name)
-        if malady:
-            text += "\n" + "\n".join(malady)
-        self._detail.setText(text)
+        """Selection changed: show that row's inheritance detail."""
+        self._actions.on_partner_selected()
 
     def _show_breeding_menu(self, pos) -> None:
         """Right-click a partner row to pin/unpin them as a keeper."""
-        item = self._table.itemAt(pos)
-        if item is None:
-            return
-        name_item = self._table.item(item.row(), 0)
-        data = name_item.data(Qt.ItemDataRole.UserRole) if name_item else None
-        if not data:
-            return
-        partner = data[0].partner
-        menu = QMenu(self)
-        label = ("Unpin - allow donation" if getattr(partner, "is_pinned", False)
-                 else "Pin for breeding")
-        action = menu.addAction(label)
-        chosen = menu.exec(self._table.viewport().mapToGlobal(pos))
-        if chosen is action:
-            self.set_pinned(partner, not getattr(partner, "is_pinned", False))
+        self._actions.show_breeding_menu(pos)
 
     def _on_partner_double(self, item: QTableWidgetItem) -> None:
-        data = item.data(Qt.ItemDataRole.UserRole)
-        if data:
-            row, _ = data
-            self.set_focus(row.partner)
+        """Double-click: analyse breeding from the partner's side instead."""
+        self._actions.on_partner_double(item)

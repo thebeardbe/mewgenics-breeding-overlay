@@ -332,12 +332,12 @@ def test_night_chance_warning_boundary_is_strict(make_bar, monkeypatch):
     rows = [pair(make_row(make_cat("Shy", 1), focus))]
     bar, _, _, _ = make_bar(rows=rows, focus=focus)
 
-    monkeypatch.setattr(_bm, "_night_chance",
+    monkeypatch.setattr(_bm, "night_chance",
                         lambda v, c=0.0: _LOW_NIGHT_CHANCE)
     bar.update_best()
     assert "⚠ breeds rarely" not in bar._btn_best.text()
 
-    monkeypatch.setattr(_bm, "_night_chance",
+    monkeypatch.setattr(_bm, "night_chance",
                         lambda v, c=0.0: _LOW_NIGHT_CHANCE - 1e-9)
     bar.update_best()
     assert "⚠ breeds rarely" in bar._btn_best.text()

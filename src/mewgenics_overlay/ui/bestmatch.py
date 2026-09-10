@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
 )
 
 from mewgenics_overlay.core.recommend import recommend as recommend_best
-from mewgenics_overlay.ui.partnertable import _night_chance
+from mewgenics_overlay.ui.partnertable import night_chance
 from mewgenics_overlay.ui.theme import wrap_tooltip as _wt
 
 _HIGH_RISK_PCT = 35.0        # banner appends a warning above this risk %
@@ -198,7 +198,7 @@ class BestMatchBar(QWidget):
         )
         if chosen.row.risk_pct > _HIGH_RISK_PCT:
             text += "   ⚠ high risk"
-        if _night_chance(chosen.row.game_compat, comfort) < _LOW_NIGHT_CHANCE:
+        if night_chance(chosen.row.game_compat, comfort) < _LOW_NIGHT_CHANCE:
             text += "   ⚠ breeds rarely"
         self._btn_best.setText(text)
         tool = "Why this pick:\n" + "\n".join(chosen.breakdown)

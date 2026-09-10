@@ -14,11 +14,9 @@ from mewgenics_overlay.core.maladies import (
     sexuality_label,
     side_text,
 )
+from mewgenics_overlay.core.recommend import better_stat_expectation
 from mewgenics_overlay.core.session import STAT_NAMES, PartnerRow, display_location
 from . import theme as _theme
-from mewgenics_overlay.vendor.save_parser import (
-    _stimulation_inheritance_weight as _better_stat_weight,
-)
 
 _COLS = ["Cat", "Family", "GenΔ", "Room", "Risk", "Night", "Exp/stat", "≥7", "Defects", "Note"]
 
@@ -117,7 +115,7 @@ _COL_TIP_PARAS = [
         "still around (not dead or donated).",
     ],
 ]
-_COL_TIPS = ["\n".join(paras) for paras in _COL_TIP_PARAS]
+COL_TIPS = ["\n".join(paras) for paras in _COL_TIP_PARAS]
 
 
 # ── column indexes (keep in sync with _COLS) ─────────────────────
@@ -229,7 +227,7 @@ def _fmt_chance(v: float, comfort: float = 0.0) -> str:
     Comfort-rich rooms can saturate the per-roll odds (chance → 100 % in the
     model); we display those as "≥95 %" rather than promising a guarantee.
     """
-    pct = _night_chance(v, comfort) * 100.0
+    pct = night_chance(v, comfort) * 100.0
     if pct >= CHANCE_DISPLAY_CAP:
         return f"≥{CHANCE_DISPLAY_CAP:.0f}%"
     return f"{pct:.0f}%"
@@ -241,34 +239,11 @@ def _roll_chance(v: float, comfort: float = 0.0) -> float:
     return max(0.0, min(1.0, roll))
 
 
-def _night_chance(v: float, comfort: float = 0.0) -> float:
+def night_chance(v: float, comfort: float = 0.0) -> float:
     """Chance the pair breeds on a given night: both of the game's two nightly
     rolls must succeed, so it is the per-roll chance squared."""
     roll = _roll_chance(v, comfort)
     return roll * roll
-
-
-def _better_stat_expectation(row, stimulation: float = 50.0):
-    """(expected, differing) over the 7 stats for a partner row.
-
-    ``expected`` is how many stats are expected to take the HIGHER parent's
-    value at this room Stimulation (the calculator's "expected better stats",
-    counted only over the stats the parents actually differ on); ``differing``
-    is that count. Wiki rule: each stat takes one parent's value with
-    P(better) = (100 + Stim) / (200 + |Stim|).
-    """
-    factors = row.pair_factors
-    if factors is None:
-        return None
-    proj = factors.projection
-    expected = 0.0
-    differing = 0
-    for s in STAT_NAMES:
-        lo, hi = proj.stat_ranges[s]
-        if hi > lo:
-            differing += 1
-            expected += _better_stat_weight(stimulation)
-    return expected, differing
 
 
 
@@ -440,7 +415,7 @@ class PartnerTableWidget(QTableWidget):
                 defects_text = _defects_summary(row, self._stim)
                 it_defects = QTableWidgetItem(defects_text)
                 it_defects.setToolTip(
-                    _theme.wrap_tooltip("\n".join(self._pair_malady_lines(row, self._stim))
+                    _theme.wrap_tooltip("\n".join(self.pair_malady_lines(row, self._stim))
                         or "Both parents clean.")
                 )
             it_note = QTableWidgetItem(_note_text(row, kids))
@@ -462,7 +437,7 @@ class PartnerTableWidget(QTableWidget):
                             "game won't attempt it.")
                 ))
                 proj = row.pair_factors.projection
-                better = _better_stat_expectation(row, self._stim)
+                better = better_stat_expectation(row, self._stim)
                 it_exp.setToolTip(
                     f"Expected offspring stat average: {row.expected_avg:.2f} / 7.\n"
                     + (f"The kitten takes the HIGHER of the two parents' "
@@ -502,7 +477,7 @@ class PartnerTableWidget(QTableWidget):
                 # night, amber below it (the game's own 0.05 *compat* gate is
                 # separate - it only decides whether attempts happen at all).
                 specials[COL_CHANCE] = (_theme.C_GOOD
-                                        if _night_chance(
+                                        if night_chance(
                                             row.game_compat,
                                             self._comfort) >= 0.05
                                         else _theme.C_WARN)
@@ -563,13 +538,13 @@ class PartnerTableWidget(QTableWidget):
             )
             lines.append(f"Expected kitten stats: {ranges}")
             lines.append(f"Expected ≥7 stats: {row.seven_plus_total:.1f}")
-            better = _better_stat_expectation(row, self._stim)
+            better = better_stat_expectation(row, self._stim)
             if better:
                 lines.append(
                     f"Takes the higher of the two parents' values in "
                     f"≈{better[0]:.1f} of {better[1]} differing stats"
                 )
-        malady = self._pair_malady_lines(row, self._stim)
+        malady = self.pair_malady_lines(row, self._stim)
         if malady:
             lines.append("")
             lines.extend(malady)
@@ -584,7 +559,7 @@ class PartnerTableWidget(QTableWidget):
         lines.append("Double-click to analyse breeding from this cat.")
         return _theme.wrap_tooltip("\n".join(lines))
 
-    def _pair_malady_lines(self, row: PartnerRow,
+    def pair_malady_lines(self, row: PartnerRow,
                            stimulation: float = 50.0,
                            effect_of=None) -> list[str]:
         """Inheritance of traits the parents ALREADY carry (disorders exact,

@@ -88,11 +88,26 @@ class WindowController(QObject):
         self._window.setWindowFlags(flags)
 
     def restore_geometry(self) -> None:
-        """Restore the last window rect, clamped to a visible screen."""
+        """Restore the last window rect, clamped to a visible screen.
+
+        ``config.load`` already normalises a stored rect, but the value can
+        also arrive injected (tests, an old settings dict), so it is coerced
+        and validated here too: anything unusable is ignored with a log line
+        instead of raising.
+        """
         rect = self._settings.get("window_rect")
-        if not (isinstance(rect, list) and len(rect) == 4):
+        if rect is None:
+            return                      # no remembered geometry - not an error
+        nums = None
+        if isinstance(rect, (list, tuple)) and len(rect) == 4:
+            try:
+                nums = [int(v) for v in rect]
+            except (TypeError, ValueError):
+                nums = None
+        if nums is None or nums[2] <= 0 or nums[3] <= 0:
+            log.warning("ignoring unusable window_rect %r", rect)
             return
-        r = QRect(*rect)
+        r = QRect(*nums)
         screens = QGuiApplication.screens()
         if any(r.intersects(s.availableGeometry()) for s in screens):
             self._window.setGeometry(r)

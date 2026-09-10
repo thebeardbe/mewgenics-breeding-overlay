@@ -30,6 +30,10 @@ from dataclasses import dataclass, field
 from typing import Callable, List, Optional
 
 from mewgenics_overlay.core.maladies import defect_inheritance_rows
+from mewgenics_overlay.core.session import STAT_NAMES
+from mewgenics_overlay.vendor.save_parser import (
+    _stimulation_inheritance_weight as _better_stat_weight,
+)
 
 W_SEVENS = 14.0           # per expected ≥7 stat (dominates the score)
 W_AVG = 2.0               # per point of expected stat average
@@ -55,6 +59,33 @@ def effect_stat_net(effect: str) -> int:
         if match.group(2).upper() in _STAT_CODES:
             total += value
     return total
+
+
+def better_stat_expectation(row, stimulation: float = 50.0):
+    """(expected, differing) over the 7 stats for a partner row.
+
+    ``expected`` is how many stats are expected to take the HIGHER parent's
+    value at this room Stimulation (the calculator's "expected better stats",
+    counted only over the stats the parents actually differ on); ``differing``
+    is that count. Wiki rule: each stat takes one parent's value with
+    P(better) = (100 + Stim) / (200 + |Stim|).
+
+    Pure maths over ``row.pair_factors``: lives in core so the UI modules
+    (partner table, action detail strip) share one implementation instead of
+    a widget owning it.
+    """
+    factors = row.pair_factors
+    if factors is None:
+        return None
+    proj = factors.projection
+    expected = 0.0
+    differing = 0
+    for s in STAT_NAMES:
+        lo, hi = proj.stat_ranges[s]
+        if hi > lo:
+            differing += 1
+            expected += _better_stat_weight(stimulation)
+    return expected, differing
 
 
 def _short(name: str) -> str:

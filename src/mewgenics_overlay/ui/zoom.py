@@ -59,11 +59,32 @@ class ZoomController(QObject):
     # ── state ──────────────────────────────────────────────────────────────
     @property
     def zoom(self) -> float:
-        return float(self._settings.get("zoom", ZOOM_DEFAULT) or ZOOM_DEFAULT)
+        """The stored zoom, always inside the allowed range.
+
+        ``config`` normalises the file, but the stored value still goes
+        through :meth:`clamp` on every read so a hand-edited
+        ``"zoom": 99`` can never reach the UI (nor the host callback).
+
+        A missing, ``None`` or otherwise falsy stored value (a stray
+        ``"zoom": 0`` loads as ``0.0``) means "no zoom was ever chosen" and
+        reads as the default 100%; clamping it would silently shrink the
+        overlay to :data:`ZOOM_MIN`.
+        """
+        try:
+            stored = float(self._settings.get("zoom"))
+        except (TypeError, ValueError):
+            stored = ZOOM_DEFAULT
+        if not stored:
+            stored = ZOOM_DEFAULT
+        return self.clamp(stored)
 
     @staticmethod
     def clamp(z: float) -> float:
-        """Round to 2 decimals and hold inside the usable zoom range."""
+        """Round to 2 decimals and hold inside the usable zoom range.
+
+        The single clamp every zoom path goes through: the state read above,
+        ``set_zoom`` (and therefore ``step``/``cycle``) and ``render``.
+        """
         return round(min(ZOOM_MAX, max(ZOOM_MIN, float(z))), 2)
 
     # ── user actions (wired to shortcuts / Settings buttons / the tray) ────
@@ -96,7 +117,7 @@ class ZoomController(QObject):
         self.render(z)
 
     def apply(self) -> None:
-        """Render the stored zoom at startup (no settings write)."""
+        """Render the stored (clamped) zoom at startup (no settings write)."""
         self.render(self.zoom)
 
     def handle_wheel(self, event) -> bool:
@@ -118,8 +139,11 @@ class ZoomController(QObject):
         """Rescale the app font (all widgets), then let the host restyle.
 
         The app font drives tables and labels; the host callback handles the
-        widgets that cache their own sizes or colours.
+        widgets that cache their own sizes or colours. The value is clamped
+        here as the last line of defence, so ``on_zoom`` is never handed an
+        out-of-range zoom whatever the caller passed.
         """
+        z = self.clamp(z)
         _theme.set_zoom(z)
         app = QApplication.instance()
         base = self._base_font or (app.font() if app is not None else None)

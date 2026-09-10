@@ -93,9 +93,26 @@ src/mewgenics_overlay/
   ui/
     theme.py              theme registry: "film" (Noir·Bright), "noir" (Noir·Dark),
                           C_* colour globals, STYLESHEET, risk_color, wrap_tooltip
-    palette.py            the main window (tabs, header, search, cat panel,
-                          partners table, Best match, room combo, pinning store,
-                          theme toggle, About dialog)
+    palette.py            main window coordinator (tabs, panel layout, signal wiring);
+                          delegates to the modules below
+    chrome.py             frameless top bar: drag grip, title/status, pin /
+                          click-through / hide buttons, zoom restyle
+    searchbox.py          cat search box + result dropdown (focus/clear state)
+    partnertable.py       partner table: sorting, rendering, tooltips, malady lines
+    focuspanel.py         focused-cat detail panel
+    bestmatch.py          Best-match banner + safe-mode toggle
+    partneractions.py     partner row selection text, pin menu, double-click refocus
+    roombar.py            room selector (Stimulation/Comfort from furniture)
+    savepanel.py          campaign save-slot cards + file picker
+    windowstate.py        frameless window state: geometry, pin/topmost,
+                          click-through, engage/hide, OS event hooks
+    zoom.py               ZoomController: clamp/step/cycle, persistence, Ctrl+wheel
+    themectl.py           ThemeController: theme choice, persistence, restyle order
+    reloader.py           ReloadCoordinator: watcher, debounced reload, partner
+                          jobs, generation tokens, UI-thread result drain
+    updatenotice.py       update-available button + check scheduling
+    aboutdialog.py        About dialog, credits, report URL, debug copy
+    pinning.py            per-save pinned/keep-list store with Gone pruning
     donations_tab.py      Donations tab: NPC dropdown, candidate table with
                           Donate?/Maybe/Keep ratings + reasons, pin context menu
     app.py                bootstrap: theme-from-config, tray, hotkey install,
@@ -164,6 +181,10 @@ Key invariants:
 | `test_location.py` | "Outside house", same-sex straight block |
 | `test_donations.py` | matrix factors, NPCS, rating, organ filters, pin |
 | `test_wiki_math.py` | formula pins vs mewgenicswiki.org calculator + SciresM gist + wiki.gg datamine (stat curve, ability breakpoints, inbreeding rolls, defect inheritance, sexuality averages, kinship escalation, compat/night rolls) — no save needed; a failure here is a vendor-drift alarm |
+| `test_savecontroller.py`, `test_reloader.py` | parse/reload coordination, generation tokens, UI-thread result drain |
+| `test_searchbox.py`, `test_chrome.py`, `test_roombar.py` | extracted UI modules: search, top bar, room selector |
+| `test_bestmatch.py`, `test_partneractions.py`, `test_pinning.py`, `test_savepanel.py` | best-match banner, partner row actions, per-save pin store, save slots |
+| `test_windowstate.py`, `test_zoom.py`, `test_themectl.py`, `test_updatenotice.py`, `test_aboutdialog.py` | frameless window state, zoom, themes, update notice, About/report helpers |
 
 Plus `scripts/gui_smoke.py` for the real UI offscreen.
 
@@ -198,7 +219,7 @@ Plus `scripts/gui_smoke.py` for the real UI offscreen.
 
 ## 8. Status / roadmap
 
-- Latest release: **v0.1.47**. Next: **v0.2.0** after tester review.
+- Latest release: **v0.1.51**. Next: **v0.2.0** after tester review.
 - Known gaps: per-NPC donation counters and Butch chapter progress are not
   recoverable from the save; Frank/retired is heuristic (abilities+stat
   gains); aggression is displayed for future fighter-room optimisation but
