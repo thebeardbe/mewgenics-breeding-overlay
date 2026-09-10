@@ -18,22 +18,18 @@ from __future__ import annotations
 
 import logging
 import os
-import sys
 import threading
-import time
 from typing import Optional
 
-from PySide6.QtCore import Qt, QEvent, QRect, QTimer, Signal
+from PySide6.QtCore import Qt, QTimer, Signal
 import mewgenics_overlay.ui.theme as _theme
 from PySide6.QtGui import (
     QFont,
-    QGuiApplication,
     QKeySequence,
     QShortcut,
 )
 from PySide6.QtWidgets import (
     QApplication,
-    QComboBox,
     QDialog,
     QFileDialog,
     QHBoxLayout,
@@ -58,27 +54,27 @@ from mewgenics_overlay.core.session import (
 from mewgenics_overlay.ui.savecontroller import SaveController
 from mewgenics_overlay.ui.chrome import TopBar
 from mewgenics_overlay.ui.focuspanel import FocusedCatPanel
+from mewgenics_overlay.ui.roombar import RoomBar
 from mewgenics_overlay.ui.searchbox import SearchBox
+from mewgenics_overlay.ui import windowstate as _win_state
+from mewgenics_overlay.ui.windowstate import WindowController
 
 # Partner-table pure core (columns, header tips, cell formatters) - moved to
 # ui/partnertable.py so the interactive widget can stay Qt-focused (step 2b).
 from .partnertable import (
     _COL_TIPS,
     _better_stat_expectation,
-    _night_chance,
     PartnerTableWidget,
 )
+
+# self-contained panels split out of this window (god-file steps 4 and 5)
+from .bestmatch import BestMatchBar
+from .updatenotice import UpdateNotice
 
 from . import config as cfg
 from .theme import wrap_tooltip as _wt
 from mewgenics_overlay import __version__
 from mewgenics_overlay.core.gameassets import GameAssets, locate_gpak
-from mewgenics_overlay.ui import update_check as _updates
-from mewgenics_overlay.core.stimulation import (
-    STIMULATION_DEFAULT,
-    room_env_map,
-)
-from mewgenics_overlay.core.recommend import recommend as recommend_best
 
 log = logging.getLogger("mewgenics_overlay.ui")
 
@@ -102,33 +98,20 @@ class PaletteWindow(QWidget):
         self._asset_lock = threading.Lock()
         self._table: Optional[PartnerTableWidget] = None  # built in _build_ui
         self._ui_busy = False
-        self._pinned = True               # mirror of the 📌 button state
-        self._click_through = False       # mouse passes through to the game
-        self._dialog_open = False         # modal dialog (file picker) open
         self._flag_applied = False        # non-Windows fallback guard
         self._ga: Optional[GameAssets] = None   # gpak effect tables (async)
         self._assets_started = False
         self._asset_result: Optional[GameAssets] = None
-        self._stim = STIMULATION_DEFAULT     # active breeding Stimulation
-        self._comfort = 0.0                  # active room Comfort (roll chance)
-        self._room_items: list = []          # combo entries (room, stim, comf)
 
-        self.setWindowTitle("Mewgenics Breeding Overlay")
-        flags = Qt.WindowType.FramelessWindowHint
-        # Pinning is done natively on Windows (SetWindowPos) and via compositor
-        # rules on Hyprland; only generic X11/Wayland keep the Qt flag, which
-        # re-creates the native window when toggled (Windows hides it -> the
-        # "can't find it anymore" bug).
-        if sys.platform != "win32" and not os.environ.get(
-                "HYPRLAND_INSTANCE_SIGNATURE"):
-            flags |= Qt.WindowType.WindowStaysOnTopHint
-        self.setWindowFlags(flags)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, False)
         self.resize(880, 600)
         self.setMinimumSize(620, 460)
-        self._restore_geometry()
-        self.setStyleSheet(_theme.stylesheet())
         self._build_ui()
+        # framing + geometry pose no native window until the first show
+        self._win.configure_frame()
+        self._win.restore_geometry()
+        self.setWindowTitle("Mewgenics Breeding Overlay")
+        self.setStyleSheet(_theme.stylesheet())
         self._wire_ui()
         self._poll = QTimer(self)
         self._poll.setInterval(120)
@@ -137,12 +120,12 @@ class PaletteWindow(QWidget):
         QShortcut(QKeySequence("Ctrl++"), self, activated=self._zoom_inc)
         QShortcut(QKeySequence("Ctrl+-"), self, activated=self._zoom_dec)
         QShortcut(QKeySequence("Ctrl+0"), self, activated=self._zoom_default)
-        QTimer.singleShot(2500, self._start_update_check)
+        QTimer.singleShot(2500, self._update_notice.start_check)
         # also re-check periodically while the overlay stays open (still
         # interval-gated, so it only hits GitHub when it should).
         self._update_timer = QTimer(self)
         self._update_timer.setInterval(60 * 60 * 1000)
-        self._update_timer.timeout.connect(self._start_update_check)
+        self._update_timer.timeout.connect(self._update_notice.start_check)
         self._update_timer.start()
 
         self._zoom_render(float(self._settings.get("zoom", 1.0) or 1.0))
@@ -198,48 +181,10 @@ class PaletteWindow(QWidget):
         """Read-only access to the header status label."""
         return self._chrome.status_label
 
-    # ── update availability check (read-only; no download) ────────────────
+    # ── update availability check (delegated to UpdateNotice) ─────────────
     def _set_update_check(self, on: bool) -> None:
         self._settings["check_for_updates"] = bool(on)
         cfg.save(self._settings)
-
-    def _start_update_check(self) -> None:
-        """Ask GitHub for the newest release at most once per window."""
-        if not self._settings.get("check_for_updates", True):
-            return
-        if not _updates.due(self._settings.get("last_update_check")):
-            return
-        now = time.time()
-        self._settings["last_update_check"] = now
-        cfg.save(self._settings)
-        log.info("checking for a new release (local %s)", __version__)
-
-        def work():
-            result = _updates.latest_release()
-            # Receiver = self (lives on the UI thread). Without a receiver,
-            # the timer is created in THIS worker thread, which has no event
-            # loop, so the update button would never appear.
-            QTimer.singleShot(0, self, lambda: self._show_update_available(result))
-
-        threading.Thread(target=work, name="update-check", daemon=True).start()
-
-    def _show_update_available(self, result) -> None:
-        if result is None:
-            return
-        remote, url = result
-        local = _updates.parse_version(__version__)
-        if remote <= local:
-            log.info("no newer release (local %s)", __version__)
-            return
-        self._update_url = url
-        label = f"v{'.'.join(str(x) for x in remote)}"
-        log.info("update available: %s -> %s", __version__, label)
-        self._btn_update.setText(f"\u2b07 {label} available")
-        self._btn_update.setVisible(True)
-
-    def _open_update(self) -> None:
-        import webbrowser
-        webbrowser.open(self._update_url or _updates.RELEASES_URL)
 
     def _maybe_start_assets(self) -> None:
         """Load resources.gpak effect tables off the UI thread (once)."""
@@ -280,12 +225,15 @@ class PaletteWindow(QWidget):
         # is a self-contained widget (ui/chrome.py); the actions it triggers
         # stay here. Extra actions live in the ⚙ Settings tab / tab corner.
         self._chrome = TopBar(
-            pinned=self._pinned,
-            click_through=self._click_through,
+            pinned=_win_state.PIN_DEFAULT,
+            click_through=_win_state.CLICK_THROUGH_DEFAULT,
             on_pin=self._toggle_pin,
             on_click_through=self._on_ct_clicked,
             on_hide=self._on_close_clicked,
         )
+        self._win = WindowController(
+            self, self._chrome, self._settings,
+            lambda: cfg.save(self._settings))
         outer.insertWidget(0, self._chrome)
 
         # search (owns its own line edit + results dropdown)
@@ -301,57 +249,42 @@ class PaletteWindow(QWidget):
         self._focus_panel = FocusedCatPanel()
         root.addWidget(self._focus_panel)
         row2 = QHBoxLayout()
-        room_lbl = QLabel("Breed room:")
-        room_lbl.setToolTip(_wt(
-            "The room where you plan to breed.\n"
-            "Its furniture changes two things in the numbers:\n"
-            "• Stimulation - decides how often kittens inherit the better "
-            "stat, and how likely a lone defect is to pass.\n"
-            "• Comfort - decides how often a breeding attempt actually "
-            "succeeds each night.\n"
-            "Until a room is chosen, a neutral Stimulation of 50 is assumed."
-        ))
-        self._room_combo = QComboBox()
-        self._room_combo.setToolTip(room_lbl.toolTip())
-        self._room_combo.setMinimumWidth(170)
-        self._room_combo.setEnabled(False)
-        self._room_combo.currentIndexChanged.connect(self._on_room_changed)
+        self._room_bar = RoomBar(
+            session_getter=lambda: self._session,
+            assets_getter=lambda: self._ga,
+            focus_getter=lambda: self._focus,
+            on_change=self._on_room_change,
+        )
         self._btn_swap = QPushButton("Hide blocked rows")
         self._btn_swap.setCheckable(True)
         self._btn_swap.setToolTip(_wt(
             "When checked, pairs that cannot breed (direct family, hater, "
             "sexuality blocks) are hidden instead of listed below."
         ))
-        row2.addWidget(room_lbl)
-        row2.addWidget(self._room_combo)
+        row2.addWidget(self._room_bar)
         row2.addStretch(1)
         row2.addWidget(self._btn_swap)
         _row_holder = QWidget()
         _row_holder.setLayout(row2)
         self._focus_panel.append_row(_row_holder)
 
-
-        # best-match banner (+ safe-mode switch)
-        best_row = QHBoxLayout()
-        self._btn_best = QPushButton("⭐ Best match")
-        self._btn_best.setObjectName("best")
-        self._btn_best.setToolTip("")
-        self._btn_best.setVisible(False)
-        self._best_row = None
-        self._safe_mode = False
-        self._btn_safe = QPushButton("🛡 Safe ≤ 15% risk")
-        self._btn_safe.setCheckable(True)
-        self._btn_safe.setToolTip(_wt(
-            "Limit the ⭐ Best match to partners that are low risk (15% or "
-            "less), so you only breed pairs that are unlikely to produce a "
-            "defective kitten.\n"
-            "If no partner is that safe, the normal 7s-first pick is shown "
-            "instead - clearly labelled."
-        ))
-        self._btn_safe.setVisible(False)
-        best_row.addWidget(self._btn_best, 1)
-        best_row.addWidget(self._btn_safe)
-        root.addLayout(best_row)
+        # best-match banner (+ safe-mode switch) - self-contained widget that
+        # reads the live rows/focus/room values through these callables.
+        self._best_bar = BestMatchBar(
+            on_select=self._on_best_selected,
+            rows_getter=lambda: self._rows,
+            focus_getter=lambda: self._focus,
+            stim_getter=self._stim_value,
+            comfort_getter=self._comfort_value,
+            malady_lines=lambda row, stim, effect: (
+                self._table._pair_malady_lines(row, stim, effect)),
+            effect_of=self._effect_for_name,
+            safe_risk_cap=lambda: self._to_float(
+                self._settings.get("safe_risk_cap", 15.0), 15.0,
+                floor=1.0, ceil=100.0),
+            spacing=_ROOT_SPACING,
+        )
+        root.addWidget(self._best_bar)
 
         # partners
         self._table = PartnerTableWidget(self)
@@ -379,20 +312,14 @@ class PaletteWindow(QWidget):
         self._donations_tab = DonationsTab(palette=self)
         tabs.addTab(self._donations_tab, "Donations")
         # the update notice sits on the right of the tab row
-        self._btn_update = QPushButton("")
-        self._btn_update.setVisible(False)
-        self._btn_update.setStyleSheet(
-            f"QPushButton {{ color:{_theme.C_GOOD}; font-weight:600; "
-            f"border:1px solid {_theme.C_GRIP}; border-radius:10px; "
-            "padding:0 8px; }}")
-        self._btn_update.clicked.connect(self._open_update)
-        self._update_url = ""
+        self._update_notice = UpdateNotice(
+            self._settings, lambda: cfg.save(self._settings))
 
         corner = QWidget()
         cl = QHBoxLayout(corner)
         cl.setContentsMargins(0, 0, 4, 0)
         cl.setSpacing(2)
-        cl.addWidget(self._btn_update)
+        cl.addWidget(self._update_notice)
         tabs.setCornerWidget(corner, Qt.Corner.TopRightCorner)
 
         # ⚙ Settings tab (save / appearance / zoom / help)
@@ -433,103 +360,55 @@ class PaletteWindow(QWidget):
         self._table.customContextMenuRequested.connect(self._show_breeding_menu)
         self._table.horizontalHeader().sectionClicked.connect(self._on_header_clicked)
         self._btn_swap.toggled.connect(self._recompute_partners)
-        self._btn_best.clicked.connect(self._on_best_clicked)
-        self._btn_safe.toggled.connect(self._on_safe_toggled)
         # watcher thread -> UI thread (queued automatically by the signal)
         self._save_changed.connect(self._on_save_changed)
 
-    # ── window behaviour: pin, click-through, summoning ────────────────────
-    def _toggle_pin(self, checked: bool) -> None:
-        """Pin toggle. Never re-creates the native window on Windows."""
-        self._pinned = bool(checked)
-        self._chrome.set_pinned(self._pinned)
-        if sys.platform == "win32":
-            self._set_topmost_win32(self._pinned)
-        elif not os.environ.get("HYPRLAND_INSTANCE_SIGNATURE"):
-            # generic X11/Wayland: Qt flag fallback (may flash once)
-            self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint,
-                               self._pinned)
-            self.show()
-        # Hyprland: stacking is controlled by compositor rules - visual only.
+    # ── window behaviour (delegated to WindowController) ───────────────────
+    @property
+    def _pinned(self) -> bool:
+        return self._win.pinned
 
-    def _set_topmost_win32(self, on: bool) -> None:
-        """Set/unset always-on-top without touching window flags (no HWND
-        re-creation -> the overlay can't get 'lost')."""
-        try:
-            import ctypes
-            hwnd = int(self.winId())
-            HWND_TOPMOST, HWND_NOTOPMOST = -1, -2
-            SWP_NOSIZE, SWP_NOMOVE, SWP_NOACTIVATE = 0x0001, 0x0002, 0x0010
-            ctypes.windll.user32.SetWindowPos(
-                hwnd,
-                HWND_TOPMOST if on else HWND_NOTOPMOST,
-                0, 0, 0, 0,
-                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
-            )
-        except Exception:
-            pass
+    @property
+    def _click_through(self) -> bool:
+        return self._win.click_through
+
+    @property
+    def _dialog_open(self) -> bool:
+        return self._win.dialog_open
+
+    @_dialog_open.setter
+    def _dialog_open(self, on: bool) -> None:
+        self._win.dialog_open = on
+
+    def _toggle_pin(self, checked: bool) -> None:
+        self._win.toggle_pin(checked)
 
     def _on_ct_clicked(self, checked: bool) -> None:
-        self.set_click_through(checked)
+        self._win.on_click_through_clicked(checked)
 
     def set_click_through(self, on: bool) -> None:
-        """When ON, mouse events pass through to the game underneath."""
-        self._click_through = bool(on)
-        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents,
-                          self._click_through)
-        self._chrome.set_click_through(self._click_through)
+        self._win.set_click_through(on)
 
     def _engage(self) -> None:
-        """Show the palette and make it interactive (hotkey/tray summon)."""
-        self.set_click_through(False)
-        self.show()
-        self.raise_()
-        self.activateWindow()
-        self.setFocus()
+        self._win.engage()
 
     def toggle_activate(self) -> None:
-        """Hotkey/tray cycle: hidden -> engage; passive -> engage; active -> hide."""
-        if not self.isVisible():
-            self._engage()
-        elif self._click_through:
-            self._engage()
-        else:
-            self.hide()
+        self._win.toggle_activate()
 
     def showEvent(self, event):  # noqa: N802 (Qt API)
         super().showEvent(event)
-        if sys.platform == "win32":
-            self._set_topmost_win32(self._pinned)
+        self._win.on_show()
 
     def hideEvent(self, event):  # noqa: N802 (Qt API)
-        self._save_geometry()
+        self._win.on_hide()
         super().hideEvent(event)
 
     def changeEvent(self, event):  # noqa: N802 (Qt API)
-        """The moment the palette loses focus (user clicks the game), stop
-        intercepting mouse input: switch to click-through automatically so the
-        game always receives clicks in this area. Summon it again with
-        Ctrl+Shift+B / tray to interact. Skipped while a modal dialog is open."""
-        if (event.type() == QEvent.Type.WindowDeactivate
-                and not self._dialog_open
-                and self.isVisible() and not self._click_through):
-            self.set_click_through(True)
+        self._win.on_change(event)
         super().changeEvent(event)
 
-    def _restore_geometry(self) -> None:
-        """Restore the last window rect, clamped to a visible screen."""
-        rect = self._settings.get("window_rect")
-        if not (isinstance(rect, list) and len(rect) == 4):
-            return
-        r = QRect(*rect)
-        screens = QGuiApplication.screens()
-        if any(r.intersects(s.availableGeometry()) for s in screens):
-            self.setGeometry(r)
-
     def _save_geometry(self) -> None:
-        g = self.geometry()
-        self._settings["window_rect"] = [g.x(), g.y(), g.width(), g.height()]
-        cfg.save(self._settings)
+        self._win.save_geometry()
 
     def _on_close_clicked(self) -> None:
         """Hide when a tray icon can bring us back; otherwise quit."""
@@ -619,8 +498,9 @@ class PaletteWindow(QWidget):
         # one), so it must be refreshed too or nothing visually changes.
         self.setStyleSheet(_theme.stylesheet())
         from mewgenics_overlay.ui.comboarrow import style_combo
-        if getattr(self, "_room_combo", None) is not None:
-            style_combo(self._room_combo, _theme.C_MUTED)
+        room_bar = getattr(self, "_room_bar", None)
+        if room_bar is not None:
+            room_bar.restyle()
         donations = getattr(self, "_donations_tab", None)
         npc_combo = getattr(donations, "_combo", None)
         if npc_combo is not None:
@@ -919,7 +799,7 @@ class PaletteWindow(QWidget):
             self._asset_result = None
         if assets is not None:
             self._ga = assets if assets.ok else None
-            self._refresh_room_combo()        # room Stimulation now available
+            self._room_bar.refresh()          # room Stimulation now available
             if self._rows:
                 self._redraw_table()          # effects now available in tooltips
             if self._focus is not None:
@@ -960,11 +840,11 @@ class PaletteWindow(QWidget):
         else:
             self._show_focus(self._focus)
             self._schedule_partners()
-        self._refresh_room_combo()
+        self._room_bar.refresh()
         self._sync_pins()
         self._donations_tab.refresh(self._session)
 
-    # ── breeding-room Stimulation ──────────────────────────────────────────
+    # ── breeding-room Stimulation (delegated to RoomBar) ───────────────────
     @staticmethod
     def _to_float(raw, default: float, floor: Optional[float] = None,
                   ceil: Optional[float] = None) -> float:
@@ -981,76 +861,15 @@ class PaletteWindow(QWidget):
     def _stim_value(self) -> float:
         """Active Stimulation for pair math (selected room's furniture value
         or the default 50 when no room is chosen)."""
-        return self._to_float(self._stim, STIMULATION_DEFAULT)
+        return self._room_bar.stim_value()
 
     def _comfort_value(self) -> float:
-        return self._to_float(self._comfort, 0.0, floor=0.0)
+        return self._room_bar.comfort_value()
 
-    def _selected_room(self):
-        idx = self._room_combo.currentIndex()
-        if 0 <= idx < len(self._room_items):
-            entry = self._room_items[idx]
-            return entry[0] if entry else None
-        return None
-
-    def _refresh_room_combo(self) -> None:
-        """Rebuild the room list from furniture (needs resources.gpak defs)."""
-        prev_room = self._selected_room()
-        rooms_env: dict = {}
-        if self._session is not None and self._session.data is not None \
-                and self._ga is not None:
-            fb = self._session.data.furniture_by_room or {}
-            if fb and self._ga.furniture_data:
-                rooms_env = room_env_map(fb, self._ga.furniture_data)
-        self._room_combo.blockSignals(True)
-        self._room_combo.clear()
-        self._room_items = []
-        self._room_combo.addItem("- Stim 50 (no room)")
-        self._room_items.append(None)
-        for room in sorted(rooms_env, key=lambda r: -rooms_env[r][0]):
-            stim, comfort = float(rooms_env[room][0]), float(rooms_env[room][1])
-            label = f"{room} - Stim {stim:g}"
-            if comfort:
-                label += f", Comf {comfort:g}"
-            self._room_combo.addItem(label)
-            self._room_items.append((room, stim, comfort))
-        self._room_combo.setEnabled(bool(rooms_env))
-        # prefer the previous pick, else the focused cat's room
-        target = None
-        if prev_room is not None and prev_room in rooms_env:
-            target = prev_room
-        elif self._focus is not None and self._focus.room in rooms_env:
-            target = self._focus.room
-        idx = 0
-        for i, entry in enumerate(self._room_items):
-            if entry is not None and entry[0] == target:
-                idx = i
-                break
-        old_stim = self._stim_value()
-        old_comf = self._comfort_value()
-        self._room_combo.setCurrentIndex(idx)
-        self._room_combo.blockSignals(False)
-        self._apply_room_selection()
-        if self._focus is not None and (self._stim_value() != old_stim
-                                        or self._comfort_value() != old_comf):
-            self._schedule_partners()   # numbers change with Stim/Comfort
-
-    def _on_room_changed(self, index: int) -> None:
-        self._apply_room_selection()
+    def _on_room_change(self) -> None:
+        """RoomBar selection/refresh changed the numbers: recompute rows."""
         if self._focus is not None:
             self._schedule_partners()
-
-    def _apply_room_selection(self) -> None:
-        entry = None
-        idx = self._room_combo.currentIndex()
-        if 0 <= idx < len(self._room_items):
-            entry = self._room_items[idx]
-        if entry is None:
-            self._stim = STIMULATION_DEFAULT
-            self._comfort = 0.0
-        else:
-            self._stim = float(entry[1])
-            self._comfort = float(entry[2])
 
     def set_focus_key(self, db_key: int) -> None:
         """Programmatic focus (used by the future in-game bridge)."""
@@ -1093,9 +912,7 @@ class PaletteWindow(QWidget):
     def _clear_focus(self) -> None:
         self._focus = None
         self._focus_panel.clear()
-        self._best_row = None
-        self._btn_best.setVisible(False)
-        self._btn_safe.setVisible(False)
+        self._best_bar.clear()
         self._table.setRowCount(0)
         self._detail.setText("Select a partner row for inheritance detail.")
 
@@ -1117,88 +934,25 @@ class PaletteWindow(QWidget):
         self._redraw_table()
         self._update_best()
 
-    # ── sorting ────────────────────────────────────────────────────────────
-    def _on_safe_toggled(self, checked: bool) -> None:
-        self._safe_mode = bool(checked)
-        self._update_best()
-
+    # ── best match (delegated to BestMatchBar) ─────────────────────────────
     def _update_best(self) -> None:
-        """Recompute and show the ⭐ best-match banner for the focused cat."""
-        if not self._rows or self._focus is None:
-            self._best_row = None
-            self._btn_best.setVisible(False)
-            self._btn_safe.setVisible(False)
-            return
-        compat = [r for r, _ in self._rows if r.compatible]
-        if not compat:
-            self._best_row = None
-            self._btn_best.setVisible(False)
-            self._btn_safe.setVisible(False)
-            return
-        effect = self._effect_for_name
-        overall = recommend_best(compat, self._focus, effect_of=effect,
-                                 stimulation=self._stim_value(),
-                                 comfort=self._comfort_value())
-        chosen = overall
-        fallback = False
-        if self._safe_mode:
-            cap = self._to_float(self._settings.get("safe_risk_cap", 15.0),
-                                 15.0, floor=1.0, ceil=100.0)
-            safe_rows = [r for r in compat if r.risk_pct <= cap]
-            safe_rec = (recommend_best(safe_rows, self._focus,
-                                       effect_of=effect,
-                                       stimulation=self._stim_value(),
-                                       comfort=self._comfort_value())
-                        if safe_rows else recommend_best([], self._focus))
-            if safe_rec.row is not None:
-                chosen = safe_rec
-            elif overall.row is not None:
-                chosen = overall            # fall back to the 7s-first pick
-                fallback = True
-        self._best_row = chosen.row
-        self._btn_safe.setVisible(True)
-        if chosen.row is None:
-            self._btn_best.setVisible(False)
-            return
-        partner = chosen.row.partner
-        prefix = "⭐ Best match"
-        if self._safe_mode and not fallback:
-            prefix = "🛡 Safe best"
-        elif fallback:
-            prefix = "⭐ Best (no ≤15% risk partner)"
-        text = (
-            f"{prefix}: {partner.name} - Risk {chosen.row.risk_pct:.1f}% · "
-            f"≥7 ≈{chosen.row.seven_plus_total:.1f} · "
-            f"COI {chosen.row.coi * 100:.1f}%"
-        )
-        if chosen.row.risk_pct > 35:
-            text += "   ⚠ high risk"
-        if _night_chance(chosen.row.game_compat,
-                         self._comfort_value()) < 0.10:
-            text += "   ⚠ breeds rarely"
-        self._btn_best.setText(text)
-        tool = "Why this pick:\n" + "\n".join(chosen.breakdown)
-        malady = self._table._pair_malady_lines(
-            chosen.row, self._stim_value(), self._effect_for_name)
-        if malady:
-            tool += "\n\n" + "\n".join(malady)
-        tool += "\n\nClick to select this partner."
-        self._btn_best.setToolTip(_wt(tool))
-        self._btn_best.setVisible(True)
+        """Delegate the ⭐ banner to BestMatchBar - it reads the live rows,
+        focus and room Stimulation/Comfort through the callables wired in
+        ``_build_ui``."""
+        self._best_bar.update_best()
 
-    def _on_best_clicked(self) -> None:
-        if self._best_row is None:
-            return
-        target = self._best_row.partner.db_key
+    def _on_best_selected(self, db_key: int) -> None:
+        """The ⭐ pick was clicked: select and reveal that partner row."""
         for ri in range(self._table.rowCount()):
             it = self._table.item(ri, 0)
             data = it.data(Qt.ItemDataRole.UserRole) if it else None
-            if data and data[0].partner.db_key == target:
+            if data and data[0].partner.db_key == db_key:
                 self._table.setCurrentCell(ri, 0)
                 self._table.scrollToItem(it)
                 self._on_partner_selected()
                 return
 
+    # ── sorting ────────────────────────────────────────────────────────────
     def _on_header_clicked(self, col: int) -> None:
         """Tri-state sort: asc -> desc -> back to default order."""
         self._table.toggle_sort(col)
