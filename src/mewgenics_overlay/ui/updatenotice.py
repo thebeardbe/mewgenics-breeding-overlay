@@ -2,7 +2,7 @@
 
 Extracted from ``PaletteWindow`` (god-file split, step 4): owns the whole
 update-check UI side - the hidden corner button, the interval-gated background
-GitHub check and the "open the release page" click.
+GitHub check and the "open the download page" click.
 
 It is window-agnostic: the live settings dict and the "persist it" callable
 arrive from the host, so the check interval / opt-out keys are read and
@@ -20,6 +20,7 @@ from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QPushButton, QWidget
 
 from mewgenics_overlay import __version__
+from mewgenics_overlay.ui import links as _links
 from mewgenics_overlay.ui import theme as _theme
 from mewgenics_overlay.ui import update_check as _updates
 
@@ -29,8 +30,8 @@ log = logging.getLogger("mewgenics_overlay.ui")
 class UpdateNotice(QPushButton):
     """Hidden-by-default button that appears when a newer release exists.
 
-    Hidden until the check finds a newer tag; clicking it opens that release
-    page in the system browser. Never downloads anything.
+    Hidden until the check finds a newer tag; clicking it opens the website
+    download section in the system browser. Never downloads anything.
     """
 
     def __init__(self, settings: dict, save_settings: Callable[[], None],
@@ -38,8 +39,9 @@ class UpdateNotice(QPushButton):
         super().__init__("", parent)
         self._settings = settings
         self._save_settings = save_settings
-        self._url = ""
         self.setVisible(False)
+        self.setToolTip("Open the download page in your browser\n"
+                        "(Windows and Linux builds are listed there)")
         self.setStyleSheet(
             f"QPushButton {{ color:{_theme.C_GOOD}; font-weight:600; "
             f"border:1px solid {_theme.C_GRIP}; border-radius:10px; "
@@ -67,15 +69,13 @@ class UpdateNotice(QPushButton):
 
         threading.Thread(target=work, name="update-check", daemon=True).start()
 
-    def _show_update_available(self, result) -> None:
-        if result is None:
+    def _show_update_available(self, remote) -> None:
+        if remote is None:
             return
-        remote, url = result
         local = _updates.parse_version(__version__)
         if remote <= local:
             log.info("no newer release (local %s)", __version__)
             return
-        self._url = url
         label = f"v{'.'.join(str(x) for x in remote)}"
         log.info("update available: %s -> %s", __version__, label)
         self.setText(f"\u2b07 {label} available")
@@ -83,4 +83,4 @@ class UpdateNotice(QPushButton):
 
     def _open_update(self) -> None:
         import webbrowser
-        webbrowser.open(self._url or _updates.RELEASES_URL)
+        webbrowser.open(_links.DOWNLOAD_URL)

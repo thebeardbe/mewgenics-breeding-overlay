@@ -1,9 +1,10 @@
 """Release update check for the overlay.
 
 Read-only network call on a background thread: asks GitHub for the latest
-release tag and returns (version, release_url). Never downloads anything -
-the UI offers a link to the release page. Failures are quiet (debug-level),
-so a missing network connection never bothers the user.
+release tag and returns the parsed version. Never downloads anything - the UI
+links to the website download section (``ui/links.DOWNLOAD_URL``). Failures
+are quiet (debug-level), so a missing network connection never bothers the
+user.
 
 Run at most once per CHECK_INTERVAL by the caller (window startup).
 """
@@ -20,9 +21,13 @@ from typing import Optional, Tuple
 
 log = logging.getLogger("mewgenics_overlay.update")
 
-# github "latest" always resolves to the newest *non-prerelease* tag.
+# github "latest" always resolves to the newest *non-prerelease* tag. The
+# website caches that tag itself, so the GitHub API stays the discovery
+# source for the version number.
 UPDATE_API_URL = ("https://api.github.com/repos/thebeardbe/"
                   "mewgenics-breeding-overlay/releases/latest")
+# Plain release page: the parse fallback when the API is rate-limited; its
+# redirect target carries the tag.
 RELEASES_URL = ("https://github.com/thebeardbe/"
                 "mewgenics-breeding-overlay/releases/latest")
 # check interval in seconds; env override (minutes) exists for testing/demo
@@ -47,18 +52,19 @@ def is_newer(local: str, remote: str) -> bool:
 
 def latest_release(url: str = UPDATE_API_URL,
                    timeout: float = REQUEST_TIMEOUT
-                   ) -> Optional[Tuple[Version, str]]:
-    """Return (version, release_url) for the newest release, or None.
+                   ) -> Optional[Version]:
+    """Return the newest release version, or None when nothing was found.
 
     Primary: the GitHub API. Fallback: the plain /releases/latest page
     (follows the redirect to the tag URL), which is not subject to the API
     rate limit - so a rate-limited check still tells the user an update
-    exists instead of silently going quiet.
+    exists instead of silently going quiet. Only the version is returned; the
+    update button always opens the website download section.
     """
     if url == UPDATE_API_URL:
-        tag, html = _api_latest(timeout)
+        tag = _api_latest(timeout)
         if tag is not None:
-            return tag, html
+            return tag
     # fallback: read the final redirect target of /releases/latest
     try:
         req = urllib.request.Request(
@@ -68,13 +74,14 @@ def latest_release(url: str = UPDATE_API_URL,
         m = re.search(r"/tag/v?([0-9][A-Za-z0-9._-]*)$", final)
         if m:
             log.info("latest release via page: %s", final)
-            return parse_version(m.group(1)), final
+            return parse_version(m.group(1))
     except Exception as exc:
         log.debug("update html fallback failed: %s", exc)
     return None
 
 
-def _api_latest(timeout: float):
+def _api_latest(timeout: float) -> Optional[Version]:
+    """The newest tag from the GitHub API, or None when the call failed."""
     try:
         req = urllib.request.Request(
             UPDATE_API_URL,
@@ -83,13 +90,12 @@ def _api_latest(timeout: float):
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             data = json.loads(resp.read())
         tag = str(data.get("tag_name") or "")
-        html = str(data.get("html_url") or RELEASES_URL)
         if not tag:
-            return None, None
-        return parse_version(tag), html
+            return None
+        return parse_version(tag)
     except Exception as exc:  # offline / rate-limited: fall back quietly
         log.debug("update API check failed: %s", exc)
-        return None, None
+        return None
 
 
 def due(last_check: Optional[float], now: Optional[float] = None) -> bool:

@@ -114,6 +114,7 @@ src/mewgenics_overlay/
     reloader.py           ReloadCoordinator: watcher, debounced reload, partner
                           jobs, generation tokens, UI-thread result drain
     updatenotice.py       update-available button + check scheduling
+    links.py              the project website URLs (site, #download, /report)
     aboutdialog.py        About dialog, credits, report URL, debug copy
     pinning.py            per-save pinned/keep-list store with Gone pruning
     donations_tab.py      Donations tab: NPC dropdown, candidate table with
@@ -222,7 +223,7 @@ Plus `scripts/gui_smoke.py` for the real UI offscreen.
 
 ## 8. Status / roadmap
 
-- Latest release: **v0.1.52** (complete PaletteWindow god-file refactor). Next: **v0.2.0** after tester review.
+- Latest release: **v0.2.0** (website download/report links; complete PaletteWindow refactor). Next: **v0.2.1** with the Windows tester's outstanding remark.
 - Known gaps: per-NPC donation counters and Butch chapter progress are not
   recoverable from the save; Frank/retired is heuristic (abilities+stat
   gains); aggression is displayed for future fighter-room optimisation but

@@ -26,7 +26,7 @@ No Python or install step is needed for the binary builds — download, run, don
 
 ### Windows
 
-1. Download **`MewgenicsOverlay.exe`** from the [Releases](https://github.com/thebeardbe/mewgenics-breeding-overlay/releases) page.
+1. Download **`MewgenicsOverlay.exe`** from the [download section](https://mewgenics.thebeard.be/#download) of the project website (the files themselves are hosted on GitHub Releases).
 2. Double-click it and press **Run anyway** when prompted (see below).
 3. Launch Mewgenics, and summon the overlay from anywhere with **`Ctrl+Shift+B`** — or right-click its tray icon.
 
@@ -34,7 +34,7 @@ No Python or install step is needed for the binary builds — download, run, don
 
 ### Linux (Arch, Ubuntu, Fedora, …)
 
-1. Download **`MewgenicsOverlay`** from the [Releases](https://github.com/thebeardbe/mewgenics-breeding-overlay/releases) page.
+1. Download **`MewgenicsOverlay`** from the [download section](https://mewgenics.thebeard.be/#download) of the project website (the files themselves are hosted on GitHub Releases).
 2. Make it executable and run it:
 
 ```bash
@@ -100,8 +100,19 @@ PYTHONPATH=src python -m mewgenics_overlay.cli donate
 ## Update check
 
 On start (and every few hours while running) the app asks GitHub whether a
-newer release exists and shows a download button if so. It sends no data and never downloads anything automatically - you can turn it off in
+newer release exists and shows a **⬇ update** button if so. It sends no data and
+never downloads anything automatically - the button just opens the
+[download section](https://mewgenics.thebeard.be/#download) of the project
+website. You can turn the check off in
 **Settings → Check for updates on start**.
+
+## Feedback & bug reports
+
+Bug reports and feature requests go through the form at
+[mewgenics.thebeard.be/report](https://mewgenics.thebeard.be/report) - the
+**Report a problem** button in the About dialog opens it directly, and
+**Copy debug info** puts the version, save path and OS details on your clipboard
+for pasting into the report.
 
 ## Save safety
 

@@ -28,12 +28,11 @@ from PySide6.QtWidgets import (
 )
 
 from mewgenics_overlay import __version__
+from mewgenics_overlay.ui.links import REPORT_URL
 
-# Fallback target for the report button whenever settings carry no valid
-# report_url. The self-hosted Bugbox service is reached through the
-# report_url setting instead - see ui/config.py.
-DEFAULT_REPORT_URL = (
-    "https://github.com/thebeardbe/mewgenics-breeding-overlay/issues")
+# Default target for the report button: the self-hosted Bugbox report form,
+# used whenever settings carry no valid report_url override (see ui/config.py).
+DEFAULT_REPORT_URL = REPORT_URL
 
 
 def report_url(configured: Optional[str] = None) -> str:

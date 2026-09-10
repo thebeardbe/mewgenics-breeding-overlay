@@ -38,6 +38,7 @@ pytest.importorskip("PySide6")
 from PySide6.QtWidgets import QApplication, QWidget  # noqa: E402
 
 from mewgenics_overlay import __version__  # noqa: E402
+from mewgenics_overlay.ui import links as _links  # noqa: E402
 from mewgenics_overlay.ui import update_check as _updates  # noqa: E402
 from mewgenics_overlay.ui import updatenotice as _un  # noqa: E402
 from mewgenics_overlay.ui.updatenotice import UpdateNotice  # noqa: E402
@@ -45,7 +46,6 @@ from mewgenics_overlay.ui.updatenotice import UpdateNotice  # noqa: E402
 _LOCAL = _updates.parse_version(__version__)
 _NEWER = (_LOCAL[0], _LOCAL[1], _LOCAL[2] + 1)
 _NEWER_LABEL = "v" + ".".join(str(x) for x in _NEWER)
-_RELEASE_URL = "https://example.invalid/releases/tag/v999"
 
 
 # ── fakes / helpers ────────────────────────────────────────────────────────
@@ -127,9 +127,14 @@ def test_notice_starts_hidden_and_silent(make_notice):
 
     assert not notice.isVisible()
     assert notice.text() == ""
-    assert notice._url == ""
     assert settings == {}
     assert saves == []
+
+
+def test_notice_tooltip_points_at_the_download_page(make_notice):
+    notice, _, _ = make_notice()
+
+    assert "download page" in notice.toolTip()
 
 
 # ── 2. opt-out and interval gating ─────────────────────────────────────────
@@ -203,7 +208,8 @@ def test_exactly_at_the_interval_boundary_is_due(make_notice, sync_threads,
 # ── 3. newer vs older/equal release ────────────────────────────────────────
 def test_newer_release_shows_the_button_with_expected_text(
         make_notice, sync_threads, fetch, qapp):
-    fetch.result = (_NEWER, _RELEASE_URL)
+    # ``latest_release`` now returns the bare version tuple, no URL pair.
+    fetch.result = _NEWER
     notice, settings, saves = make_notice()
 
     notice.start_check()
@@ -212,16 +218,15 @@ def test_newer_release_shows_the_button_with_expected_text(
     assert notice.isVisible()
     assert _NEWER_LABEL in notice.text()
     assert "available" in notice.text()
-    assert notice._url == _RELEASE_URL
 
 
-def test_newer_release_via_show_available_sets_url(make_notice):
+def test_newer_release_via_show_available_shows_the_button(make_notice):
     notice, _, _ = make_notice()
 
-    notice._show_update_available((_NEWER, _RELEASE_URL))
+    notice._show_update_available(_NEWER)
 
     assert notice.isVisible()
-    assert notice._url == _RELEASE_URL
+    assert _NEWER_LABEL in notice.text()
 
 
 @pytest.mark.parametrize("remote", [
@@ -233,10 +238,9 @@ def test_newer_release_via_show_available_sets_url(make_notice):
 def test_equal_or_older_release_is_ignored(make_notice, remote):
     notice, _, _ = make_notice()
 
-    notice._show_update_available((remote, _RELEASE_URL))
+    notice._show_update_available(remote)
 
     assert not notice.isVisible()
-    assert notice._url == ""
     assert notice.text() == ""
 
 
@@ -246,7 +250,7 @@ def test_none_result_is_ignored(make_notice):
     notice._show_update_available(None)
 
     assert not notice.isVisible()
-    assert notice._url == ""
+    assert notice.text() == ""
 
 
 def test_start_check_with_no_result_stays_hidden(make_notice, sync_threads,
@@ -261,27 +265,29 @@ def test_start_check_with_no_result_stays_hidden(make_notice, sync_threads,
     assert fetch.calls == 1
 
 
-# ── 4. click opens the release page (never a real browser) ─────────────────
-def test_click_opens_the_stored_release_url(make_notice, monkeypatch):
+# ── 4. click opens the website download page (never a real browser) ───────
+def test_click_opens_the_website_download_url(make_notice, monkeypatch):
     opened = []
     monkeypatch.setattr(webbrowser, "open", opened.append)
     notice, _, _ = make_notice()
-    notice._show_update_available((_NEWER, _RELEASE_URL))
+    notice._show_update_available(_NEWER)
 
     notice.click()
 
-    assert opened == [_RELEASE_URL]
+    # The button always opens the website download section, regardless of the
+    # version the check reported.
+    assert opened == [_links.DOWNLOAD_URL]
 
 
-def test_click_without_a_result_opens_the_releases_page(make_notice,
-                                                        monkeypatch):
+def test_click_without_a_result_opens_the_download_url(make_notice,
+                                                       monkeypatch):
     opened = []
     monkeypatch.setattr(webbrowser, "open", opened.append)
     notice, _, _ = make_notice()
 
     notice.click()
 
-    assert opened == [_updates.RELEASES_URL]
+    assert opened == [_links.DOWNLOAD_URL]
 
 
 def test_constructing_the_notice_opens_nothing(make_notice, monkeypatch):

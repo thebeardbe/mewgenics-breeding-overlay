@@ -24,9 +24,9 @@ DEFAULTS = {
     "include_adventure": True,    # consider Adventure cats as partners
     "order": "risk",            # partner sort: "risk" (safe first) or "quality"
     "max_partners": 100,
-    # Where the About-box "Report a problem" button points. Defaults to the
-    # GitHub issues page; point it at your own Bugbox (https://<domain>/report)
-    # once deployed so players skip the GitHub account entirely.
+    # Where the About-box "Report a problem" button points. None uses the
+    # built-in default (the self-hosted Bugbox form); override it to point at
+    # a different report form.
     "report_url": None,
 }
 

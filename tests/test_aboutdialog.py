@@ -23,6 +23,7 @@ from PySide6.QtWidgets import QApplication, QPushButton  # noqa: E402
 
 from mewgenics_overlay import __version__  # noqa: E402
 from mewgenics_overlay.ui import aboutdialog as ad  # noqa: E402
+from mewgenics_overlay.ui import links as _links  # noqa: E402
 from mewgenics_overlay.ui.aboutdialog import (  # noqa: E402
     DEFAULT_REPORT_URL,
     AboutDialog,
@@ -53,7 +54,11 @@ def opener(monkeypatch):
 
 
 # ── 1. report_url ──────────────────────────────────────────────────────────
-def test_report_url_defaults_to_the_github_issues_page():
+def test_report_url_defaults_to_the_website_report_form():
+    # The default comes from ui/links.py, the single home for site URLs.
+    assert DEFAULT_REPORT_URL == _links.REPORT_URL
+    assert DEFAULT_REPORT_URL == _links.SITE_URL + "report"
+    assert "github.com" not in DEFAULT_REPORT_URL
     assert report_url() == DEFAULT_REPORT_URL
     assert report_url(None) == DEFAULT_REPORT_URL
     assert report_url("") == DEFAULT_REPORT_URL
