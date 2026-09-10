@@ -23,10 +23,43 @@ from mewgenics_overlay.core.recommend import recommend as recommend_best
 from mewgenics_overlay.ui.partnertable import _night_chance
 from mewgenics_overlay.ui.theme import wrap_tooltip as _wt
 
-_SAFE_LABEL = "🛡 Safe ≤ 15% risk"
 _HIGH_RISK_PCT = 35.0        # banner appends a warning above this risk %
 _LOW_NIGHT_CHANCE = 0.10     # banner appends "breeds rarely" below this
 _DEFAULT_SPACING = 6         # fallback when the host passes no spacing
+# Risk ceiling safe mode assumes when the host has not configured one. The
+# palette falls back to this value, so it is the single source of the default.
+SAFE_CAP_DEFAULT = 15.0
+
+
+def _format_cap(cap: float) -> str:
+    """Shown form of the safe-risk cap: 15.0 -> '15', 12.5 -> '12.5'.
+
+    ``:g`` drops the trailing ``.0`` the default cap carries, so the copy
+    stays "🛡 Safe ≤ 15% risk" at the default while any other configured
+    ``safe_risk_cap`` is quoted truthfully.
+    """
+    return f"{float(cap):g}"
+
+
+def _safe_label(cap: float) -> str:
+    """Checkbox caption for the live safe-risk cap."""
+    return f"🛡 Safe ≤ {_format_cap(cap)}% risk"
+
+
+def _safe_tooltip(cap: float) -> str:
+    """Checkbox explanation, quoting the live safe-risk cap."""
+    return _wt(
+        "Limit the ⭐ Best match to partners that are low risk "
+        f"({_format_cap(cap)}% or less), so you only breed pairs that are "
+        "unlikely to produce a defective kitten.\n"
+        "If no partner is that safe, the normal 7s-first pick is shown "
+        "instead - clearly labelled."
+    )
+
+
+# The caption at the default cap, derived from the constant above so the copy
+# cannot drift from the number it quotes.
+_SAFE_LABEL = _safe_label(SAFE_CAP_DEFAULT)
 
 
 class BestMatchBar(QWidget):
@@ -63,6 +96,7 @@ class BestMatchBar(QWidget):
         self._safe_risk_cap = safe_risk_cap
         self._best_row = None
         self._safe_mode = False
+        initial_cap = self._safe_risk_cap()
 
         row = QHBoxLayout(self)
         row.setContentsMargins(0, 0, 0, 0)
@@ -74,15 +108,9 @@ class BestMatchBar(QWidget):
         self._btn_best.setVisible(False)
         self._btn_best.clicked.connect(self._on_clicked)
 
-        self._btn_safe = QPushButton(_SAFE_LABEL)
+        self._btn_safe = QPushButton(_safe_label(initial_cap))
         self._btn_safe.setCheckable(True)
-        self._btn_safe.setToolTip(_wt(
-            "Limit the ⭐ Best match to partners that are low risk (15% or "
-            "less), so you only breed pairs that are unlikely to produce a "
-            "defective kitten.\n"
-            "If no partner is that safe, the normal 7s-first pick is shown "
-            "instead - clearly labelled."
-        ))
+        self._btn_safe.setToolTip(_safe_tooltip(initial_cap))
         self._btn_safe.setVisible(False)
         self._btn_safe.toggled.connect(self._on_safe_toggled)
 
@@ -106,6 +134,15 @@ class BestMatchBar(QWidget):
         self._btn_best.setVisible(False)
         self._btn_safe.setVisible(False)
 
+    def _refresh_safe_cap(self, cap: float) -> None:
+        """Keep the checkbox copy in step with the live safe-risk cap."""
+        label = _safe_label(cap)
+        if self._btn_safe.text() != label:
+            self._btn_safe.setText(label)
+        tip = _safe_tooltip(cap)
+        if self._btn_safe.toolTip() != tip:
+            self._btn_safe.setToolTip(tip)
+
     # ── recommendation banner ──────────────────────────────────────────────
     def update_best(self) -> None:
         """Recompute and show the ⭐ best-match banner for the focused cat.
@@ -115,6 +152,10 @@ class BestMatchBar(QWidget):
         """
         rows = self._rows_getter() or []
         focus = self._focus_getter()
+        # The safe cap is user-configurable, so the checkbox copy and the
+        # fallback wording are derived from it instead of hardcoded.
+        cap = self._safe_risk_cap()
+        self._refresh_safe_cap(cap)
         if not rows or focus is None:
             self.clear()
             return
@@ -130,7 +171,6 @@ class BestMatchBar(QWidget):
         chosen = overall
         fallback = False
         if self._safe_mode:
-            cap = self._safe_risk_cap()
             safe_rows = [r for r in compat if r.risk_pct <= cap]
             safe_rec = (recommend_best(safe_rows, focus, effect_of=effect,
                                        stimulation=stimulation, comfort=comfort)
@@ -150,7 +190,7 @@ class BestMatchBar(QWidget):
         if self._safe_mode and not fallback:
             prefix = "🛡 Safe best"
         elif fallback:
-            prefix = "⭐ Best (no ≤15% risk partner)"
+            prefix = f"⭐ Best (no ≤{_format_cap(cap)}% risk partner)"
         text = (
             f"{prefix}: {partner.name} - Risk {chosen.row.risk_pct:.1f}% · "
             f"≥7 ≈{chosen.row.seven_plus_total:.1f} · "

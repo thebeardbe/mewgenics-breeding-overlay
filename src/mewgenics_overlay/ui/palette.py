@@ -24,13 +24,11 @@ from typing import Optional
 from PySide6.QtCore import Qt, QTimer, Signal
 import mewgenics_overlay.ui.theme as _theme
 from PySide6.QtGui import (
-    QFont,
     QKeySequence,
     QShortcut,
 )
 from PySide6.QtWidgets import (
     QApplication,
-    QDialog,
     QFileDialog,
     QHBoxLayout,
     QLabel,
@@ -68,12 +66,20 @@ from .partnertable import (
 )
 
 # self-contained panels split out of this window (god-file steps 4 and 5)
-from .bestmatch import BestMatchBar
+from .bestmatch import BestMatchBar, SAFE_CAP_DEFAULT
 from .updatenotice import UpdateNotice
+
+# About/report/debug block and the user-zoom machinery (final split steps)
+from .aboutdialog import (
+    copy_debug_to_clipboard,
+    open_report,
+    report_url,
+    show_about,
+)
+from .zoom import ZoomController
 
 from . import config as cfg
 from .theme import wrap_tooltip as _wt
-from mewgenics_overlay import __version__
 from mewgenics_overlay.core.gameassets import GameAssets, locate_gpak
 
 log = logging.getLogger("mewgenics_overlay.ui")
@@ -90,9 +96,17 @@ class PaletteWindow(QWidget):
     def __init__(self):
         super().__init__()
         self._settings = cfg.load()
-        self._zoom_base_font = QFont(
-            QApplication.instance().font()) if QApplication.instance() else None
-        _theme.set_zoom(float(self._settings.get("zoom", 1.0) or 1.0))
+        # Zoom state, clamping and persistence live in the controller; it
+        # rescales the app font itself and calls _zoom_render for the
+        # window-specific visuals (header buttons, columns, stylesheets).
+        self._zoom_ctl = ZoomController(
+            self._settings,
+            lambda: cfg.save(self._settings),
+            on_zoom=self._zoom_render,
+            on_label=self._on_zoom_label,
+            parent=self,
+        )
+        _theme.set_zoom(self._zoom_ctl.zoom)
         self._focus: Optional[Cat] = None
         self._save = SaveController()   # session state + background queue + watcher
         self._asset_lock = threading.Lock()
@@ -128,7 +142,7 @@ class PaletteWindow(QWidget):
         self._update_timer.timeout.connect(self._update_notice.start_check)
         self._update_timer.start()
 
-        self._zoom_render(float(self._settings.get("zoom", 1.0) or 1.0))
+        self._zoom_ctl.apply()
         self._adopt_session(None)
         self._load_last_save()
         self._maybe_start_assets()
@@ -280,8 +294,8 @@ class PaletteWindow(QWidget):
                 self._table._pair_malady_lines(row, stim, effect)),
             effect_of=self._effect_for_name,
             safe_risk_cap=lambda: self._to_float(
-                self._settings.get("safe_risk_cap", 15.0), 15.0,
-                floor=1.0, ceil=100.0),
+                self._settings.get("safe_risk_cap", SAFE_CAP_DEFAULT),
+                SAFE_CAP_DEFAULT, floor=1.0, ceil=100.0),
             spacing=_ROOT_SPACING,
         )
         root.addWidget(self._best_bar)
@@ -418,38 +432,31 @@ class PaletteWindow(QWidget):
             self.shutdown()
             QApplication.instance().quit()
 
+    # ── zoom (delegated to ZoomController) ─────────────────────────────────
     def _zoom_step(self, delta: float) -> None:
-        self._set_zoom(float(self._settings.get("zoom", 1.0) or 1.0) + delta)
+        self._zoom_ctl.step(delta)
 
     def _zoom_inc(self) -> None:
-        self._zoom_step(0.25)
+        self._zoom_ctl.zoom_in()
 
     def _zoom_dec(self) -> None:
-        self._zoom_step(-0.25)
+        self._zoom_ctl.zoom_out()
 
     def _zoom_default(self) -> None:
-        self._set_zoom(1.0)
+        self._zoom_ctl.reset()
 
     def _cycle_zoom(self) -> None:
-        cur = float(self._settings.get("zoom", 1.0) or 1.0)
-        nxt = next((c for c in (1.0, 1.5, 2.0, 3.0) if c > cur + 0.001), 1.0)
-        self._set_zoom(nxt)
+        self._zoom_ctl.cycle()
+
+    def _on_zoom_label(self, pct: int) -> None:
+        """Zoom readout in the Settings tab (absent before _build_ui)."""
+        if getattr(self, "_settings_tab", None) is not None:
+            self._settings_tab.set_zoom(pct)
 
     def _zoom_render(self, z: float) -> None:
-        """Re-zoom every visual: app font (tables/labels), header buttons,
-        column widths and the theme stylesheet font sizes."""
-        _theme.set_zoom(z)
-        app = QApplication.instance()
-        base = getattr(self, "_zoom_base_font", None) or (app.font() if app else None)
-        if app is not None and base is not None:
-            nf = QFont(base)
-            if base.pixelSize() > 0:
-                nf.setPixelSize(max(6, int(round(base.pixelSize() * z))))
-            else:
-                nf.setPointSizeF(max(4.0, base.pointSizeF() * z))
-            app.setFont(nf)
-            for w in app.allWidgets():
-                w.setFont(nf)
+        """Re-zoom the window-specific visuals the controller cannot see:
+        header buttons, table column widths and theme stylesheet font sizes.
+        The app font and ``theme.set_zoom`` are handled by the controller."""
         self._chrome.scale_buttons(z)
         if self._table is not None:
             self._table.scale_columns(z)
@@ -460,19 +467,10 @@ class PaletteWindow(QWidget):
 
     def _set_zoom(self, z: float) -> None:
         """Persist and apply a new zoom level."""
-        z = round(min(4.0, max(0.75, float(z))), 2)
-        self._settings["zoom"] = z
-        cfg.save(self._settings)
-        if getattr(self, "_settings_tab", None) is not None:
-            self._settings_tab.set_zoom(int(round(z * 100)))
-        self._zoom_render(z)
+        self._zoom_ctl.set_zoom(z)
 
     def wheelEvent(self, event):  # noqa: N802 (Qt API)
-        if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
-            delta = event.angleDelta().y()
-            if delta:
-                self._zoom_step(0.25 if delta > 0 else -0.25)
-            event.accept()
+        if self._zoom_ctl.handle_wheel(event):
             return
         super().wheelEvent(event)
 
@@ -561,109 +559,21 @@ class PaletteWindow(QWidget):
                     return text
         return ""
 
+    # ── about / report / debug (delegated to ui/aboutdialog.py) ────────────
     def _show_about(self) -> None:
         """Credits dialog: who built it and whose research it stands on."""
-        text = (
-            f"<h3>Mewgenics Breeding Overlay</h3>"
-            f"<p>Version {__version__}</p>"
-            f"<p>Built by <b>TheBeardBE</b>, with help from an LLM "
-            f"through <b>pi.dev</b>.</p>"
-            f"<p><b>Credits</b></p>"
-            f"<ul>"
-            f"<li>Save parser &amp; genetics engine: "
-            f"<a href='https://github.com/frankieg33/MewgenicsBreedingManager'>"
-            f"MewgenicsBreedingManager</a> (MIT, © 2026 frankieg33) - "
-            f"vendored; provenance in <code>vendor/_VENDORED.md</code></li>"
-            f"<li>1.1 breeding-model sync: "
-            f"<a href='https://github.com/whyayala/MewgenicsBreedingManager'>"
-            f"whyayala's maintained fork</a> (v5.9.5) - same-sex rule, "
-            f"gender-role compat gate, neutral-sexuality fix</li>"
-            f"<li>Save-format research: "
-            f"<a href='https://github.com/pzx521521/mewgenics-save-editor'>"
-            f"pzx521521/mewgenics-save-editor</a> and the community</li>"
-            f"<li>Breeding formulas (datamined from the game): "
-            f"<a href='https://mewgenicswiki.org/tools/breeding-calculator'>"
-            f"Mewgenics breeding calculator</a> (mewgenicswiki.org) + "
-            f"<a href='https://gist.github.com/SciresM/95a9dbba22937420e75d4da617af1397'>"
-            f"SciresM's game-code analysis</a>, cross-checked against "
-            f"<a href='https://mewgenics.wiki.gg/wiki/Breeding'>wiki.gg's "
-            f"datamined tables</a> - pinned by tests/test_wiki_math.py</li>"
-            f"<li>Game mechanics reference: "
-            f"<a href='https://mewgenics.wiki.gg/wiki/Mewgenics'>"
-            f"Mewgenics Wiki</a></li>"
-            f"</ul>"
-            f"<p>Licensed MIT. Saves are read-only - this tool never "
-            f"modifies them.</p>"
-            f"<p>Update check: on start the app asks GitHub for the newest "
-            f"release and shows a download button if one exists - no data is "
-            f"sent. Disable it in Settings.</p>"
-            f"<p>Found a problem? Use <b>🐞 Report a problem</b> below - "
-            f"no account needed.</p>"
-        )
-        dialog = QDialog(self)
-        dialog.setWindowTitle("About")
-        dialog.setModal(True)
-        layout = QVBoxLayout(dialog)
-        label = QLabel(text)
-        label.setTextFormat(Qt.TextFormat.RichText)
-        label.setWordWrap(True)
-        label.setOpenExternalLinks(True)
-        layout.addWidget(label)
-        ok = QPushButton("OK")
-        ok.clicked.connect(dialog.accept)
-        actions = QWidget()
-        row = QHBoxLayout(actions)
-        row.setContentsMargins(0, 0, 0, 0)
-        report = QPushButton("🐞 Report a problem")
-        report.setToolTip("Open the bug-report form in your browser - no account needed.")
-        report.clicked.connect(self._open_report)
-        copy_info = QPushButton("📋 Copy debug info")
-        copy_info.setToolTip("Copies version + save + theme to the clipboard so a "
-                             "bug report needs no file hunting. Paste it into the form.")
-        copy_info.clicked.connect(self._copy_debug)
-        row.addWidget(report)
-        row.addWidget(copy_info)
-        row.addStretch()
-        layout.addWidget(actions)
-        layout.addWidget(ok, 0, Qt.AlignmentFlag.AlignRight)
-        dialog.resize(560, 480)
-        dialog.exec()
+        show_about(self, self._settings, self._set_status)
 
     def _report_url(self) -> str:
         """Where the About-box report button points (see config.report_url)."""
-        url = (self._settings.get("report_url")
-               or "https://github.com/thebeardbe/mewgenics-breeding-overlay/issues")
-        # Only ever hand an http(s) URL to the OS browser - never a custom
-        # scheme from a config file (file:, or registered protocol handlers).
-        if isinstance(url, str) and url.lower().startswith(("http://",
-                                                           "https://")):
-            return url
-        return "https://github.com/thebeardbe/mewgenics-breeding-overlay/issues"
+        return report_url(self._settings.get("report_url"))
 
     def _open_report(self) -> None:
-        import webbrowser
-        webbrowser.open(self._report_url())
+        open_report(self._settings.get("report_url"))
 
     def _copy_debug(self) -> None:
         """Copy a compact debug block to the clipboard for bug reports."""
-        import platform
-        try:
-            qt_ver = __import__("PySide6").__version__
-        except Exception:
-            qt_ver = "?"
-        try:
-            py_ver = platform.python_version()
-        except Exception:
-            py_ver = "?"
-        save = self._settings.get("save_path") or ""
-        text = "\n".join([
-            f"Mewgenics Breeding Overlay v{__version__}",
-            f"OS: {platform.system()} {platform.release()}",
-            f"Python: {py_ver} · Qt: {qt_ver}",
-            f"Theme: {self._settings.get('theme')}",
-            f"Save: {save or '(none loaded)'}",
-        ])
-        QApplication.clipboard().setText(text)
+        copy_debug_to_clipboard(self._settings)
         self._set_status("debug info copied - paste it into a bug report")
 
     # ── save loading ───────────────────────────────────────────────────────
