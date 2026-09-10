@@ -41,7 +41,6 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QSizeGrip,
     QListWidget,
-    QListWidgetItem,
     QMenu,
     QPushButton,
     QSystemTrayIcon,
@@ -55,10 +54,10 @@ from mewgenics_overlay.core.session import (
     STAT_NAMES,
     Cat,
     Session,
-    display_location,
 )
 from mewgenics_overlay.ui.savecontroller import SaveController
 from mewgenics_overlay.ui.focuspanel import FocusedCatPanel
+from mewgenics_overlay.ui.searchbox import SearchBox
 
 # Partner-table pure core (columns, header tips, cell formatters) - moved to
 # ui/partnertable.py so the interactive widget can stay Qt-focused (step 2b).
@@ -81,6 +80,8 @@ from mewgenics_overlay.core.stimulation import (
 from mewgenics_overlay.core.recommend import recommend as recommend_best
 
 log = logging.getLogger("mewgenics_overlay.ui")
+
+_ROOT_SPACING = 6   # shared by the palette root layout and the SearchBox
 
 class _DragLabel(QLabel):
     """Header grip that starts an OS window move on left-drag."""
@@ -129,8 +130,6 @@ class PaletteWindow(QWidget):
         self._asset_lock = threading.Lock()
         self._table: Optional[PartnerTableWidget] = None  # built in _build_ui
         self._ui_busy = False
-        self._suppress_clear_text = False
-        self._opened_by_focus = False
         self._pinned = True               # mirror of the 📌 button state
         self._click_through = False       # mouse passes through to the game
         self._dialog_open = False         # modal dialog (file picker) open
@@ -291,7 +290,7 @@ class PaletteWindow(QWidget):
         self._page_main = QWidget()
         root = QVBoxLayout(self._page_main)
         root.setContentsMargins(10, 8, 10, 10)
-        root.setSpacing(6)
+        root.setSpacing(_ROOT_SPACING)
         tabs.addTab(self._page_main, "Breeding")
 
         # header: drag grip + title + status only. Actions live in the
@@ -340,26 +339,14 @@ class PaletteWindow(QWidget):
         head.addWidget(self._btn_close)
         outer.insertLayout(0, head)
 
-        # search
-        self._search = QLineEdit()
-        self._search.setPlaceholderText("Click a cat in-game, then type its name here…")
-        self._search.setClearButtonEnabled(True)
-        # down-arrow affordance: opens the full-cat dropdown
-        self._dropdown_action = self._search.addAction(
-            self._arrow_icon(), QLineEdit.ActionPosition.TrailingPosition)
-        self._dropdown_action.setToolTip("Show all cats")
-        self._dropdown_action.triggered.connect(self._open_search_dropdown)
-        self._search.setToolTip(_wt(
-            "Find a cat by typing part of its name - the list comes from "
-            "your latest save and refreshes on its own whenever the game "
-            "saves.\n"
-            "Then pick who to analyse for breeding."
-        ))
-        self._results = QListWidget()
-        self._results.setVisible(False)
-        self._results.setMaximumHeight(170)
-        root.addWidget(self._search)
-        root.addWidget(self._results)
+        # search (owns its own line edit + results dropdown)
+        self._searchbox = SearchBox(
+            lambda: self._session,
+            self._on_search_chosen,
+            self._on_search_cleared,
+            spacing=_ROOT_SPACING,
+        )
+        root.addWidget(self._searchbox)
 
         # focused cat summary
         self._focus_panel = FocusedCatPanel()
@@ -491,11 +478,6 @@ class PaletteWindow(QWidget):
         self._tabs = tabs
 
     def _wire_ui(self) -> None:
-        self._search.textChanged.connect(self._on_search_text)
-        self._search.installEventFilter(self)
-        self._search.returnPressed.connect(self._on_search_enter)
-        self._results.itemClicked.connect(self._on_result_clicked)
-        self._results.itemActivated.connect(self._on_result_clicked)
         self._table.itemSelectionChanged.connect(self._on_partner_selected)
         self._table.itemDoubleClicked.connect(self._on_partner_double)
         self._table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -1154,12 +1136,33 @@ class PaletteWindow(QWidget):
 
     def set_focus(self, cat: Cat) -> None:
         self._focus = cat
-        self._suppress_clear_text = True
-        self._search.setText("")
-        self._suppress_clear_text = False
-        self._search.clearFocus()
+        self._searchbox.set_text_silently("")
+        self._searchbox.clear_focus()
         self._show_focus(cat)
         self._schedule_partners()
+
+    def _on_search_cleared(self) -> None:
+        """Manual clear in the search box: reset the table only when there
+        is something to reset (pre-extraction behaviour)."""
+        if self._focus is not None or self._table.rowCount() > 0:
+            self._clear_focus()
+
+    def _on_search_chosen(self, db_key: int) -> None:
+        """A dropdown result was picked: focus that cat."""
+        if self._session is None:
+            return
+        cat = self._session.by_key.get(db_key)
+        if cat is not None:
+            self.set_focus(cat)
+
+    # ── search box (delegated to SearchBox) ────────────────────────────────
+    @property
+    def _search(self) -> QLineEdit:
+        return self._searchbox.edit
+
+    @property
+    def _results(self) -> QListWidget:
+        return self._searchbox.list
 
     def _clear_focus(self) -> None:
         self._focus = None
@@ -1175,112 +1178,6 @@ class PaletteWindow(QWidget):
             return self._ga.effect_for(group_key, mutation_id) \
                 if self._ga is not None else ""
         self._focus_panel.show_cat(cat, effect_for=_gpak_effect)
-
-    def _arrow_icon(self):
-        """Tiny down-arrow QIcon in the current theme's muted colour."""
-        from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
-        pm = QPixmap(12, 12)
-        pm.fill(QColor(0, 0, 0, 0))
-        pnt = QPainter(pm)
-        pnt.setRenderHint(QPainter.RenderHint.Antialiasing)
-        pen = QPen(QColor(_theme.C_MUTED), 2)
-        pnt.setPen(pen)
-        pnt.drawLine(1, 4, 6, 9)
-        pnt.drawLine(6, 9, 11, 4)
-        pnt.end()
-        return QIcon(pm)
-
-    def _open_search_dropdown(self) -> None:
-        """Arrow click: open the dropdown, or close it if already open.
-        Never clears the current selection/table. A click that merely focuses
-        the box (which itself opens the list) must not close it again."""
-        if self._opened_by_focus:
-            self._opened_by_focus = False
-            if self._session is not None and not self._results.isVisible():
-                self._fill_dropdown(self._search.text())
-                self._results.setVisible(True)
-            return
-        if self._results.isVisible():
-            self._results.setVisible(False)
-            return
-        if self._session is None:
-            return
-        self._fill_dropdown(self._search.text())
-        self._results.setVisible(True)
-
-    def eventFilter(self, watched, event):  # noqa: N802 (Qt API)
-        """Show the full cat dropdown when the user actively focuses the
-        search box (click, Tab or keyboard shortcut). Pure window activation
-        on Wayland/Hyprland does NOT open it.
-
-        If another widget ever needs filtering, dispatch on ``watched`` in a
-        separate method - do not stack more ``if watched is ...`` branches
-        here."""
-        if watched is self._search and event.type() == QEvent.Type.FocusIn:
-            reason = event.reason()
-            explicit = reason in (
-                QEvent.FocusReason.MouseFocusReason,
-                QEvent.FocusReason.TabFocusReason,
-                QEvent.FocusReason.ShortcutFocusReason,
-            )
-            if explicit and self._session is not None:
-                self._opened_by_focus = True
-                self._fill_dropdown(self._search.text())
-                self._results.setVisible(True)
-        return super().eventFilter(watched, event)
-
-    def _fill_dropdown(self, text: str) -> None:
-        """Fill and show the results list; no side effects (does not clear
-        the current cat/table). Opening via the arrow or focusing the box
-        must never behave like the user pressing the clear X."""
-        self._results.clear()
-        if self._session is None:
-            self._results.setVisible(False)
-            return
-        text = text.strip()
-        if text:
-            hits = self._session.search(text, limit=100)
-            truncated = len(hits) > 60
-            if truncated:
-                hits = hits[:60]
-        else:
-            hits = sorted(self._session.alive,
-                          key=lambda c: c.name.lower())
-            truncated = len(hits) > 60
-        for c in hits[:60]:
-            item = QListWidgetItem(
-                f"{c.name}   · {display_location(c)}   · {c.gender}   · "
-                f"sum {sum(c.base_stats.values())}"
-            )
-            item.setData(Qt.ItemDataRole.UserRole, c.db_key)
-            self._results.addItem(item)
-        if truncated:
-            more = QListWidgetItem("… more matches - type more of the name")
-            more.setFlags(Qt.ItemFlag.NoItemFlags)
-            self._results.addItem(more)
-        self._results.setVisible(bool(hits) or truncated)
-
-    def _on_search_text(self, text: str) -> None:
-        """Typing/clearing. A manual clear (built-in X / backspace on the
-        focused box) also resets the current cat and its table."""
-        if not text.strip() and not self._suppress_clear_text \
-                and self._search.hasFocus() \
-                and (self._focus is not None or self._table.rowCount()):
-            self._clear_focus()
-        self._fill_dropdown(text)
-
-    def _on_result_clicked(self, item: QListWidgetItem) -> None:
-        key = item.data(Qt.ItemDataRole.UserRole)
-        if self._session is not None:
-            cat = self._session.by_key.get(key)
-            if cat is not None:
-                self.set_focus(cat)
-        self._opened_by_focus = False
-        self._results.setVisible(False)
-
-    def _on_search_enter(self) -> None:
-        if self._results.count():
-            self._on_result_clicked(self._results.item(0))
 
     # ── partners table ─────────────────────────────────────────────────────
     def _recompute_partners(self) -> None:
