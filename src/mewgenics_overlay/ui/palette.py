@@ -56,6 +56,7 @@ from mewgenics_overlay.core.session import (
     Session,
 )
 from mewgenics_overlay.ui.savecontroller import SaveController
+from mewgenics_overlay.ui.chrome import TopBar
 from mewgenics_overlay.ui.focuspanel import FocusedCatPanel
 from mewgenics_overlay.ui.searchbox import SearchBox
 
@@ -82,35 +83,6 @@ from mewgenics_overlay.core.recommend import recommend as recommend_best
 log = logging.getLogger("mewgenics_overlay.ui")
 
 _ROOT_SPACING = 6   # shared by the palette root layout and the SearchBox
-
-class _DragLabel(QLabel):
-    """Header grip that starts an OS window move on left-drag."""
-
-    def __init__(self, text: str = ""):
-        super().__init__(text)
-        self._dragging = False
-        self.setCursor(Qt.CursorShape.OpenHandCursor)
-
-    def mousePressEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton:
-            self._dragging = True
-            event.accept()
-            return
-        super().mousePressEvent(event)
-
-    def mouseMoveEvent(self, event):
-        if self._dragging and event.buttons() & Qt.MouseButton.LeftButton:
-            wh = self.window().windowHandle()
-            if wh is not None and wh.startSystemMove():
-                self._dragging = False
-                event.accept()
-                return
-        super().mouseMoveEvent(event)
-
-    def mouseReleaseEvent(self, event):
-        self._dragging = False
-        super().mouseReleaseEvent(event)
-
 
 class PaletteWindow(QWidget):
     """The overlay palette. Owns the save session, watcher and worker."""
@@ -215,6 +187,17 @@ class PaletteWindow(QWidget):
         if self._table is not None:
             self._table.sort_dir = d
 
+    # ── header chrome (delegated to TopBar) ───────────────────────────────
+    @property
+    def _title(self) -> QLabel:
+        """Read-only access to the header title label."""
+        return self._chrome.title_label
+
+    @property
+    def _status(self) -> QLabel:
+        """Read-only access to the header status label."""
+        return self._chrome.status_label
+
     # ── update availability check (read-only; no download) ────────────────
     def _set_update_check(self, on: bool) -> None:
         self._settings["check_for_updates"] = bool(on)
@@ -293,51 +276,17 @@ class PaletteWindow(QWidget):
         root.setSpacing(_ROOT_SPACING)
         tabs.addTab(self._page_main, "Breeding")
 
-        # header: drag grip + title + status only. Actions live in the
-        # ⚙ Settings tab and the tab-bar corner.
-        head = QHBoxLayout()
-        grip = _DragLabel("⠿")
-        self._grip = grip
-        grip.setStyleSheet(f"color:{_theme.C_GRIP}; font-size:13px;")
-        grip.setToolTip("Drag to move the overlay")
-        self._title = _DragLabel("🐈 Breeding Overlay")
-        self._title.setStyleSheet("font-weight:700; font-size:14px;")
-        self._title.setCursor(Qt.CursorShape.OpenHandCursor)
-        self._status = QLabel("")
-        self._status.setObjectName("muted")
-        self._status.setStyleSheet(
-            f"color:{_theme.C_STATUS}; font-size:11px;")
-        head.addWidget(grip)
-        head.addWidget(self._title)
-        head.setSpacing(12)
-        head.setContentsMargins(4, 2, 6, 2)
-        head.addWidget(self._status, 1)
-        self._btn_pin = QPushButton("📌")
-        self._btn_pin.setCheckable(True)
-        self._btn_pin.setChecked(self._pinned)
-        self._btn_pin.setObjectName("iconbtn")
-        self._btn_pin.setFixedSize(46, 26)
-        self._btn_pin.setToolTip("Keep above the game (native pin on Windows, "
-                                 "Hyprland rules on Linux)")
-        self._btn_pin.clicked.connect(self._toggle_pin)
-        self._btn_ct = QPushButton("🧿")
-        self._btn_ct.setCheckable(True)
-        self._btn_ct.setChecked(self._click_through)
-        self._btn_ct.setObjectName("iconbtn")
-        self._btn_ct.setFixedSize(46, 26)
-        self._btn_ct.setToolTip("Click-through: let mouse clicks reach "
-                                "Mewgenics. Ctrl+Shift+B / tray to interact.")
-        self._btn_ct.clicked.connect(self._on_ct_clicked)
-        self._btn_close = QPushButton("✕")
-        self._btn_close.setObjectName("iconbtn")
-        self._btn_close.setFixedSize(46, 26)
-        self._btn_close.setToolTip("Hide (Ctrl+Shift+B / tray) - quits when "
-                                   "no tray is available")
-        self._btn_close.clicked.connect(self._on_close_clicked)
-        head.addWidget(self._btn_pin)
-        head.addWidget(self._btn_ct)
-        head.addWidget(self._btn_close)
-        outer.insertLayout(0, head)
+        # header: drag grip + title + status + pin/click-through/hide. The row
+        # is a self-contained widget (ui/chrome.py); the actions it triggers
+        # stay here. Extra actions live in the ⚙ Settings tab / tab corner.
+        self._chrome = TopBar(
+            pinned=self._pinned,
+            click_through=self._click_through,
+            on_pin=self._toggle_pin,
+            on_click_through=self._on_ct_clicked,
+            on_hide=self._on_close_clicked,
+        )
+        outer.insertWidget(0, self._chrome)
 
         # search (owns its own line edit + results dropdown)
         self._searchbox = SearchBox(
@@ -493,6 +442,7 @@ class PaletteWindow(QWidget):
     def _toggle_pin(self, checked: bool) -> None:
         """Pin toggle. Never re-creates the native window on Windows."""
         self._pinned = bool(checked)
+        self._chrome.set_pinned(self._pinned)
         if sys.platform == "win32":
             self._set_topmost_win32(self._pinned)
         elif not os.environ.get("HYPRLAND_INSTANCE_SIGNATURE"):
@@ -527,11 +477,7 @@ class PaletteWindow(QWidget):
         self._click_through = bool(on)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents,
                           self._click_through)
-        btn = getattr(self, "_btn_ct", None)
-        if btn is not None:
-            btn.blockSignals(True)
-            btn.setChecked(self._click_through)
-            btn.blockSignals(False)
+        self._chrome.set_click_through(self._click_through)
 
     def _engage(self) -> None:
         """Show the palette and make it interactive (hotkey/tray summon)."""
@@ -610,16 +556,6 @@ class PaletteWindow(QWidget):
         nxt = next((c for c in (1.0, 1.5, 2.0, 3.0) if c > cur + 0.001), 1.0)
         self._set_zoom(nxt)
 
-    def _scale_icon_buttons(self, z: float) -> None:
-        """Buttons share one height and one glyph width; only the zoom %
-        button is wider so its text has real left/right padding."""
-        h = max(22, int(26 * z))
-        for attr, bw in (("_btn_pin", 46), ("_btn_ct", 46),
-                         ("_btn_close", 46)):
-            btn = getattr(self, attr, None)
-            if btn is not None:
-                btn.setFixedSize(max(38, int(bw * z)), h)
-
     def _zoom_render(self, z: float) -> None:
         """Re-zoom every visual: app font (tables/labels), header buttons,
         column widths and the theme stylesheet font sizes."""
@@ -635,23 +571,13 @@ class PaletteWindow(QWidget):
             app.setFont(nf)
             for w in app.allWidgets():
                 w.setFont(nf)
-        self._scale_icon_buttons(z)
+        self._chrome.scale_buttons(z)
         if self._table is not None:
             self._table.scale_columns(z)
         self.apply_theme(str(self._settings.get("theme", "noir")))
-        self._restyle_header(z)
+        self._chrome.restyle(z)
         if getattr(self, "_focus_panel", None) is not None:
             self._focus_panel.restyle(z)
-
-    def _restyle_header(self, zoom: float) -> None:
-        """Header grip/title/status font sizes follow the zoom level."""
-        self._grip.setStyleSheet(
-            f"color:{_theme.C_GRIP}; font-size:{_theme.zoom_px(13)}px;")
-        self._title.setStyleSheet(
-            f"font-weight:700; font-size:{_theme.zoom_px(14)}px; "
-            f"color:{_theme.C_TEXT};")
-        self._status.setStyleSheet(
-            f"color:{_theme.C_STATUS}; font-size:{_theme.zoom_px(11)}px;")
 
     def _set_zoom(self, z: float) -> None:
         """Persist and apply a new zoom level."""
@@ -938,7 +864,7 @@ class PaletteWindow(QWidget):
         self._settings["save_path"] = path
         cfg.save(self._settings)
         base = path.split('/')[-1].split(chr(92))[-1]
-        self._title.setText(f"🐈 Overlay - {base}")
+        self._chrome.set_title(f"🐈 Overlay - {base}")
         if getattr(self, "_settings_tab", None) is not None:
             self._settings_tab.set_current(path)
         self._start_watcher(path)
@@ -959,7 +885,7 @@ class PaletteWindow(QWidget):
             self._set_status("⚠ save changed but reload failed - see the log")
 
     def _set_status(self, text: str) -> None:
-        self._status.setText(text)
+        self._chrome.set_status(text)
 
     def shutdown(self) -> None:
         """Stop background threads before the app exits."""
