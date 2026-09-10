@@ -44,9 +44,17 @@ def _file_exists(path: str) -> bool:
     return bool(path) and os.path.exists(path)
 
 
-def _base_name(path) -> str:
-    """File name of *path* on either separator (Windows saves arrive with ``\\``)."""
+def base_name(path) -> str:
+    """File name of *path* on either separator (Windows saves arrive with ``\\``).
+
+    Single source of truth for the save-slot label and the window title, so
+    they always agree on the shown file name.
+    """
     return str(path).split("/")[-1].split("\\")[-1]
+
+
+# Backwards-compatible alias (existing importers use the private name).
+_base_name = base_name
 
 
 class SavePanel(QWidget):
@@ -160,7 +168,7 @@ class SavePanel(QWidget):
         by_num = {}
         for r in records:
             raw = str(r.get("path", "") or "")
-            base = _base_name(raw)
+            base = base_name(raw)
             if base.startswith("steamcampaign") and base.endswith(".sav"):
                 try:
                     n = int(base[len("steamcampaign"):-4])
@@ -177,7 +185,7 @@ class SavePanel(QWidget):
             path = self._slot_paths[i] if i < len(self._slot_paths) else None
             is_current = bool(path) and str(path) == self._current
             if path:
-                sub = f"🐈 {_base_name(path)}"
+                sub = f"🐈 {base_name(path)}"
                 if is_current:
                     sub += _CURRENT_MARK
             else:

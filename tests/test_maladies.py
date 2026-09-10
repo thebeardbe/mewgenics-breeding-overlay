@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from mewgenics_overlay.core.maladies import (
+    defect_effect_text,
     defect_inheritance_rows,
     defect_lines,
     disorder_summary,
@@ -152,3 +153,63 @@ def test_different_lines_when_no_shared_carrier_ancestor():
     assert r.same_line is False
     assert r.slots_a == frozenset({"arm_L"})
     assert r.slots_b == frozenset({"arm_R"})
+
+
+# ── shared gpak defect-effect lookup ──────────────────────────────────────
+class _Assets:
+    """Minimal GameAssets stand-in: ``effect_for`` over a (group, id) map."""
+
+    def __init__(self, effects=None):
+        self._effects = dict(effects or {})
+
+    def effect_for(self, group, mutation_id):
+        return self._effects.get((group, mutation_id), "")
+
+
+def _defect_cat(entries):
+    return SimpleNamespace(visual_mutation_entries=entries)
+
+
+def test_defect_effect_text_returns_the_matching_defect_effect():
+    assets = _Assets({("tail", 3): "short and stumpy"})
+    c = _defect_cat([
+        {"is_defect": False, "name": "Bobtail", "group_key": "tail",
+         "mutation_id": 9},        # decoration, not a defect
+        {"is_defect": True, "name": "Bobtail", "group_key": "tail",
+         "mutation_id": 3},
+    ])
+
+    assert defect_effect_text(assets, c, "Bobtail") == "short and stumpy"
+
+
+def test_defect_effect_text_skips_other_names_and_non_defects():
+    assets = _Assets({("tail", 3): "text"})
+    c = _defect_cat([
+        {"is_defect": False, "name": "Bobtail", "group_key": "tail",
+         "mutation_id": 3},
+    ])
+
+    assert defect_effect_text(assets, c, "Bobtail") == ""
+    assert defect_effect_text(assets, c, "Other") == ""
+
+
+def test_defect_effect_text_without_assets_or_entries_is_empty():
+    c = _defect_cat([
+        {"is_defect": True, "name": "Bobtail", "group_key": "tail",
+         "mutation_id": 3},
+    ])
+
+    assert defect_effect_text(None, c, "Bobtail") == ""
+    assert defect_effect_text(_Assets({}), _defect_cat([]), "Bobtail") == ""
+
+
+def test_defect_effect_text_returns_the_first_non_empty_effect():
+    assets = _Assets({("tail", 4): "second"})
+    c = _defect_cat([
+        {"is_defect": True, "name": "Bobtail", "group_key": "tail",
+         "mutation_id": 3},     # known entry but no effect table text
+        {"is_defect": True, "name": "Bobtail", "group_key": "tail",
+         "mutation_id": 4},
+    ])
+
+    assert defect_effect_text(assets, c, "Bobtail") == "second"

@@ -93,8 +93,11 @@ src/mewgenics_overlay/
   ui/
     theme.py              theme registry: "film" (Noir·Bright), "noir" (Noir·Dark),
                           C_* colour globals, STYLESHEET, risk_color, wrap_tooltip
-    palette.py            main window coordinator (tabs, panel layout, signal wiring);
-                          delegates to the modules below
+    palette.py            window coordinator: lifecycle, tray/hotkey/open-save
+                          entry points, thin delegations to the modules below
+    layout.py             build(window): constructs and wires the whole widget tree
+    tablectl.py           TableCoordinator: focus, partner rows, sorting, best match
+    assets.py             AssetLoader: resources.gpak worker thread + result drain
     chrome.py             frameless top bar: drag grip, title/status, pin /
                           click-through / hide buttons, zoom restyle
     searchbox.py          cat search box + result dropdown (focus/clear state)

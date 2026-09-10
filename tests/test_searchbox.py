@@ -16,11 +16,10 @@ Tab or shortcut) opens the dropdown; window activation alone does not.
 
 Host-side clear guard
 ---------------------
-``PaletteWindow._on_search_cleared`` only resets the table when a cat is
-focused or rows are still on screen. The SearchBox-level tests cover the
-widget half; ``test_host_clear_guard_resets_only_when_focus_or_rows`` covers
-the guard itself with a light stand-in for the host, so no ``PaletteWindow``
-is ever constructed here.
+The search-clear guard no longer lives on ``PaletteWindow``; it is the
+coordinator's ``TableCoordinator.clear_if_content`` (reached via
+``PaletteWindow._on_search_cleared``) and is covered in ``test_tablectl.py``.
+The SearchBox-level tests here cover the widget half of the clear callback.
 """
 
 from __future__ import annotations
@@ -41,7 +40,6 @@ from PySide6.QtCore import QEvent, Qt  # noqa: E402
 from PySide6.QtGui import QFocusEvent  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-from mewgenics_overlay.ui.palette import PaletteWindow  # noqa: E402
 from mewgenics_overlay.ui.searchbox import (  # noqa: E402
     _RESULTS_SHOWN,
     _SEARCH_LIMIT,
@@ -405,36 +403,3 @@ def test_focus_in_with_explicit_reason_opens_the_dropdown(make_box):
     assert visible_to(box)
     assert box.list.count() == len(cats)
     assert chosen == [] and cleared == []
-
-
-# ── 6. host-side clear guard ───────────────────────────────────────────────
-class _FakePaletteHost:
-    """The only state ``PaletteWindow._on_search_cleared`` reads."""
-
-    def __init__(self, focus=None, rows=0):
-        self._focus = focus
-        self._table = SimpleNamespace(rowCount=lambda: rows)
-        self.clears = 0
-
-    def _clear_focus(self):
-        self.clears += 1
-
-
-@pytest.mark.parametrize("focus,rows,expected", [
-    (None, 0, 0),        # nothing to reset -> table left alone
-    (object(), 0, 1),    # a cat is focused -> reset
-    (None, 3, 1),        # stale rows on screen -> reset
-])
-def test_host_clear_guard_resets_only_when_focus_or_rows(focus, rows,
-                                                         expected):
-    """The thin host guard on top of SearchBox's on_clear callback.
-
-    Called unbound against a stand-in host: the method touches only
-    ``_focus``, ``_table.rowCount()`` and ``_clear_focus()``, so this needs
-    no PaletteWindow (and thus no save, watcher or timers).
-    """
-    host = _FakePaletteHost(focus=focus, rows=rows)
-
-    PaletteWindow._on_search_cleared(host)
-
-    assert host.clears == expected

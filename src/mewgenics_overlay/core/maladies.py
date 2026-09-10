@@ -122,6 +122,27 @@ def defect_map(cat) -> Dict[str, dict]:
     return out
 
 
+def defect_effect_text(assets, cat, name: str) -> str:
+    """First known gpak effect text for a named defect carried by *cat*.
+
+    Single source of truth for the two lookups over a cat's
+    ``visual_mutation_entries`` (the donation matrix and the partner table):
+    keep the defect entries whose display name matches, ask the loaded
+    ``GameAssets`` for the effect text and return the first non-empty one.
+    Returns '' when there is no gpak, no entry matches, or the entry has no
+    known effect.
+    """
+    if assets is None:
+        return ""
+    for entry in (getattr(cat, "visual_mutation_entries", None) or []):
+        if entry.get("is_defect") and entry.get("name") == name:
+            text = assets.effect_for(entry.get("group_key"),
+                                     entry.get("mutation_id"))
+            if text:
+                return text
+    return ""
+
+
 _PART_GROUP = {
     "fur": "fur", "body": "body", "head": "head", "tail": "tail",
     "mouth": "mouth", "leg": "legs", "legs": "legs", "arm": "arms",
