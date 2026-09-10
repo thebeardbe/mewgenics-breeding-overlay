@@ -31,7 +31,7 @@ from mewgenics_overlay.ui import theme as _theme
 
 
 def _hex(c) -> str:
-    return str(getattr(_theme, c, "#6a6761"))
+    return str(getattr(_theme, c, _theme.C_FALLBACK))
 
 
 class SettingsTab(QWidget):

@@ -196,6 +196,11 @@ def active_theme() -> str:
     return _ACTIVE
 
 
+# Fallback used when a theme is missing a colour key (module-level so no
+# hex literal lives outside this file).
+C_FALLBACK = "#6a6761"
+
+
 def theme_titles() -> list[tuple[str, str]]:
     return [(key, info["title"]) for key, info in THEMES.items()]
 
