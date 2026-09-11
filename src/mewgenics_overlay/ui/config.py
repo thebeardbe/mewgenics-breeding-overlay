@@ -13,6 +13,7 @@ import os
 import tempfile
 from pathlib import Path
 
+from mewgenics_overlay.core import bridge
 from mewgenics_overlay.ui import hotkeybinding
 
 log = logging.getLogger("mewgenics_overlay.config")
@@ -27,6 +28,9 @@ DEFAULTS = {
     "include_adventure": True,    # consider Adventure cats as partners
     "order": "risk",            # partner sort: "risk" (safe first) or "quality"
     "max_partners": 100,
+    # In-game bridge (mewgenics-breeding-mod): loopback TCP focus requests.
+    "bridge_enabled": True,
+    "bridge_port": bridge.DEFAULT_PORT,
     # Where the About-box "Report a problem" button points. None uses the
     # built-in default (the self-hosted Bugbox form); override it to point at
     # a different report form.
@@ -134,6 +138,10 @@ def _coerce(saved: dict) -> dict:
             data[key] = v if isinstance(v, str) else None
         elif key == "max_partners":
             data[key] = _int(v, default, lo=1, hi=500)
+        elif key == "bridge_port":
+            # A privileged or out-of-range port is unusable; fall back rather
+            # than failing to bind at startup.
+            data[key] = _int(v, default, lo=1024, hi=65535)
         elif isinstance(default, bool):
             data[key] = _bool(v, default)
         elif isinstance(default, (int, float)):

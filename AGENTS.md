@@ -76,6 +76,8 @@ src/mewgenics_overlay/
   core/
     discovery.py          save + resources.gpak location (Windows/Proton/Linux)
     watcher.py            debounced file watcher + safe copy-before-read
+    bridge.py             in-game bridge: loopback TCP protocol, request -> db_key
+                          resolution, transport server (Qt-free; ui/bridgectl.py)
     session.py            parse wrapper: cats, alive/dead, current_day,
                           npc_progress_flags, rank_partners(stimulation),
                           same-sex straight block, display_location ("Outside house")
@@ -126,6 +128,7 @@ src/mewgenics_overlay/
     hotkeybinding.py      pure hotkey combo model (parse/format/vk/mods, per-DE syntax)
     hotkeyctl.py          HotkeyController: install/rebind/persist + QShortcut
     singleton.py          single-instance QLocalServer channel; --toggle forwarding
+    bridgectl.py          BridgeController: bridge server -> Qt signal on the UI thread
     desktopshortcut.py    detect desktop + install/remove the toggle shortcut
     shortcut_common.py    runner seam, quoting helpers, manual instructions
     shortcut_backends.py  GNOME (gsettings) + KDE (desktop file/KGlobalAccel) setup

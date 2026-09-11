@@ -76,6 +76,13 @@ Waiting on the tester's results for v0.2.1 (Windows hotkey) and v0.2.2
 
 ## Future features
 
+- **In-game bridge (in progress)** — the separate `mewgenics-breeding-mod` DLL
+  talks to the overlay over loopback TCP (protocol v1, `{"type":"focus","key":N}`).
+  `core/bridge.py` owns the protocol and resolution, `ui/bridgectl.py` hops onto
+  the UI thread, and `app.py` focuses the cat and shows the window. Default port
+  `45780` (`bridge_port`), disable with `bridge_enabled`. The mod currently only
+  logs cats at save load; the in-game button and the overlay-to-game select path
+  are still to come.
 - **Auto-update** — check the latest release on startup; show a confirmation
   box before downloading/offering the new binary. (The check + website
   download button shipped in v0.2.0; actual self-update is not done.)

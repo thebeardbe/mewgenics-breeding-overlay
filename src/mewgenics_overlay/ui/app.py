@@ -25,6 +25,8 @@ from PySide6.QtGui import QAction, QColor, QGuiApplication, QIcon, QPainter, QPi
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
 from mewgenics_overlay import __version__
+from mewgenics_overlay.core import bridge
+from mewgenics_overlay.ui import bridgectl
 from mewgenics_overlay.ui import config as ui_config
 from mewgenics_overlay.ui import singleton
 from mewgenics_overlay.ui import theme as _theme
@@ -192,7 +194,8 @@ def main(argv=None) -> int:
                         "starting a new instance")
         instance.try_acquire()
     # start with the saved theme (Bleached Film / Noir Ink)
-    _theme_key = ui_config.load().get("theme", _theme.DEFAULT_THEME)
+    settings = ui_config.load()
+    _theme_key = settings.get("theme", _theme.DEFAULT_THEME)
     if _theme_key not in _theme.THEMES:
         _theme_key = _theme.DEFAULT_THEME
     _theme.set_theme(_theme_key)
@@ -216,6 +219,28 @@ def main(argv=None) -> int:
         logging.info("global hotkey unavailable; use the tray icon to toggle")
     app.aboutToQuit.connect(palette._save_geometry)
 
+    # In-game bridge: the companion mod sends focus requests over loopback TCP.
+    # The controller re-emits them on the UI thread; resolution against the
+    # live save stays here so the mod only ever sends a cat key.
+    bridge_ctl = None
+    if settings.get("bridge_enabled", True):
+        bridge_ctl = bridgectl.BridgeController(
+            port=int(settings.get("bridge_port", bridge.DEFAULT_PORT)))
+
+        def _on_bridge_focus(request) -> None:
+            key = bridge.resolve_focus_key(palette._session, request)
+            if key is None:
+                logging.info("bridge: no cat for %r in the current save", request)
+                return
+            logging.info("bridge: focusing cat key=%d", key)
+            palette.set_focus_key(key)
+            palette._engage()
+
+        bridge_ctl.focus_requested.connect(_on_bridge_focus)
+        if not bridge_ctl.start():
+            logging.warning("bridge: not listening this session (port %s busy?)",
+                            bridge_ctl.port)
+
     if args.save:
         palette.open_save(args.save)
     if not args.hidden:
@@ -223,6 +248,8 @@ def main(argv=None) -> int:
 
     code = app.exec()
 
+    if bridge_ctl is not None:
+        bridge_ctl.stop()
     palette.shutdown()
     palette.uninstall_hotkey()
     if tray is not None:

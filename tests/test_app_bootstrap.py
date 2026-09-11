@@ -25,6 +25,7 @@ import pytest  # noqa: E402
 pytest.importorskip("PySide6")
 pytest.importorskip("lz4")
 
+from mewgenics_overlay.core import bridge  # noqa: E402
 from mewgenics_overlay.ui import app  # noqa: E402
 from mewgenics_overlay.ui import desktopshortcut  # noqa: E402
 from mewgenics_overlay.ui import hotkeybinding  # noqa: E402
@@ -38,6 +39,10 @@ class _FakeSignal:
 
     def connect(self, slot):
         self.slots.append(slot)
+
+    def emit(self, *args):
+        for slot in self.slots:
+            slot(*args)
 
 
 class _FakeApp:
@@ -72,6 +77,17 @@ class _FakePalette:
         self.shown = False
         self.shutdown_called = False
         self.uninstalled = False
+        # Bridge wiring reads the live session and focuses a cat key.
+        self._session = SimpleNamespace(
+            by_key={341: SimpleNamespace(db_key=341)}, cats=[])
+        self.focused = []
+        self.engaged = False
+
+    def set_focus_key(self, db_key):
+        self.focused.append(db_key)
+
+    def _engage(self):
+        self.engaged = True
 
     def toggle_activate(self):
         pass
@@ -93,6 +109,26 @@ class _FakePalette:
 
     def shutdown(self):
         self.shutdown_called = True
+
+
+class _FakeBridgeController:
+    """Records construction and lifecycle; delivers requests on demand."""
+
+    instances: list["_FakeBridgeController"] = []
+
+    def __init__(self, port=0, parent=None):
+        self.port = port
+        self.focus_requested = _FakeSignal()
+        self.started = False
+        self.stopped = False
+        _FakeBridgeController.instances.append(self)
+
+    def start(self):
+        self.started = True
+        return True
+
+    def stop(self):
+        self.stopped = True
 
 
 class _FakeInstance:
@@ -147,7 +183,8 @@ def bootstrap(monkeypatch, tmp_path):
         SimpleNamespace(setHighDpiScaleFactorRoundingPolicy=staticmethod(
             lambda policy: None)))
     monkeypatch.setattr(app, "PaletteWindow", _FakePalette)
-    monkeypatch.setattr(app.ui_config, "load", lambda: {})
+    monkeypatch.setattr(app.ui_config, "load",
+                        lambda: {"bridge_enabled": False})
     monkeypatch.setattr(
         app.ui_config, "config_dir",
         lambda: (_ for _ in ()).throw(OSError("no config dir in tests")))
@@ -238,3 +275,33 @@ def test_shortcut_cli_remove_failure_exits_nonzero(monkeypatch, capsys):
 
     assert app._shortcut_cli(install=False) == 1
     assert "could not remove" in capsys.readouterr().out
+
+
+# ── 5. in-game bridge wiring ──────────────────────────────────────────────
+def test_bridge_wiring_focuses_the_requested_cat(bootstrap, monkeypatch):
+    bootstrap.install_instance([True], toggle_ok=True)
+    monkeypatch.setattr(app.ui_config, "load",
+                        lambda: {"bridge_enabled": True, "bridge_port": 45699})
+    _FakeBridgeController.instances = []
+    monkeypatch.setattr(app.bridgectl, "BridgeController", _FakeBridgeController)
+
+    assert app.main(["--no-tray"]) == 0
+
+    ctl = _FakeBridgeController.instances[-1]
+    assert ctl.started is True
+    assert ctl.port == 45699
+    assert ctl.stopped is True           # listener closed on quit
+
+    palette = bootstrap.palette.instances[-1]
+    ctl.focus_requested.emit(bridge.FocusRequest(key=341))
+    assert palette.focused == [341]
+    assert palette.engaged is True
+
+
+def test_bridge_does_not_start_when_disabled(bootstrap, monkeypatch):
+    bootstrap.install_instance([True], toggle_ok=True)
+    _FakeBridgeController.instances = []
+    monkeypatch.setattr(app.bridgectl, "BridgeController", _FakeBridgeController)
+
+    assert app.main(["--no-tray"]) == 0
+    assert _FakeBridgeController.instances == []

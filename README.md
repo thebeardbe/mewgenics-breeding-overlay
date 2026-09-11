@@ -118,6 +118,23 @@ PYTHONPATH=src python -m mewgenics_overlay.cli donate
 | Compat | Game compatibility: `0.15 × charisma × libido × lover × sexuality`, pass line at 0.05. |
 | Exp/stat, ≥7 | Expected kitten stat average, and how many stats land at 7. |
 
+## In-game bridge (experimental)
+
+The overlay can be driven from inside Mewgenics by the companion mod
+(`mewgenics-breeding-mod`). When you ask the mod to analyse a cat, it sends a
+small JSON line over a loopback TCP socket, and the overlay focuses that cat and
+shows itself.
+
+- Listens on `127.0.0.1:45780` by default. Change `bridge_port` in `config.json`,
+  or set `bridge_enabled` to `false`, to control it.
+- Protocol: one JSON object per line, e.g.
+  `{"v": 1, "type": "focus", "key": 341}`. `key` is the game's cat key, which is
+  the overlay's `db_key`; `uid` and `name` are accepted as fallbacks.
+- Loopback only. A local process can focus a cat, but it cannot read anything or
+  change game state.
+
+This is not in a release yet; it needs the mod DLL installed in the game.
+
 ## Update check
 
 On start (and every few hours while running) the app asks GitHub whether a
