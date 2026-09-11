@@ -104,13 +104,26 @@ Waiting on the tester's results for v0.2.1 (Windows hotkey) and v0.2.2
   - the client-lookup retry triggers on any lookup miss, not only "no pid
     match", so a broken `hyprctl` is queried twice; retry only after a
     successful parse with no pid match, or reword the docstring.
-  - one failing `hyprctl` command is logged twice (the default runner logs the
-    concrete reason, then the caller logs the exit code); drop one line.
+  - when every dispatch form for a step fails, the single warning carries the
+    exit codes only; the concrete reason (Hyprland's stderr) is at DEBUG.
+    Append the reason to the warning if a user-facing failure ever needs it.
+  - if the legacy form consumes the whole budget, the Lua form is skipped and
+    the warning renders "Lua '...' (exit None)" beside a separate budget
+    warning. Phrase it as "not attempted (budget spent)" if that path shows up.
   - `focus_window()` runs synchronously inside `engage()`, bounded to about
     1.5s plus a 0.15s first-summon retry. Move it to a worker if a hitch ever
     shows up on a slow compositor.
 - The mod's hooks are pinned to game build `25143593`; a game update needs the
   RVAs re-resolved (see the mod repo's `RESEARCH.md`).
+- `core/bridge.py` outbound `send()`: the writability check plus `sendall` is
+  only safe because the payload is tiny (~50 bytes). Before the outbound message
+  grows, make the write genuinely non-blocking (non-blocking socket plus a
+  length-checked send loop).
+- `core/bridge.py`: "client not writable; dropping it" conflates a dead socket
+  with a stalled peer; distinguish them for diagnostics.
+- `ui/app.py`: the bind-failure log interpolates `bridge_ctl.port`, which is
+  `None` before a successful bind, so it reads "port None busy?". Log the
+  configured port instead.
 
 ## Refactor roadmap (complete)
 
