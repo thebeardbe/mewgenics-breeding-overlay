@@ -248,6 +248,16 @@ Plus `scripts/gui_smoke.py` for the real UI offscreen.
   schemas aborts; the app forces `generic` on Linux at startup.
 - **Hyprland**: Qt runs under xcb (auto-forced) so window rules/pinning work;
   Wayland-native can't float above the game.
+- **Hyprland window raise (`ui/raisewindow.py`)**: Qt's `show()`, `raise_()` and
+  `activateWindow()` are only requests, so after them the overlay also asks the
+  compositor directly. Hyprland 0.55+ running the Lua configuration evaluates
+  `hyprctl dispatch` as Lua (`hl.dispatch(...)`), so the legacy
+  `focuswindow address:...` strings exit 7 there. The module tries the legacy
+  form first and, when it exits non-zero, retries that step with
+  `hl.dsp.focus({window='address:...'})` or `hl.dsp.window.bring_to_top()` as a
+  single argv element. A failed legacy attempt is DEBUG while a fallback form
+  is still pending; a step where every form failed emits one WARNING naming
+  both forms and their exit codes.
 - **Emoji header buttons**: tiny glyphs; give them `objectName = "iconbtn"`
   and bump font-size in the theme QSS.
 - **Qt QSS limits**: no box-shadow, no repeating gradients; use

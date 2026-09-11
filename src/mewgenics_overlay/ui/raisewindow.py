@@ -12,6 +12,11 @@ hanging or failing ``hyprctl`` must not take the overlay down with it. A whole
 subprocess additionally by :data:`HYPRCTL_TIMEOUT_S`), and every failure is
 logged before ``focus_window`` returns ``False``.
 
+Hyprland has two dispatch flavours. Older releases take the legacy dispatcher
+strings (``focuswindow address:...``, ``bringactivetotop``); a Lua-config
+Hyprland (0.56+) evaluates the argument as Lua, so each step falls back to the
+equivalent ``hl.dsp.*`` expression when the legacy form fails.
+
 The subprocess runner, the ``which`` lookup and the ``sleep`` used for the
 first-summon retry are injectable so tests can drive the whole flow without
 Hyprland installed or real waiting.
@@ -19,6 +24,7 @@ Hyprland installed or real waiting.
 
 from __future__ import annotations
 
+import contextvars
 import json
 import logging
 import os
@@ -68,9 +74,32 @@ FOCUS_COMMAND = "focuswindow"        # hyprctl dispatch focuswindow address:<a>
 RAISE_COMMAND = "bringactivetotop"   # hyprctl dispatch bringactivetotop
 ADDRESS_PREFIX = "address:"
 
+# A Lua-config Hyprland (0.56+) evaluates the ``hyprctl dispatch`` argument as
+# Lua (``return hl.dispatch(<input>)``), so the legacy dispatcher strings fail
+# there with exit 7 ("expected a dispatcher"). Each step therefore carries the
+# equivalent Lua expression and falls back to it when the legacy form fails;
+# the legacy form stays first because it is still correct on older Hyprland.
+# The expression is sent as a single argv element, never through a shell.
+LUA_FOCUS_TEMPLATE = "hl.dsp.focus({{window='{address}'}})"
+LUA_RAISE = "hl.dsp.window.bring_to_top()"
+
 # Injectable subprocess runner: ``argv -> (returncode, stdout)``. The default
 # implementation never raises, so callers have one failure shape to handle.
 Runner = Callable[[Sequence[str]], tuple[int, str]]
+
+# Set while a dispatch step that has a Lua fallback runs. Such a step still has
+# another form to try and reports its own single WARNING if every form fails,
+# so the runner's per-form failure reason drops to DEBUG instead of warning on
+# every fallback (which reads like a failure even when the step then succeeds).
+# A legacy-only step is unmarked and keeps warning directly, as before.
+_FALLBACK_PENDING: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "mewgenics_overlay_raisewindow_fallback_pending", default=False)
+
+
+def _log_failure(message: str, *args: object) -> None:
+    """Log a command failure: DEBUG while a fallback step is pending, else WARNING."""
+    level = logging.DEBUG if _FALLBACK_PENDING.get() else logging.WARNING
+    log.log(level, message, *args)
 
 
 def is_hyprland(env: Optional[Mapping[str, str]] = None) -> bool:
@@ -93,7 +122,8 @@ def focus_window(
 ) -> bool:
     """Ask Hyprland to focus and raise the window owned by *pid*.
 
-    Returns ``True`` only when both dispatch commands succeed. On a
+    Returns ``True`` only when both steps succeed, each in either dispatch
+    flavour (legacy first, then the Lua ``hl.dsp`` form). On a
     non-Hyprland session this is a quiet ``False`` (the Qt calls already did
     what they could); every other miss is logged and returns ``False``.
 
@@ -133,10 +163,11 @@ def focus_window(
                     target)
         return False
 
-    if not _dispatch(run, hyprctl, [FOCUS_COMMAND,
-                                    f"{ADDRESS_PREFIX}{address}"], deadline):
+    if not _dispatch(run, hyprctl,
+                     [FOCUS_COMMAND, f"{ADDRESS_PREFIX}{address}"], deadline,
+                     lua=_lua_focus(address)):
         return False
-    if not _dispatch(run, hyprctl, [RAISE_COMMAND], deadline):
+    if not _dispatch(run, hyprctl, [RAISE_COMMAND], deadline, lua=LUA_RAISE):
         return False
     log.debug("raised Hyprland client %s for pid %s", address, target)
     return True
@@ -168,24 +199,26 @@ def _run(argv: Sequence[str],
     so the caller logs it once instead of the UI thread seeing an exception.
     The concrete reason is logged here (the exception type and message, or
     the command's stderr on a non-zero exit) because the caller only sees the
-    exit code and would otherwise report a bare "exit 1".
+    exit code and would otherwise report a bare "exit 1". While a fallback
+    step is pending the reason is logged at DEBUG: the step still has a
+    second dispatch form to try and warns once itself if every form fails.
     """
     cmd = [str(arg) for arg in argv]
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True,
                               timeout=timeout)
     except subprocess.TimeoutExpired:
-        log.warning("Hyprland command %s timed out after %.2fs", cmd[0],
-                    timeout)
+        _log_failure("Hyprland command %s timed out after %.2fs", cmd[0],
+                     timeout)
         return 1, ""
     except (OSError, subprocess.SubprocessError) as exc:
-        log.warning("Hyprland command %s failed: %s: %s", cmd[0],
-                    type(exc).__name__, exc)
+        _log_failure("Hyprland command %s failed: %s: %s", cmd[0],
+                     type(exc).__name__, exc)
         return 1, ""
     if proc.returncode != 0:
         stderr = (proc.stderr or "").strip()
-        log.warning("Hyprland command %s exited %s: %s", cmd[0],
-                    proc.returncode, stderr or "no stderr")
+        _log_failure("Hyprland command %s exited %s: %s", cmd[0],
+                     proc.returncode, stderr or "no stderr")
     return proc.returncode, proc.stdout or ""
 
 
@@ -195,14 +228,17 @@ def _guarded(runner: Runner) -> Runner:
     The default runner already converts OS and subprocess errors, but an
     injected runner may raise: this module promises never to raise, so the
     exception is logged and turned into a failed result instead of unwinding
-    out of ``WindowController.engage()``.
+    out of ``WindowController.engage()``. The log goes through
+    :func:`_log_failure`, so a raise inside a step that still has a Lua form
+    to try is DEBUG (the step warns once itself if every form fails), while a
+    raise that ends the step still warns.
     """
     def run(argv: Sequence[str]) -> tuple[int, str]:
         try:
             return runner(argv)
         except Exception as exc:  # any failure here must stay contained
-            log.warning("Hyprland command %s raised: %s",
-                        argv[0] if argv else "?", exc)
+            _log_failure("Hyprland command %s raised: %s",
+                         argv[0] if argv else "?", exc)
             return 1, ""
     return run
 
@@ -328,16 +364,62 @@ def _address_for_pid(clients: Sequence[object], pid: int) -> Optional[str]:
     return fallback
 
 
-def _dispatch(runner: Runner, hyprctl: str, args: Sequence[str],
-              deadline: Optional[float] = None) -> bool:
-    """Run one ``hyprctl dispatch`` command; log and return ``False`` on exit."""
+def _lua_focus(address: str) -> str:
+    """The Lua ``dispatch`` expression that focuses a client *address*."""
+    return LUA_FOCUS_TEMPLATE.format(address=f"{ADDRESS_PREFIX}{address}")
+
+
+def _dispatch_once(runner: Runner, hyprctl: str, args: Sequence[str],
+                   deadline: Optional[float],
+                   tentative: bool = False) -> Optional[int]:
+    """One dispatch form's exit code, or ``None`` when it was not attempted.
+
+    *tentative* marks a form inside a step that has a Lua fallback: its
+    runner-level failure reason is logged at DEBUG, and :func:`_dispatch`
+    emits the single WARNING if every form fails. A legacy-only form leaves
+    it ``False`` so the runner keeps warning directly.
+    """
     argv = [hyprctl, "dispatch", *args]
-    result = _invoke(runner, argv, deadline)
-    if result is None:
+    token = _FALLBACK_PENDING.set(tentative)
+    try:
+        result = _invoke(runner, argv, deadline)
+    finally:
+        _FALLBACK_PENDING.reset(token)
+    return None if result is None else result[0]
+
+
+def _dispatch(runner: Runner, hyprctl: str, args: Sequence[str],
+              deadline: Optional[float] = None,
+              lua: Optional[str] = None) -> bool:
+    """Run one ``hyprctl dispatch`` step, falling back to its Lua form.
+
+    *args* is the legacy dispatcher argv, still right for older Hyprland;
+    *lua* is the equivalent Lua expression for a Lua-config Hyprland, sent
+    as one argv element. The legacy form is tried first and the Lua form
+    only when it fails, so success from either counts for the step. Returns
+    ``False`` when both forms fail, logging one warning that names both forms
+    with their exit codes so the failure is diagnosable; *lua* ``None`` keeps
+    the legacy-only path.
+    """
+    label = args[0] if args else "?"
+    fallback = lua is not None
+    legacy = _dispatch_once(runner, hyprctl, args, deadline,
+                            tentative=fallback)
+    if legacy is None:
         return False
-    code, _out = result
-    if code != 0:
-        log.warning("%s dispatch %s failed (exit %s)", HYPRCTL,
-                    args[0] if args else "?", code)
+    if legacy == 0:
+        log.debug("Hyprland dispatch %s succeeded via legacy %s", label,
+                  " ".join(args))
+        return True
+    if lua is not None:
+        lua_code = _dispatch_once(runner, hyprctl, [lua], deadline,
+                                  tentative=True)
+        if lua_code == 0:
+            log.debug("Hyprland dispatch %s succeeded via Lua %s", label, lua)
+            return True
+        log.warning("%s dispatch %s failed in both forms: legacy '%s' "
+                    "(exit %s) and Lua '%s' (exit %s)", HYPRCTL, label,
+                    " ".join(args), legacy, lua, lua_code)
         return False
-    return True
+    log.warning("%s dispatch %s failed (exit %s)", HYPRCTL, label, legacy)
+    return False

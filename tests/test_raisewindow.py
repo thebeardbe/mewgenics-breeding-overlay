@@ -11,13 +11,21 @@ Covered here:
 
 * session detection and the quiet no-op off Hyprland;
 * the happy path order (clients -> focus -> bring-to-top);
+* the two ``hyprctl dispatch`` flavours per step: the legacy dispatcher
+  string is tried first, and only when it fails is the equivalent Lua
+  ``hl.dsp`` expression sent as a single argv element, for both the focus
+  and the bring-to-top step;
+* a step whose two forms both fail returning ``False`` with exactly one
+  warning that names the legacy and the Lua form;
 * the client preference among several windows of the same pid;
 * the one-shot lookup retry after ``FIRST_LOOKUP_RETRY_DELAY_S``;
 * the single whole-attempt :data:`FOCUS_BUDGET_S` that every call and the
   retry are charged against;
 * the default runner's concrete-failure logging;
-* an injected runner that *raises* (on the first call and on a later one)
-  being contained and turned into ``False`` instead of unwinding;
+* an injected runner that *raises* (on the first call, and repeatedly on
+  later ones so both dispatch forms of a step fail) being contained and
+  turned into ``False`` instead of unwinding, and a one-shot raise being
+  recovered by the Lua fallback;
 * every failure returning ``False`` without raising.
 
 The last section pins the integration point: ``WindowController.engage()``
@@ -126,6 +134,17 @@ def _hypr_env():
 
 
 HYPRCTL_PATH = "/usr/bin/hyprctl"
+
+# Each dispatch step's two argv shapes, built from the module's own constants
+# so the tests pin the real legacy strings and the real Lua expressions. The
+# focus Lua form embeds the ``address:`` prefix of the legacy argument.
+FOCUS_LEGACY_ARGV = [
+    HYPRCTL_PATH, "dispatch", "focuswindow", "address:0x04d2"]
+RAISE_LEGACY_ARGV = [HYPRCTL_PATH, "dispatch", "bringactivetotop"]
+FOCUS_LUA_ARGV = [
+    HYPRCTL_PATH, "dispatch",
+    raisewindow.LUA_FOCUS_TEMPLATE.format(address="address:0x04d2")]
+RAISE_LUA_ARGV = [HYPRCTL_PATH, "dispatch", raisewindow.LUA_RAISE]
 
 
 # ── 1. session detection ───────────────────────────────────────────────────
@@ -256,6 +275,224 @@ def test_which_defaults_to_shutil_which_when_not_injected(monkeypatch):
 
     assert raisewindow.focus_window(pid=1, env=_hypr_env()) is False
     assert looked_up == [raisewindow.HYPRCTL]
+
+
+# ── 3b. the two dispatch flavours: legacy first, Lua as the fallback ──────
+# Each step (focus, bring-to-top) carries a legacy dispatcher string and the
+# equivalent Lua ``hl.dsp`` expression. The legacy form is always tried
+# first; the Lua form only when it fails, and always as one argv element
+# (never shell-split). A step whose legacy form succeeds must not spend a
+# second ``hyprctl`` call on the Lua alternative.
+def _both_forms_warnings(caplog):
+    return [r for r in caplog.records
+            if r.name == LOG_NAME and r.levelno == logging.WARNING
+            and "both forms" in r.getMessage()]
+
+
+def test_lua_focus_embeds_the_address_prefix_of_the_legacy_argument():
+    # The Lua form targets the same address the legacy form does.
+    assert FOCUS_LEGACY_ARGV[-1] in FOCUS_LUA_ARGV[-1]
+    assert raisewindow._lua_focus("0x04d2") == FOCUS_LUA_ARGV[-1]
+
+
+def test_focus_window_uses_the_legacy_form_for_both_steps_when_it_succeeds():
+    runner = FakeRunner(
+        results=[(0, _clients_reply(1234)), (0, ""), (0, "")])
+
+    assert raisewindow.focus_window(
+        pid=1234, which=lambda _n: HYPRCTL_PATH, runner=runner,
+        env=_hypr_env(), sleep=FakeSleep()) is True
+
+    assert runner.calls == [
+        [HYPRCTL_PATH, "clients", "-j"], FOCUS_LEGACY_ARGV,
+        RAISE_LEGACY_ARGV,
+    ]
+    # No Lua expression was sent for either step.
+    assert not any("hl.dsp" in arg for call in runner.calls for arg in call)
+
+
+def test_focus_step_falls_back_to_the_lua_form_when_the_legacy_one_fails():
+    runner = FakeRunner(results=[(0, _clients_reply(1234)),
+                                 (7, ""),     # legacy focus fails
+                                 (0, ""),     # Lua focus succeeds
+                                 (0, "")])    # legacy bring-above
+
+    assert raisewindow.focus_window(
+        pid=1234, which=lambda _n: HYPRCTL_PATH, runner=runner,
+        env=_hypr_env(), sleep=FakeSleep()) is True
+
+    assert runner.calls == [
+        [HYPRCTL_PATH, "clients", "-j"], FOCUS_LEGACY_ARGV,
+        FOCUS_LUA_ARGV, RAISE_LEGACY_ARGV,
+    ]
+    # The Lua expression is one argv element, braces and all.
+    assert runner.calls[2][2] == FOCUS_LUA_ARGV[2]
+    assert len(runner.calls[2]) == 3
+
+
+def test_raise_step_falls_back_to_the_lua_form_when_the_legacy_one_fails():
+    runner = FakeRunner(results=[(0, _clients_reply(1234)),
+                                 (0, ""),     # legacy focus
+                                 (2, ""),     # legacy bring-above fails
+                                 (0, "")])    # Lua bring-above succeeds
+
+    assert raisewindow.focus_window(
+        pid=1234, which=lambda _n: HYPRCTL_PATH, runner=runner,
+        env=_hypr_env(), sleep=FakeSleep()) is True
+
+    assert runner.calls == [
+        [HYPRCTL_PATH, "clients", "-j"], FOCUS_LEGACY_ARGV,
+        RAISE_LEGACY_ARGV, RAISE_LUA_ARGV,
+    ]
+    assert runner.calls[3][2] == raisewindow.LUA_RAISE
+    assert len(runner.calls[3]) == 3
+
+
+def test_both_steps_recover_through_the_lua_form():
+    runner = FakeRunner(results=[(0, _clients_reply(1234)),
+                                 (7, ""), (0, ""),
+                                 (7, ""), (0, "")])
+
+    assert raisewindow.focus_window(
+        pid=1234, which=lambda _n: HYPRCTL_PATH, runner=runner,
+        env=_hypr_env(), sleep=FakeSleep()) is True
+
+    assert runner.calls == [
+        [HYPRCTL_PATH, "clients", "-j"], FOCUS_LEGACY_ARGV,
+        FOCUS_LUA_ARGV, RAISE_LEGACY_ARGV, RAISE_LUA_ARGV,
+    ]
+
+
+def test_focus_failing_in_both_forms_logs_one_warning_and_stops(caplog):
+    runner = FakeRunner(results=[(0, _clients_reply(1234)),
+                                 (7, ""),     # legacy focus fails
+                                 (3, "")])    # Lua focus fails too
+
+    with caplog.at_level(logging.WARNING, logger=LOG_NAME):
+        result = raisewindow.focus_window(
+            pid=1234, which=lambda _n: HYPRCTL_PATH, runner=runner,
+            env=_hypr_env(), sleep=FakeSleep())
+
+    assert result is False
+    # The bring-above step never runs: the focus step's failure ends it.
+    assert runner.calls == [
+        [HYPRCTL_PATH, "clients", "-j"], FOCUS_LEGACY_ARGV,
+        FOCUS_LUA_ARGV,
+    ]
+
+    warnings = [r for r in caplog.records
+                if r.name == LOG_NAME and r.levelno == logging.WARNING]
+    assert len(warnings) == 1
+    message = warnings[0].getMessage()
+    assert "both forms" in message
+    assert "focuswindow address:0x04d2" in message      # names the legacy form
+    assert FOCUS_LUA_ARGV[2] in message                  # and the Lua form
+    assert "(exit 7)" in message        # the legacy form's exit code
+    assert "(exit 3)" in message        # and the Lua form's
+
+
+def test_raise_failing_in_both_forms_logs_one_warning(caplog):
+    runner = FakeRunner(results=[(0, _clients_reply(1234)),
+                                 (0, ""),     # legacy focus
+                                 (7, ""),     # legacy bring-above fails
+                                 (3, "")])    # Lua bring-above fails too
+
+    with caplog.at_level(logging.WARNING, logger=LOG_NAME):
+        result = raisewindow.focus_window(
+            pid=1234, which=lambda _n: HYPRCTL_PATH, runner=runner,
+            env=_hypr_env(), sleep=FakeSleep())
+
+    assert result is False
+    assert runner.calls == [
+        [HYPRCTL_PATH, "clients", "-j"], FOCUS_LEGACY_ARGV,
+        RAISE_LEGACY_ARGV, RAISE_LUA_ARGV,
+    ]
+
+    warnings = [r for r in caplog.records
+                if r.name == LOG_NAME and r.levelno == logging.WARNING]
+    assert len(warnings) == 1
+    message = warnings[0].getMessage()
+    assert "both forms" in message
+    assert "bringactivetotop" in message
+    assert raisewindow.LUA_RAISE in message
+    assert "(exit 7)" in message        # the legacy form's exit code
+    assert "(exit 3)" in message        # and the Lua form's
+
+
+# The same fallback as a unit, without a client lookup wrapped around it.
+def test_dispatch_skips_lua_when_the_legacy_form_succeeds():
+    runner = FakeRunner(results=[(0, "")])
+
+    assert raisewindow._dispatch(
+        runner, HYPRCTL_PATH, ["focuswindow", "address:0x1"], None,
+        lua=raisewindow.LUA_RAISE) is True
+
+    assert runner.calls == [
+        [HYPRCTL_PATH, "dispatch", "focuswindow", "address:0x1"]]
+
+
+def test_dispatch_sends_lua_as_one_argv_element_after_legacy_fails():
+    runner = FakeRunner(results=[(1, ""), (0, "")])
+
+    assert raisewindow._dispatch(
+        runner, HYPRCTL_PATH, ["bringactivetotop"], None,
+        lua=raisewindow.LUA_RAISE) is True
+
+    assert runner.calls == [
+        [HYPRCTL_PATH, "dispatch", "bringactivetotop"],
+        RAISE_LUA_ARGV,
+    ]
+    assert runner.calls[1][2] == raisewindow.LUA_RAISE   # not shell-split
+
+
+def test_dispatch_both_forms_failing_returns_false_with_one_warning(caplog):
+    runner = FakeRunner(results=[(1, ""), (2, "")])
+
+    with caplog.at_level(logging.WARNING, logger=LOG_NAME):
+        result = raisewindow._dispatch(
+            runner, HYPRCTL_PATH, ["focuswindow", "address:0x1"], None,
+            lua=raisewindow.LUA_RAISE)
+
+    assert result is False
+    warnings = _both_forms_warnings(caplog)
+    assert len(warnings) == 1
+    message = warnings[0].getMessage()
+    assert "focuswindow address:0x1" in message
+    assert raisewindow.LUA_RAISE in message
+    assert "(exit 1)" in message        # the legacy form's exit code
+    assert "(exit 2)" in message        # and the Lua form's
+
+
+def test_dispatch_without_a_lua_form_stays_legacy_only(caplog):
+    """``lua=None`` keeps the legacy-only path documented for a step."""
+    runner = FakeRunner(results=[(2, "")])
+
+    with caplog.at_level(logging.WARNING, logger=LOG_NAME):
+        result = raisewindow._dispatch(
+            runner, HYPRCTL_PATH, ["bringactivetotop"], None, lua=None)
+
+    assert result is False
+    assert runner.calls == [[HYPRCTL_PATH, "dispatch", "bringactivetotop"]]
+    warnings = [r.getMessage() for r in caplog.records
+                if r.name == LOG_NAME and r.levelno == logging.WARNING]
+    assert any("bringactivetotop" in m for m in warnings)
+    assert not any("both forms" in m for m in warnings)
+
+
+def test_dispatch_does_not_try_lua_when_the_budget_blocks_legacy(
+        monkeypatch, caplog):
+    clock = _patch_clock(monkeypatch, FakeClock(1000.0))
+    runner = FakeRunner(results=[(0, "")])
+
+    with caplog.at_level(logging.WARNING, logger=LOG_NAME):
+        result = raisewindow._dispatch(
+            runner, HYPRCTL_PATH, ["bringactivetotop"], clock.now,
+            lua=raisewindow.LUA_RAISE)
+
+    # A spent budget is not a legacy failure, so no Lua call is spent on it.
+    assert result is False
+    assert runner.calls == []
+    assert any("budget" in r.getMessage() for r in caplog.records)
 
 
 # ── 4. picking among several clients owned by the same pid ─────────────────
@@ -606,8 +843,9 @@ def test_non_dict_client_entries_are_skipped():
     assert "address:0xok" in runner.calls[1]
 
 
-def test_focus_dispatch_failure_stops_before_bringactivetotop(caplog):
-    runner = FakeRunner(results=[(0, _clients_reply(1234)), (1, "")])
+def test_focus_dispatch_failure_in_both_forms_stops_before_bringactivetotop(
+        caplog):
+    runner = FakeRunner(results=[(0, _clients_reply(1234)), (1, ""), (1, "")])
 
     with caplog.at_level(logging.WARNING, logger=LOG_NAME):
         result = raisewindow.focus_window(
@@ -616,15 +854,16 @@ def test_focus_dispatch_failure_stops_before_bringactivetotop(caplog):
 
     assert result is False
     assert runner.calls == [
-        [HYPRCTL_PATH, "clients", "-j"],
-        [HYPRCTL_PATH, "dispatch", "focuswindow", "address:0x04d2"],
+        [HYPRCTL_PATH, "clients", "-j"], FOCUS_LEGACY_ARGV,
+        FOCUS_LUA_ARGV,
     ]
-    assert any("dispatch focuswindow failed" in r.getMessage()
+    assert any("dispatch focuswindow failed in both forms" in r.getMessage()
                for r in caplog.records)
 
 
-def test_bringactivetotop_failure_returns_false(caplog):
-    runner = FakeRunner(results=[(0, _clients_reply(1234)), (0, ""), (2, "")])
+def test_bringactivetotop_failure_in_both_forms_returns_false(caplog):
+    runner = FakeRunner(results=[(0, _clients_reply(1234)), (0, ""),
+                                 (2, ""), (2, "")])
 
     with caplog.at_level(logging.WARNING, logger=LOG_NAME):
         result = raisewindow.focus_window(
@@ -632,10 +871,9 @@ def test_bringactivetotop_failure_returns_false(caplog):
             env=_hypr_env(), sleep=FakeSleep())
 
     assert result is False
-    assert runner.calls[-1] == [
-        HYPRCTL_PATH, "dispatch", "bringactivetotop"]
-    assert any("dispatch bringactivetotop failed" in r.getMessage()
-               for r in caplog.records)
+    assert runner.calls[-1] == RAISE_LUA_ARGV
+    assert any("dispatch bringactivetotop failed in both forms"
+               in r.getMessage() for r in caplog.records)
 
 
 def test_no_failure_path_raises(caplog):
@@ -645,9 +883,9 @@ def test_no_failure_path_raises(caplog):
         FakeRunner(results=[(0, "{"), (0, "{")]),         # unparseable twice
         FakeRunner(results=[(0, "[]"), (0, "[]")]),       # no pid match twice
         FakeRunner(results=[(0, _clients_reply(1234)),
-                            (9, "")]),   # focus dispatch fails
+                            (9, ""), (9, "")]),   # focus fails both forms
         FakeRunner(results=[(0, _clients_reply(1234)), (0, ""),
-                            (9, "")]),                    # bring-above fails
+                            (9, ""), (9, "")]),  # bring-above fails both
     ]
     with caplog.at_level(logging.DEBUG, logger=LOG_NAME):
         for runner in scenarios:
@@ -661,13 +899,19 @@ def test_no_failure_path_raises(caplog):
 # failed result, because ``focus_window`` is called from the UI thread. These
 # tests drive the public entry point with a runner that raises and check the
 # exception cannot escape.
-def _raising_runner(exc, raise_on_call=1, clients_payload=None):
-    """A recording runner that raises *exc* on its Nth call (1-indexed)."""
+def _raising_runner(exc, raise_on_call=1, clients_payload=None,
+                    forever=False):
+    """A recording runner that raises *exc* on its Nth call (1-indexed).
+
+    With *forever* it keeps raising on every call from the Nth on, so a
+    multi-form dispatch step cannot recover and the failure is contained.
+    """
     calls = []
 
     def runner(argv):
         calls.append([str(a) for a in argv])
-        if len(calls) == raise_on_call:
+        if len(calls) == raise_on_call or (forever
+                                           and len(calls) >= raise_on_call):
             raise exc
         return 0, clients_payload if argv[1] == "clients" else ""
 
@@ -695,23 +939,71 @@ def test_focus_window_contains_a_runner_that_raises_on_the_first_call(
                for r in caplog.records)
 
 
-@pytest.mark.parametrize("raise_on_call", [2, 3])
-def test_focus_window_contains_a_runner_that_raises_on_a_later_call(
-        raise_on_call):
-    """A raise after the client lookup succeeded (on the focus or the
-    bring-to-top dispatch) also stops the attempt with a logged False."""
+@pytest.mark.parametrize("raise_on_call, expected, label, lua_form", [
+    (2, [[HYPRCTL_PATH, "clients", "-j"], FOCUS_LEGACY_ARGV,
+         FOCUS_LUA_ARGV], "focuswindow", FOCUS_LUA_ARGV[2]),
+    (3, [[HYPRCTL_PATH, "clients", "-j"], FOCUS_LEGACY_ARGV,
+         RAISE_LEGACY_ARGV, RAISE_LUA_ARGV], "bringactivetotop",
+     RAISE_LUA_ARGV[2]),
+])
+def test_focus_window_contains_a_runner_that_raises_persistently(
+        raise_on_call, expected, label, lua_form, caplog):
+    """A runner that keeps raising after the client lookup (so both dispatch
+    forms of a step fail) ends the attempt with a logged False, and the
+    exception never unwinds out of ``focus_window``.
+
+    The raise goes through the same failure helper as the default runner:
+    while the step still has its Lua form to try each guarded raise is DEBUG
+    (a raise counts as a failed command, i.e. exit 1), and the step then
+    reports its own single WARNING naming both forms with their exit codes.
+    """
     runner, calls = _raising_runner(
         RuntimeError("hyprctl died"), raise_on_call=raise_on_call,
+        clients_payload=_clients_reply(1234), forever=True)
+
+    with caplog.at_level(logging.DEBUG, logger=LOG_NAME):
+        assert raisewindow.focus_window(
+            pid=1234, which=lambda _n: HYPRCTL_PATH, runner=runner,
+            env=_hypr_env(), sleep=FakeSleep()) is False
+
+    assert calls == expected
+    # The one visible record is the step's own warning, naming both forms
+    # with their exit codes; a raise that the Lua form still had a chance to
+    # recover from never warns on its own.
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == 1
+    message = warnings[0].getMessage()
+    assert "both forms" in message
+    assert label in message
+    assert "(exit 1)" in message        # the raising legacy form
+    assert lua_form in message           # and the Lua form it fell back to
+    assert not any(r.levelno >= logging.WARNING and "raised" in r.getMessage()
+                   for r in caplog.records)
+    assert any(r.levelno == logging.DEBUG and "raised" in r.getMessage()
+               for r in caplog.records)
+
+
+def test_a_one_shot_runner_raise_counts_as_a_failed_legacy_form(caplog):
+    """A guarded raise becomes a failed dispatch, so the Lua form still gets
+    its chance: the fallback is not skipped just because the runner raised,
+    and the recovered raise leaves no warning behind."""
+    runner, calls = _raising_runner(
+        RuntimeError("hyprctl hiccup"), raise_on_call=2,
         clients_payload=_clients_reply(1234))
 
-    assert raisewindow.focus_window(
-        pid=1234, which=lambda _n: HYPRCTL_PATH, runner=runner,
-        env=_hypr_env(), sleep=FakeSleep()) is False
+    with caplog.at_level(logging.DEBUG, logger=LOG_NAME):
+        assert raisewindow.focus_window(
+            pid=1234, which=lambda _n: HYPRCTL_PATH, runner=runner,
+            env=_hypr_env(), sleep=FakeSleep()) is True
     assert calls == [
         [HYPRCTL_PATH, "clients", "-j"],
-        [HYPRCTL_PATH, "dispatch", "focuswindow", "address:0x04d2"],
-        [HYPRCTL_PATH, "dispatch", "bringactivetotop"],
-    ][:raise_on_call]
+        FOCUS_LEGACY_ARGV,        # raised -> guarded failure
+        FOCUS_LUA_ARGV,           # recovered via the Lua form
+        RAISE_LEGACY_ARGV,
+    ]
+    assert not any(r.levelno >= logging.WARNING for r in caplog.records)
+    assert any(r.levelno == logging.DEBUG and "raised" in r.getMessage()
+               for r in caplog.records)
 
 
 @pytest.mark.parametrize("exc", [
@@ -1054,6 +1346,37 @@ def test_default_runner_logs_nothing_on_success(monkeypatch, caplog):
         assert raisewindow._run([HYPRCTL_PATH]) == (0, "ok")
 
     assert caplog.records == []
+
+
+def test_default_runner_legacy_dispatch_recovered_by_lua_warns_not_at_all(
+        monkeypatch, caplog):
+    """Headline guarantee of this change, through the *real* default runner
+    (only ``subprocess.run`` stubbed): a legacy dispatch that fails and is
+    then recovered by the Lua form emits no warning record at all. The
+    per-form reason is recorded at DEBUG only, because the step still had its
+    Lua form to try and succeeded, so nothing failed to warn about."""
+    _patch_clock(monkeypatch, FakeClock(1000.0))
+
+    def _sub_run(cmd, **kwargs):
+        if cmd[1] == "clients":
+            return _proc(stdout=_clients_reply(1234))
+        if cmd[2] == "focuswindow":
+            # A legacy dispatcher string on a Lua-config Hyprland (0.56+).
+            return _proc(returncode=7, stderr="expected a dispatcher")
+        return _proc()               # the Lua form, then bring-to-top
+
+    _install_subprocess(monkeypatch, _sub_run)
+
+    with caplog.at_level(logging.DEBUG, logger=LOG_NAME):
+        result = raisewindow.focus_window(
+            pid=1234, which=lambda _n: HYPRCTL_PATH, env=_hypr_env(),
+            sleep=FakeSleep())
+
+    assert result is True
+    assert caplog.records             # the DEBUG reason really was emitted
+    assert not any(r.levelno >= logging.WARNING for r in caplog.records)
+    assert any(r.levelno == logging.DEBUG and "exited 7" in r.getMessage()
+               for r in caplog.records)
 
 
 def test_the_timeout_is_short_enough_for_the_ui_thread():
