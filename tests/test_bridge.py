@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import socket
 import threading
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -170,6 +171,49 @@ def test_server_drops_oversized_line_and_stays_up():
         send(server.port, message(key=360))
         assert collector.wait(), "valid request after oversized line not delivered"
         assert collector.requests[-1].key == 360
+    finally:
+        server.stop()
+
+
+def test_server_send_reaches_a_connected_client():
+    server, _ = start_server()
+    try:
+        client = socket.create_connection(("127.0.0.1", server.port), timeout=3.0)
+        deadline = time.time() + 2.0
+        while server.client_count == 0 and time.time() < deadline:
+            time.sleep(0.01)
+        assert server.client_count == 1
+
+        assert server.send({"v": 1, "type": "select", "key": 423}) == 1
+        client.settimeout(3.0)
+        payload = json.loads(client.recv(1024).decode("utf-8").strip())
+        assert payload == {"v": 1, "type": "select", "key": 423}
+        client.close()
+    finally:
+        server.stop()
+
+
+def test_server_send_without_clients_is_zero():
+    server, _ = start_server()
+    try:
+        assert server.send({"v": 1, "type": "select", "key": 1}) == 0
+    finally:
+        server.stop()
+
+
+def test_server_keeps_the_connection_open_for_commands():
+    server, collector = start_server()
+    try:
+        client = socket.create_connection(("127.0.0.1", server.port), timeout=3.0)
+        client.sendall((message(key=341) + "\n").encode("utf-8"))
+        assert collector.wait(), "focus not delivered"
+        deadline = time.time() + 2.0
+        while server.client_count == 0 and time.time() < deadline:
+            time.sleep(0.01)
+        assert server.send({"v": 1, "type": "select", "key": 341}) == 1
+        client.settimeout(3.0)
+        assert b"select" in client.recv(1024)
+        client.close()
     finally:
         server.stop()
 

@@ -171,6 +171,11 @@ class BridgeServer:
         self._thread: Optional[threading.Thread] = None
         self._stop = threading.Event()
         self._port: Optional[int] = None
+        # Connected peers. The mod keeps one connection open so we can send
+        # commands back (select a cat in game). Guarded by a lock because the
+        # UI thread sends while connection threads register/unregister.
+        self._clients: set[socket.socket] = set()
+        self._clients_lock = threading.Lock()
 
     # ── state ──────────────────────────────────────────────────────────────
     @property
@@ -187,6 +192,37 @@ class BridgeServer:
     @property
     def running(self) -> bool:
         return self._thread is not None and self._thread.is_alive()
+
+    @property
+    def client_count(self) -> int:
+        with self._clients_lock:
+            return len(self._clients)
+
+    # ── outbound ───────────────────────────────────────────────────────────
+    def send(self, payload: dict) -> int:
+        """Send one JSON line to every connected peer; returns how many got it.
+
+        Safe to call from the UI thread. Dead peers are dropped silently.
+        """
+        data = (json.dumps(payload, separators=(",", ":")) + "\n").encode("utf-8")
+        with self._clients_lock:
+            clients = list(self._clients)
+        delivered = 0
+        for conn in clients:
+            try:
+                conn.sendall(data)
+                delivered += 1
+            except OSError:
+                self._unregister(conn)
+        return delivered
+
+    def _register(self, conn: socket.socket) -> None:
+        with self._clients_lock:
+            self._clients.add(conn)
+
+    def _unregister(self, conn: socket.socket) -> None:
+        with self._clients_lock:
+            self._clients.discard(conn)
 
     # ── lifecycle ──────────────────────────────────────────────────────────
     def start(self) -> bool:
@@ -222,6 +258,14 @@ class BridgeServer:
                 sock.close()
             except OSError:
                 pass
+        with self._clients_lock:
+            clients = list(self._clients)
+            self._clients.clear()
+        for conn in clients:
+            try:
+                conn.close()
+            except OSError:
+                pass
         if self._thread is not None:
             self._thread.join(timeout=2.0)
             self._thread = None
@@ -245,25 +289,32 @@ class BridgeServer:
                 name="mewgenics-bridge-conn", daemon=True).start()
 
     def _handle(self, conn: socket.socket, peer: tuple) -> None:
-        with conn:
-            conn.settimeout(ACCEPT_TIMEOUT)
-            buffer = b""
-            while not self._stop.is_set():
-                try:
-                    chunk = conn.recv(4096)
-                except socket.timeout:
-                    continue
-                except OSError:
-                    return
-                if not chunk:
-                    return
-                buffer += chunk
-                if len(buffer) > MAX_LINE_BYTES and b"\n" not in buffer:
-                    self._log.warning("bridge: dropping oversized message from %s", peer)
-                    return
-                while b"\n" in buffer:
-                    line, buffer = buffer.split(b"\n", 1)
-                    self._dispatch(line, peer)
+        self._register(conn)
+        try:
+            self._read_loop(conn, peer)
+        finally:
+            self._unregister(conn)
+            conn.close()
+
+    def _read_loop(self, conn: socket.socket, peer: tuple) -> None:
+        conn.settimeout(ACCEPT_TIMEOUT)
+        buffer = b""
+        while not self._stop.is_set():
+            try:
+                chunk = conn.recv(4096)
+            except socket.timeout:
+                continue
+            except OSError:
+                return
+            if not chunk:
+                return
+            buffer += chunk
+            if len(buffer) > MAX_LINE_BYTES and b"\n" not in buffer:
+                self._log.warning("bridge: dropping oversized message from %s", peer)
+                return
+            while b"\n" in buffer:
+                line, buffer = buffer.split(b"\n", 1)
+                self._dispatch(line, peer)
 
     def _dispatch(self, line: bytes, peer: tuple) -> None:
         if not line.strip():

@@ -136,6 +136,10 @@ shows itself.
   the overlay's `db_key`; `uid` and `name` are accepted as fallbacks.
 - Loopback only. A local process can focus a cat, but it cannot read anything or
   change game state.
+- **Ctrl+G** sends the focused cat the other way: the game selects that cat, so
+  you can jump from a partner in the overlay to that cat in game. It needs a mod
+  build that supports `select` and a connected game; if no game is connected the
+  overlay logs it and does nothing.
 
 This is not in a release yet; it needs the mod DLL installed in the game.
 

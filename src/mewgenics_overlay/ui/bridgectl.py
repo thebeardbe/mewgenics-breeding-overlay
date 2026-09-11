@@ -43,3 +43,11 @@ class BridgeController(QObject):
 
     def stop(self) -> None:
         self._server.stop()
+
+    def send_select(self, key: int) -> int:
+        """Ask the game to show cat *key*. Returns how many clients got it."""
+        return self._server.send({
+            "v": bridge.PROTOCOL_VERSION,
+            "type": "select",
+            "key": int(key),
+        })

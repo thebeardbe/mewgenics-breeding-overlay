@@ -21,7 +21,8 @@ import os
 import sys
 
 from PySide6.QtCore import Qt, QPoint
-from PySide6.QtGui import QAction, QColor, QGuiApplication, QIcon, QPainter, QPixmap
+from PySide6.QtGui import QAction, QColor, QGuiApplication, QIcon, QKeySequence, QPainter, QPixmap, QShortcut
+from PySide6.QtGui import QGuiApplication as _QtGuiApplication  # real class, not test-stubbed
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
 from mewgenics_overlay import __version__
@@ -240,6 +241,22 @@ def main(argv=None) -> int:
         if not bridge_ctl.start():
             logging.warning("bridge: not listening this session (port %s busy?)",
                             bridge_ctl.port)
+
+        def _show_focused_cat_in_game() -> None:
+            cat = palette._focus
+            if cat is None:
+                logging.info("bridge: nothing focused to show in game")
+                return
+            if bridge_ctl.send_select(cat.db_key) > 0:
+                logging.info("bridge: asked the game to select cat key=%d", cat.db_key)
+            else:
+                logging.warning("bridge: no game connected; cannot show %s", cat.name)
+
+        # Ctrl+G: show the cat the overlay is focused on back in the game.
+        # Guarded: a QShortcut needs a live QApplication (tests stub it out).
+        if _QtGuiApplication.instance() is not None:
+            show_cat = QShortcut(QKeySequence("Ctrl+G"), palette)
+            show_cat.activated.connect(_show_focused_cat_in_game)
 
     if args.save:
         palette.open_save(args.save)

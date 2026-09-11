@@ -25,6 +25,8 @@ import pytest  # noqa: E402
 pytest.importorskip("PySide6")
 pytest.importorskip("lz4")
 
+from PySide6.QtCore import QObject  # noqa: E402
+
 from mewgenics_overlay.core import bridge  # noqa: E402
 from mewgenics_overlay.ui import app  # noqa: E402
 from mewgenics_overlay.ui import desktopshortcut  # noqa: E402
@@ -65,12 +67,16 @@ class _FakeApp:
         return 0
 
 
-class _FakePalette:
-    """Records constructions; every method ``main`` calls is a no-op."""
+class _FakePalette(QObject):
+    """Records constructions; every method ``main`` calls is a no-op.
+
+    A real QObject because ``main`` parents a QShortcut to it.
+    """
 
     instances: list["_FakePalette"] = []
 
     def __init__(self):
+        super().__init__()
         _FakePalette.instances.append(self)
         self.hotkey_active = False
         self.listener = None
@@ -82,6 +88,7 @@ class _FakePalette:
             by_key={341: SimpleNamespace(db_key=341)}, cats=[])
         self.focused = []
         self.engaged = False
+        self._focus = None
 
     def set_focus_key(self, db_key):
         self.focused.append(db_key)
@@ -121,6 +128,7 @@ class _FakeBridgeController:
         self.focus_requested = _FakeSignal()
         self.started = False
         self.stopped = False
+        self.sent = []
         _FakeBridgeController.instances.append(self)
 
     def start(self):
@@ -129,6 +137,10 @@ class _FakeBridgeController:
 
     def stop(self):
         self.stopped = True
+
+    def send_select(self, key):
+        self.sent.append(key)
+        return 1
 
 
 class _FakeInstance:
