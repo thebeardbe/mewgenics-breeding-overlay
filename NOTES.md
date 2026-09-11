@@ -76,13 +76,15 @@ Waiting on the tester's results for v0.2.1 (Windows hotkey) and v0.2.2
 
 ## Future features
 
-- **In-game bridge (in progress)** — the separate `mewgenics-breeding-mod` DLL
-  talks to the overlay over loopback TCP (protocol v1, `{"type":"focus","key":N}`).
-  `core/bridge.py` owns the protocol and resolution, `ui/bridgectl.py` hops onto
-  the UI thread, and `app.py` focuses the cat and shows the window. Default port
-  `45780` (`bridge_port`), disable with `bridge_enabled`. The mod currently only
-  logs cats at save load; the in-game button and the overlay-to-game select path
-  are still to come.
+- **In-game bridge (working; polish to come)** — the separate
+  `mewgenics-breeding-mod` DLL talks to the overlay over one loopback TCP
+  connection (protocol v1). `core/bridge.py` owns the protocol and resolution,
+  `ui/bridgectl.py` hops onto the UI thread, and `app.py` focuses the cat and
+  shows the window. The mod sends `focus` when a cat is selected in game, and
+  the overlay sends `select` back (Ctrl+G today) to switch the game's cat menu.
+  Default port `45780` (`bridge_port`), disable with `bridge_enabled`. Still to
+  come: the in-game CatMenu button, launching the overlay from the mod, and the
+  one-click installers.
 - **Auto-update** — check the latest release on startup; show a confirmation
   box before downloading/offering the new binary. (The check + website
   download button shipped in v0.2.0; actual self-update is not done.)
@@ -95,6 +97,20 @@ Waiting on the tester's results for v0.2.1 (Windows hotkey) and v0.2.2
 - **"How does this cat look?"** — if feasible, a button/panel rendering the
   cat's visual appearance from the save's mutation data (needs research on
   how far the save + gpak data can drive a sprite preview).
+
+## In-game bridge follow-ups (reviewer notes)
+
+- `ui/raisewindow.py` (Hyprland focus fallback):
+  - the client-lookup retry triggers on any lookup miss, not only "no pid
+    match", so a broken `hyprctl` is queried twice; retry only after a
+    successful parse with no pid match, or reword the docstring.
+  - one failing `hyprctl` command is logged twice (the default runner logs the
+    concrete reason, then the caller logs the exit code); drop one line.
+  - `focus_window()` runs synchronously inside `engage()`, bounded to about
+    1.5s plus a 0.15s first-summon retry. Move it to a worker if a hitch ever
+    shows up on a slow compositor.
+- The mod's hooks are pinned to game build `25143593`; a game update needs the
+  RVAs re-resolved (see the mod repo's `RESEARCH.md`).
 
 ## Refactor roadmap (complete)
 

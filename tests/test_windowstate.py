@@ -29,6 +29,7 @@ from PySide6.QtCore import QEvent, QRect, Qt  # noqa: E402
 from PySide6.QtGui import QGuiApplication  # noqa: E402
 from PySide6.QtWidgets import QApplication, QWidget  # noqa: E402
 
+from mewgenics_overlay.ui import raisewindow  # noqa: E402
 from mewgenics_overlay.ui import windowstate as ws  # noqa: E402
 from mewgenics_overlay.ui.windowstate import (  # noqa: E402
     CLICK_THROUGH_DEFAULT,
@@ -42,6 +43,19 @@ from mewgenics_overlay.ui.windowstate import (  # noqa: E402
 def qapp():
     app = QApplication.instance() or QApplication([])
     yield app
+
+
+@pytest.fixture(autouse=True)
+def _stub_hyprland_raise(monkeypatch):
+    """``engage()`` also nudges the compositor through ``raisewindow``.
+
+    These tests are about the Qt-level behaviour, so the fallback is stubbed
+    out: otherwise a Hyprland dev machine would shell out to the real
+    ``hyprctl clients -j`` (bounded only by a 2 s timeout) and read the live
+    session during the suite. ``tests/test_raisewindow.py`` covers the
+    fallback itself and pins the call from ``engage()``.
+    """
+    monkeypatch.setattr(raisewindow, "focus_window", lambda *a, **k: False)
 
 
 class FakeChrome:

@@ -20,6 +20,9 @@ import time
 _tmp_cfg = tempfile.mkdtemp(prefix="mewgenics-cfg-")
 os.environ.setdefault("XDG_CONFIG_HOME", _tmp_cfg)
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+# The engage path shells out to the compositor to raise the window; drop the
+# Hyprland session marker so that fallback is a no-op in this offscreen run.
+os.environ.pop("HYPRLAND_INSTANCE_SIGNATURE", None)
 
 from PySide6.QtWidgets import QApplication  # noqa: E402
 

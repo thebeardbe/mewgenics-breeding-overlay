@@ -22,6 +22,7 @@ from PySide6.QtCore import QEvent, QObject, QRect, Qt
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import QWidget
 
+from mewgenics_overlay.ui import raisewindow
 from mewgenics_overlay.ui.chrome import TopBar
 
 log = logging.getLogger("mewgenics_overlay.ui")
@@ -170,6 +171,10 @@ class WindowController(QObject):
         self._window.raise_()
         self._window.activateWindow()
         self._window.setFocus()
+        # Qt only *asks*; on Hyprland a compositor rule can still keep the
+        # palette behind the game, so nudge the compositor directly. No-op
+        # (and quiet) on every other session.
+        raisewindow.focus_window()
 
     def toggle_activate(self) -> None:
         """Hotkey/tray cycle: hidden -> engage; passive -> engage; active -> hide."""
