@@ -31,6 +31,7 @@ from mewgenics_overlay.vendor.save_parser import (
 )
 from mewgenics_overlay.vendor.breeding import (
     PairFactors,
+    game_compatibility,
     is_direct_family_pair,
     score_pair,
 )
@@ -43,6 +44,19 @@ STAT_NAMES = ["STR", "DEX", "CON", "INT", "SPD", "CHA", "LCK"]
 
 RISK_SAFE_TIER = 8.0   # partners at/below this risk % sort above riskier ones
                       # (see the "risk" order in rank_partners)
+
+# The game rejects a mating attempt when its compatibility score falls below
+# this line. The vendored pair evaluation uses the same value as its default
+# ``compat_threshold``; naming it here keeps the overlay's own wording and
+# the vendor math agreeing on one value.
+GAME_COMPATIBILITY_MIN = 0.05
+
+# Save property values are decoded for display/detection only; cap each one
+# so a large blob can never be retained in memory.
+SAVE_PROPERTY_MAX_CHARS = 64
+
+# Overlay label for a parent-child / sibling block (one source of truth).
+FAMILY_BLOCK_REASON = "Direct family pair"
 
 
 def display_location(cat) -> str:
@@ -59,6 +73,35 @@ def display_location(cat) -> str:
     if status == "In House":
         return room if room else "Outside house"
     return status or "Gone"
+
+
+def blocked_reason(cat: Cat, partner: Cat, vendored_reason: str,
+                   direct_family: bool = False) -> str:
+    """Overlay wording for why a partner row is blocked (pure).
+
+    The vendored ``can_breed`` rejects every same-gender pair with a single
+    message before the game's compatibility gate is considered, so a
+    straight same-sex pair is described as "mates but produces no kitten"
+    even when its compatibility is below the line and the game would never
+    attempt it. Direct family pairs keep the overlay label; same-gender pairs
+    are re-described from their real compatibility value; every other pair
+    keeps the vendored reason unchanged. All returned strings are em-dash
+    free.
+    """
+    if direct_family:
+        return FAMILY_BLOCK_REASON
+    gender_a = (getattr(cat, "gender", "?") or "?").strip().lower()
+    gender_b = (getattr(partner, "gender", "?") or "?").strip().lower()
+    # Mirror the vendored can_breed: neutral ("?") pairs are never same-sex.
+    if gender_a == gender_b and gender_a != "?":
+        compat = game_compatibility(cat, partner)
+        if compat < GAME_COMPATIBILITY_MIN:
+            return (f"This pair will not mate, compatibility {compat:.3f} "
+                    f"is below the game's {GAME_COMPATIBILITY_MIN:.2f} line")
+        return (f"Same-gender pair, compatibility {compat:.3f} is at or "
+                f"above the game's {GAME_COMPATIBILITY_MIN:.2f} line: they "
+                f"mate but produce no kitten and raise the Gay Stray chance")
+    return vendored_reason
 
 
 def _build_key_maps(
@@ -144,6 +187,7 @@ class Session:
         self.data: SaveData | None = None
         self.cats: list[Cat] = []
         self.npc_progress_flags: set = set()
+        self.save_properties: dict = {}
         self._parent_map: dict[int, set[int]] = {}
         self._lover_map: dict[int, set[int]] = {}
         self._hater_map: dict[int, set[int]] = {}
@@ -155,10 +199,11 @@ class Session:
         self.cats = list(self.data.cats)
         self._finish_cats(self.cats)
         self._parent_map, self._lover_map, self._hater_map = _build_key_maps(self.cats)
-        # current_day + npc_progress both live in the same sqlite file the
-        # parser just opened, so read them in ONE extra read-only connection.
-        self.current_day, self.npc_progress_flags = _read_aux_save_data(
-            self.save_path)
+        # current_day + npc_progress + the properties table all live in the
+        # same sqlite file the parser just opened, so read them in ONE extra
+        # read-only connection.
+        (self.current_day, self.npc_progress_flags,
+         self.save_properties) = _read_aux_save_data(self.save_path)
 
     @staticmethod
     def _finish_cats(cats: list[Cat]) -> None:
@@ -255,17 +300,11 @@ class Session:
                 stimulation=stimulation,
             )
             family = is_direct_family_pair(cat, b, parent_map)
-            # Same-sex pairs are already rejected by the vendored can_breed
-            # (1.1 rule: they mate but never produce a kitten - they raise
-            # the Gay-Stray chance instead), so no extra gate is needed here.
+            # The vendored can_breed rejects same-gender pairs before the
+            # game's compatibility gate runs, so blocked_reason re-describes
+            # those rows with their real compatibility value.
             ok = bool(factors.compatible and not family)
-            if not ok:
-                if family:
-                    reason = "Direct family pair"
-                else:
-                    reason = factors.reason
-            else:
-                reason = ""
+            reason = "" if ok else blocked_reason(cat, b, factors.reason, family)
             proj = factors.projection
             is_lover = b.db_key in lover_map.get(cat.db_key, set())
             row = PartnerRow(
@@ -323,13 +362,16 @@ class Session:
             unique_id=cat.unique_id,
         )
 
-def _read_aux_save_data(save_path: str) -> tuple[Optional[int], set]:
-    """Best-effort extra save fields: (current in-game day, npc_progress flags).
+def _read_aux_save_data(save_path: str) -> tuple[Optional[int], set, dict]:
+    """Best-effort extra save fields: (day, npc_progress flags, properties).
 
-    Both live in the same read-only sqlite database the parser already opened
-    (``properties/current_day`` and the ``files/npc_progress`` blob), so they
-    are read together in ONE connection. On any problem returns
-    ``(None, empty set)`` - the overlay degrades gracefully without them.
+    All three live in the same read-only sqlite database the parser already
+    opened (``properties/current_day``, the ``files/npc_progress`` blob, and
+    the ``properties`` key/value table), so they are read together in ONE
+    connection. Property values are decoded as UTF-8 with errors replaced and
+    truncated to ``SAVE_PROPERTY_MAX_CHARS`` so no large blob is retained. On
+    any problem returns ``(None, empty set, empty dict)`` - the overlay
+    degrades gracefully without them.
     """
     try:
         conn = sqlite3.connect(f"file:{save_path}?mode=ro", uri=True)
@@ -346,15 +388,24 @@ def _read_aux_save_data(save_path: str) -> tuple[Optional[int], set]:
             if row:
                 names = re.findall(rb"[A-Za-z_][A-Za-z0-9_]{2,}", row[0])
                 flags = {n.decode(errors="replace") for n in names}
+            properties: dict = {}
+            for key, value in conn.execute("SELECT key, data FROM properties"):
+                if isinstance(value, (bytes, bytearray)):
+                    text = bytes(value).decode("utf-8", errors="replace")
+                elif value is None:
+                    text = ""
+                else:
+                    text = str(value)
+                properties[str(key)] = text[:SAVE_PROPERTY_MAX_CHARS]
         finally:
             conn.close()
-        return day, flags
+        return day, flags, properties
     except sqlite3.Error as exc:
         # corrupt/locked save: degrade gracefully but stay discoverable
         log.warning("aux save data unreadable for %s: %s", save_path, exc)
-        return None, set()
+        return None, set(), {}
     except Exception:
         log.exception("unexpected error reading aux save data for %s",
                       save_path)
-        return None, set()
+        return None, set(), {}
 

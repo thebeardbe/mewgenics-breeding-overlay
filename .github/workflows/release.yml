@@ -24,6 +24,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: flake.lock is committed
+        run: |
+          if [ ! -f flake.lock ]; then
+            echo "flake.lock is missing from the checkout."
+            echo "Without it, 'nix run github:thebeardbe/mewgenics-breeding-overlay'"
+            echo "fails with 'cannot write modified lock file'."
+            echo "Regenerate it with 'nix flake lock' and commit it before tagging."
+            exit 1
+          fi
+          echo "flake.lock present"
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"

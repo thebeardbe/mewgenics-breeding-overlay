@@ -120,6 +120,8 @@ class DonationsTab(QWidget):
         dead = getattr(session, "dead_cats", []) if session is not None else []
         flags = getattr(session, "npc_progress_flags", set()) \
             if session is not None else set()
+        props = getattr(session, "save_properties", {}) \
+            if session is not None else {}
         butch_unlocked = any(f.startswith("butch") for f in flags)
         if butch_unlocked:
             self._butch_note.setText(
@@ -132,7 +134,8 @@ class DonationsTab(QWidget):
         report = donation_report(
             cats, active=flags, dead=tuple(dead),
             current_day=getattr(session, "current_day", None),
-            effect_of_cat=getattr(self, "_effect_of_cat", None)) \
+            effect_of_cat=getattr(self, "_effect_of_cat", None),
+            properties=props) \
             if (cats or dead) else []
         # Spoiler guard: locked (or unsupported/undetectable) NPCs must never
         # appear - that would give away who exists and what they want.

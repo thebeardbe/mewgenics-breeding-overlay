@@ -78,6 +78,10 @@ nix profile install github:thebeardbe/mewgenics-breeding-overlay
 mewgenics-overlay
 ```
 
+The repository ships a committed `flake.lock`, so `nix run github:...` works
+without Nix trying to write a lock file; refresh the pin with `nix flake update`
+when you want a newer nixpkgs.
+
 ### From source (any distro, power users / developers)
 
 Requires Python 3.10+ and a real Mewgenics save for full functionality.

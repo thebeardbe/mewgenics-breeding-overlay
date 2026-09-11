@@ -179,10 +179,19 @@ Key invariants:
   (MBM fork) change, not an overlay one.
 - **Fertility/twins** (twin chance = combined fertility − 1) is a hidden stat
   the game never reveals (Tink has no display for it); not modelled.
-- **NPC unlocks** are read from the save's `npc_progress` flags; locked NPCs
-  are hidden entirely (spoiler guard). Organ Grinder counts only *visible*
-  (non-`Gone`) dead cats. Butch chapter progress and per-NPC donation counters
-  are **not** in the save — shown as unsupported/notice.
+- **NPC unlocks**: an NPC is available only when an exact accepting token is
+  present in the save's `npc_progress` flags, a `NPCRSTRACKER_<slug>_...`
+  tip-tracker property exists, or (Organ Grinder only) `organname_set` is
+  `"1"`. Quest and shop tokens that merely contain the name, such as
+  `beanies_quests_intro`, `tracy_foodstorage1` and `organ_unlock`, do not
+  count. Locked NPCs stay hidden entirely (spoiler guard). Organ Grinder counts
+  only *visible* (non-`Gone`) dead cats. Butch chapter progress and per-NPC
+  donation counters are **not** in the save; shown as unsupported/notice.
+- **Same-gender blocked rows**: re-described from the pair's real game
+  compatibility. Below the game's 0.05 line the row says the pair will not mate
+  and names the value; at or above it, that they mate but produce no kitten and
+  raise the Gay Stray chance, also naming the value. Direct-family rows keep
+  their own label; every other blocked row keeps the vendored reason.
 
 ## 6. Tests
 
@@ -247,13 +256,17 @@ Plus `scripts/gui_smoke.py` for the real UI offscreen.
   skips**: partial bumps make CI/Nix/About drift. The release workflow's
   `version-check` job rejects any `v*` tag whose three files don't match
   each other and the tag.
+- **`flake.lock` must stay committed**: regenerate it with `nix flake lock`
+  after changing any flake input. Without it, `nix run github:...` fails with
+  "cannot write modified lock file" because Nix resolves the moving input and
+  then tries to write the lock into the read-only store copy of the flake.
 - **Vendored files stay untouched** apart from import paths (see
   `vendor/_VENDORED.md`); keep them re-vendorable.
 - Table header tooltips: set on `horizontalHeaderItem(i).setToolTip(...)`.
 
 ## 8. Status / roadmap
 
-- Latest release: **v0.2.2** (Linux: configurable hotkey via desktop-owned shortcut + `--toggle` single instance). Next: **v0.3.0** (desktop portal GlobalShortcuts / X11 grab) as tester feedback lands.
+- Latest release: **v0.2.3** (donation NPC unlock detection, accurate same-sex blocked reasons, committed `flake.lock` so `nix run github:...` works). Next: **v0.3.0** (desktop portal GlobalShortcuts / X11 grab) as tester feedback lands.
 - Known gaps: per-NPC donation counters and Butch chapter progress are not
   recoverable from the save; Frank/retired is heuristic (abilities+stat
   gains); aggression is displayed for future fighter-room optimisation but

@@ -1,7 +1,7 @@
 # Flake wrapper so NixOS users can `nix run` / `nix profile install` the
 # overlay without touching Python. The real definition lives in default.nix.
 {
-  description = "Mewgenics Breeding Overlay — zero-install nix package";
+  description = "Mewgenics Breeding Overlay: zero-install nix package";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 

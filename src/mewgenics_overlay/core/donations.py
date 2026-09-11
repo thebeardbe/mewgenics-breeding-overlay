@@ -96,12 +96,58 @@ NPC_PROFILES: dict = {
                                  "organ"),
 }
 NPC_ORDER = list(NPC_PROFILES)
+
+# NPC availability signals: an NPC starts accepting cats only when the save's
+# npc_progress flags contain one of its EXACT accepting tokens. Prefix
+# matching on the slug was wrong: quest/shop tokens such as
+# 'beanies_quests_intro', 'tracy_foodstorage1' and 'organ_unlock' share the
+# NPC slug but do not mean the NPC takes cats.
+NPC_ACCEPTING_TOKENS: dict = {
+    "Tink": ("tink_begin_accepting_cats",),
+    "Dr. Beanies": ("unlock_beanies", "beanies_begin_accepting_cats"),
+    "Frank": ("unlock_frank", "frank_begin_accepting_cats"),
+    "Tracy": ("unlock_tracy", "tracy_begin_accepting_cats"),
+    "Baby Jack": ("unlock_jack", "jack_begin_accepting_cats"),
+    "Organ Grinder": ("unlock_organ", "organ_begin_accepting_cats",
+                      "organ_intro"),
+}
+# The per-NPC tip tracker in the properties table proves the NPC exists and
+# interacts with the player: NPCRSTRACKER_<slug>_<...>. Its presence is an
+# availability signal in its own right.
+NPCRSTRACKER_PREFIX = "NPCRSTRACKER_"
+# Organ Grinder is additionally unlocked outright when its name is set.
+ORGAN_NAME_SET_PROPERTY = "organname_set"
+ORGAN_NAME_SET_VALUE = "1"
 # NPCs whose requirements the save format can't express yet.
 UNSUPPORTED = [
     ("Butch", "cats that reached far chapters",
      "per-cat chapter progress is not stored in the save - only an "
      "adventure heuristic exists"),
 ]
+
+
+def npc_available(npc: str, active: set,
+                  properties: Optional[dict] = None) -> bool:
+    """Whether *npc* has started accepting cats, from save signals (pure).
+
+    True when ANY of these hold: an exact accepting token is present in the
+    npc_progress flag set, a save property is a per-NPC tip-tracker entry
+    for this NPC (``NPCRSTRACKER_<slug>_...``), or (Organ Grinder only)
+    ``organname_set`` is ``"1"``. Exact token matching keeps quest and shop
+    flags from falsely unlocking an NPC.
+    """
+    props = properties or {}
+    if active & set(NPC_ACCEPTING_TOKENS.get(npc, ())):
+        return True
+    slug = NPC_PROFILES[npc].slug if npc in NPC_PROFILES else ""
+    if slug:
+        tracker = f"{NPCRSTRACKER_PREFIX}{slug}_"
+        if any(name.startswith(tracker) for name in props):
+            return True
+    if npc == "Organ Grinder":
+        return props.get(ORGAN_NAME_SET_PROPERTY) == ORGAN_NAME_SET_VALUE
+    return False
+
 
 def _has_any_mutation_or_condition(cat) -> bool:
     entries = getattr(cat, "visual_mutation_entries", None) or []
@@ -405,12 +451,14 @@ def _assess(cat, sums, effect_of_cat=None):
 
 def donation_report(cats, active: Optional[set] = None,
                     dead: tuple = (), current_day: Optional[int] = None,
-                    effect_of_cat=None) -> List[DonationSlot]:
+                    effect_of_cat=None,
+                    properties: Optional[dict] = None) -> List[DonationSlot]:
     """Rank every donation NPC's qualifying cats for the current roster.
 
     ``cats`` are the alive cats; ``dead`` (optional) supplies the cats that
     have died, which the Organ Grinder takes. ``active`` is an optional set
-    of flag names from the save's npc_progress.
+    of flag names from the save's npc_progress, and ``properties`` is the
+    save's property map (used for the availability signals).
 
     Results are fully self-contained: each slot carries its cats AND its
     analysis (``advice``), so nothing is written onto the cat objects.
@@ -435,8 +483,7 @@ def donation_report(cats, active: Optional[set] = None,
         pool = dead if npc == "Organ Grinder" else cats
         slot = DonationSlot(npc=npc, wants=profile.wants,
                             unlock_note=profile.unlock_note,
-                            active=any(flag.startswith(profile.slug)
-                                       for flag in flags))
+                            active=npc_available(npc, flags, properties))
         qualified = [c for c in pool
                      if _qualifies(c, npc)
                      and (npc != "Organ Grinder"
