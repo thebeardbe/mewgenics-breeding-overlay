@@ -37,12 +37,14 @@ from PySide6.QtWidgets import (  # noqa: E402
     QLabel,
     QSizeGrip,
     QTabWidget,
+    QTableWidgetItem,
     QWidget,
 )
 
 from mewgenics_overlay.core import discovery  # noqa: E402
 from mewgenics_overlay.ui import config as _cfg  # noqa: E402
 from mewgenics_overlay.ui import layout as _layout  # noqa: E402
+from mewgenics_overlay.ui import partneractions as _pa  # noqa: E402
 from mewgenics_overlay.ui import shortcutworker  # noqa: E402
 from mewgenics_overlay.ui.bestmatch import BestMatchBar  # noqa: E402
 from mewgenics_overlay.ui.chrome import TopBar  # noqa: E402
@@ -88,6 +90,10 @@ class FakePalette(QWidget):
         self._session = None
         self._assets = SimpleNamespace(assets=None)
         self._tablectl = None        # created by PaletteWindow *after* build
+        # layout.build hands this to PartnerActions as the "Show in game"
+        # availability predicate; the real palette derives it from a running
+        # bridge controller. Tests may set it False to hide the item.
+        self.bridge_available = True
 
     # callbacks connected by layout.build / the widgets it creates
     def _toggle_pin(self, checked):
@@ -148,6 +154,12 @@ class FakePalette(QWidget):
     def set_focus(self, cat):
         self.calls.append(("focus", cat))
 
+    def show_in_game(self, db_key):
+        # layout.build injects this into PartnerActions as the context menu's
+        # "Show in game" callback; the real PaletteWindow returns bool.
+        self.calls.append(("show_in_game", db_key))
+        return True
+
     def apply_theme(self, key):
         self.calls.append(("theme", key))
 
@@ -165,6 +177,31 @@ class FakePalette(QWidget):
 
     def _on_header_clicked(self, col):
         self.calls.append(("header", col))
+
+
+class _PickShowInGameMenu:
+    """Non-blocking QMenu stand-in that always picks "Show in game".
+
+    The real ``exec`` opens a modal loop, so the layout test injects this to
+    drive the partner context menu deterministically. It records itself so the
+    test can assert the item was actually offered.
+    """
+
+    def __init__(self, log=None, parent=None):
+        self.actions = []
+        self.picked = None
+        if log is not None:
+            log.append(self)
+
+    def addAction(self, text):
+        action = SimpleNamespace(text=text)
+        self.actions.append(action)
+        return action
+
+    def exec(self, global_pos):                       # noqa: A003 (Qt API)
+        self.picked = next((a for a in self.actions
+                            if a.text == "Show in game"), None)
+        return self.picked
 
 
 def _attach_shortcut_actions(host, ok=True, message="done"):
@@ -390,6 +427,59 @@ def test_context_menu_request_is_forwarded_to_the_host(make_host):
     host._table.customContextMenuRequested.emit(QPoint(1, 2))
 
     assert ("menu", QPoint(1, 2)) in host.calls
+
+
+def test_context_menu_show_in_game_reaches_the_host(make_host, monkeypatch,
+                                                    qapp):
+    # layout.build injects window.show_in_game into PartnerActions; picking
+    # the menu item must land on the host's outbound path with the row's key.
+    host = make_host()
+    menus: list = []
+    monkeypatch.setattr(_pa, "QMenu",
+                        lambda parent=None: _PickShowInGameMenu(menus))
+
+    partner = SimpleNamespace(name="Meeko", db_key=341, is_pinned=False)
+    item = QTableWidgetItem("Meeko")
+    item.setData(Qt.ItemDataRole.UserRole,
+                 (SimpleNamespace(partner=partner), []))
+    host._table.setRowCount(1)
+    host._table.setItem(0, 0, item)
+    host._table.show()
+    qapp.processEvents()
+
+    host._actions.show_breeding_menu(
+        host._table.visualItemRect(item).center())
+
+    assert [a.text for a in menus[0].actions] == [
+        "Pin for breeding", "Show in game"]
+    assert ("show_in_game", 341) in host.calls
+    assert not any(c[0] == "pin_cat" for c in host.calls)
+
+
+def test_context_menu_hides_show_in_game_when_the_bridge_is_unavailable(
+        make_host, monkeypatch, qapp):
+    # The predicate reaches the palette's bridge_available property: an
+    # attached-but-stopped bridge keeps the item out of the menu.
+    host = make_host()
+    host.bridge_available = False
+    menus: list = []
+    monkeypatch.setattr(_pa, "QMenu",
+                        lambda parent=None: _PickShowInGameMenu(menus))
+
+    partner = SimpleNamespace(name="Meeko", db_key=341, is_pinned=False)
+    item = QTableWidgetItem("Meeko")
+    item.setData(Qt.ItemDataRole.UserRole,
+                 (SimpleNamespace(partner=partner), []))
+    host._table.setRowCount(1)
+    host._table.setItem(0, 0, item)
+    host._table.show()
+    qapp.processEvents()
+
+    host._actions.show_breeding_menu(
+        host._table.visualItemRect(item).center())
+
+    assert [a.text for a in menus[0].actions] == ["Pin for breeding"]
+    assert not any(c[0] == "show_in_game" for c in host.calls)
 
 
 def test_swap_toggle_reaches_the_later_created_coordinator(make_host):

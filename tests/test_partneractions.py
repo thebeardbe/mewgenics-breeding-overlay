@@ -2,8 +2,9 @@
 
 ``mewgenics_overlay.ui.partneractions.PartnerActions`` was extracted from
 ``PaletteWindow`` (god-file split). It reacts to partner-table interactions:
-it writes the inheritance detail strip, opens the pin/unpin context menu and
-re-focuses the picked cat. Everything window-specific (the active room
+it writes the inheritance detail strip, opens the pin/unpin (and, when the
+host supplies the callback, "Show in game") context menu and re-focuses the
+picked cat. Everything window-specific (the active room
 Stimulation, the pair's malady lines, the gpak effect lookup, pinning and
 focusing) arrives as a callable from the host.
 
@@ -103,6 +104,8 @@ class _FakeMenu:
 
     def exec(self, global_pos):                       # noqa: A003 (Qt API)
         self.controller.last_pos = global_pos
+        if isinstance(self.controller.choice, int) and self.actions:
+            return self.actions[self.controller.choice]
         if self.controller.choice == "first" and self.actions:
             return self.actions[0]
         return None
@@ -125,7 +128,8 @@ def make_actions(qapp, fake_menu):
     """Build isolated PartnerActions over a real table with recording fakes."""
     widgets = []
 
-    def _make(row=None, kids=(), *, stim=50.0, malady_fn=None, select=True):
+    def _make(row=None, kids=(), *, stim=50.0, malady_fn=None, select=True,
+              on_show_in_game=None, show_in_game_available=None):
         table = PartnerTableWidget()
         table.resize(840, 260)
         name_item = None
@@ -146,6 +150,14 @@ def make_actions(qapp, fake_menu):
         effect_calls: list = []
         pins: list = []
         focuses: list = []
+        shown: list = []
+
+        if on_show_in_game is None:
+            show_cb = None
+        else:
+            def show_cb(key):
+                shown.append(key)
+                return on_show_in_game(key)
 
         def stim_value():
             stim_calls.append(stim)
@@ -163,12 +175,14 @@ def make_actions(qapp, fake_menu):
             table, detail, stim_value, malady_lines, effect_of,
             on_pin=lambda cat, on: pins.append((cat, on)),
             on_focus=focuses.append,
+            on_show_in_game=show_cb,
+            show_in_game_available=show_in_game_available,
         )
         env = SimpleNamespace(
             table=table, name_item=name_item, detail=detail, actions=actions,
             stim_calls=stim_calls, malady_calls=malady_calls,
             effect_calls=effect_calls, effect_of=effect_of,
-            pins=pins, focuses=focuses,
+            pins=pins, focuses=focuses, shown=shown,
         )
         widgets.append(table)
         return env
@@ -422,6 +436,152 @@ def test_right_click_below_the_last_row_builds_no_menu(make_actions,
 
     assert fake_menu.menus == []
     assert env.pins == []
+
+
+# ── 5b. "Show in game" context-menu item ─────────────────────────────────
+def test_menu_offers_show_in_game_when_the_callback_is_supplied(
+        make_actions, fake_menu):
+    env = make_actions(make_row(make_cat("Meeko")),
+                       on_show_in_game=lambda key: True)
+
+    env.actions.show_breeding_menu(_row_center(env))
+
+    assert [a.text for a in fake_menu.menus[0].actions] == [
+        "Pin for breeding", "Show in game"]
+
+
+def test_menu_offers_show_in_game_when_availability_is_true(
+        make_actions, fake_menu):
+    env = make_actions(make_row(make_cat("Meeko")),
+                       on_show_in_game=lambda key: True,
+                       show_in_game_available=lambda: True)
+
+    env.actions.show_breeding_menu(_row_center(env))
+
+    assert [a.text for a in fake_menu.menus[0].actions] == [
+        "Pin for breeding", "Show in game"]
+
+
+def test_menu_omits_show_in_game_when_the_bridge_is_unavailable(
+        make_actions, fake_menu):
+    # A bridge that is attached but not running must keep the item hidden even
+    # though the callback exists.
+    partner = make_cat("Meeko", db_key=423)
+    env = make_actions(make_row(partner),
+                       on_show_in_game=lambda key: True,
+                       show_in_game_available=lambda: False)
+    fake_menu.choice = "first"              # the only action is Pin
+
+    env.actions.show_breeding_menu(_row_center(env))
+
+    assert [a.text for a in fake_menu.menus[0].actions] == [
+        "Pin for breeding"]
+    assert env.shown == []                  # no select was sent
+    assert env.pins == [(partner, True)]
+
+
+def test_availability_predicate_is_consulted_for_each_menu(
+        make_actions, fake_menu):
+    checks = []
+
+    def available():
+        checks.append(True)
+        return True
+
+    env = make_actions(make_row(make_cat("Meeko")),
+                       on_show_in_game=lambda key: True,
+                       show_in_game_available=available)
+
+    env.actions.show_breeding_menu(_row_center(env))
+
+    assert checks == [True]
+
+
+def test_availability_predicate_is_not_consulted_without_the_callback(
+        make_actions, fake_menu):
+    checks = []
+
+    def available():
+        checks.append(True)
+        return True
+
+    env = make_actions(make_row(make_cat("Meeko")),
+                       show_in_game_available=available)
+
+    env.actions.show_breeding_menu(_row_center(env))
+
+    assert [a.text for a in fake_menu.menus[0].actions] == [
+        "Pin for breeding"]
+    assert checks == []
+
+
+def test_menu_omits_show_in_game_without_the_callback(make_actions,
+                                                      fake_menu):
+    env = make_actions(make_row(make_cat("Meeko")))
+
+    env.actions.show_breeding_menu(_row_center(env))
+
+    assert [a.text for a in fake_menu.menus[0].actions] == ["Pin for breeding"]
+
+
+def test_choosing_show_in_game_passes_the_partner_key(make_actions,
+                                                      fake_menu):
+    partner = make_cat("Meeko", db_key=423)
+    env = make_actions(make_row(partner), on_show_in_game=lambda key: True)
+    fake_menu.choice = 1                     # second action: "Show in game"
+
+    env.actions.show_breeding_menu(_row_center(env))
+
+    assert env.shown == [423]
+    assert env.pins == []                    # a show is not a pin
+
+
+def test_choosing_pin_still_pins_when_show_in_game_is_present(
+        make_actions, fake_menu):
+    partner = make_cat("Meeko", db_key=423, is_pinned=False)
+    env = make_actions(make_row(partner), on_show_in_game=lambda key: True)
+    fake_menu.choice = 0                     # first action: "Pin for breeding"
+
+    env.actions.show_breeding_menu(_row_center(env))
+
+    assert env.pins == [(partner, True)]
+    assert env.shown == []
+
+
+def test_a_failed_show_in_game_does_not_pin_or_raise(make_actions,
+                                                     fake_menu):
+    # The callback's boolean result is the host's concern; the menu must not
+    # treat a False (no game listening) as a reason to pin or to blow up.
+    partner = make_cat("Meeko", db_key=9, is_pinned=False)
+    env = make_actions(make_row(partner), on_show_in_game=lambda key: False)
+    fake_menu.choice = 1
+
+    env.actions.show_breeding_menu(_row_center(env))
+
+    assert env.shown == [9]
+    assert env.pins == []
+
+
+def test_dismissing_the_menu_does_not_show_in_game(make_actions, fake_menu):
+    env = make_actions(make_row(make_cat("Meeko")),
+                       on_show_in_game=lambda key: True)
+    fake_menu.choice = None
+
+    env.actions.show_breeding_menu(_row_center(env))
+
+    assert len(fake_menu.menus) == 1
+    assert env.shown == []
+
+
+def test_show_in_game_reads_the_partner_not_the_clicked_cell(
+        make_actions, fake_menu):
+    partner = make_cat("Meeko", db_key=77)
+    env = make_actions(make_row(partner), on_show_in_game=lambda key: True)
+    fake_menu.choice = 1
+
+    env.actions.show_breeding_menu(_row_center(env, col=4))
+
+    assert env.shown == [77]
 
 
 # ── 6. double-click re-focus ───────────────────────────────────────────────

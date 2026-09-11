@@ -13,6 +13,7 @@ loader and directory are stubbed and no tray is built (``--no-tray``).
 
 from __future__ import annotations
 
+import logging
 import os
 
 # Must be set before the first QApplication is constructed.
@@ -26,6 +27,8 @@ pytest.importorskip("PySide6")
 pytest.importorskip("lz4")
 
 from PySide6.QtCore import QObject  # noqa: E402
+from PySide6.QtGui import QShortcut  # noqa: E402
+from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from mewgenics_overlay.core import bridge  # noqa: E402
 from mewgenics_overlay.ui import app  # noqa: E402
@@ -89,6 +92,16 @@ class _FakePalette(QObject):
         self.focused = []
         self.engaged = False
         self._focus = None
+        # Outbound "show in game" path (palette.attach_bridge/show_in_game).
+        self.bridges = []
+        self.showed_in_game = []
+
+    def attach_bridge(self, bridge_ctl):
+        self.bridges.append(bridge_ctl)
+
+    def show_in_game(self, db_key):
+        self.showed_in_game.append(db_key)
+        return True
 
     def set_focus_key(self, db_key):
         self.focused.append(db_key)
@@ -122,6 +135,8 @@ class _FakeBridgeController:
     """Records construction and lifecycle; delivers requests on demand."""
 
     instances: list["_FakeBridgeController"] = []
+    #: Scripted result of :meth:`start`; tests flip it to simulate a busy port.
+    start_result = True
 
     def __init__(self, port=0, parent=None):
         self.port = port
@@ -133,7 +148,7 @@ class _FakeBridgeController:
 
     def start(self):
         self.started = True
-        return True
+        return self.start_result
 
     def stop(self):
         self.stopped = True
@@ -177,6 +192,7 @@ def bootstrap(monkeypatch, tmp_path):
     """Patch ``app``'s heavy seams; returns the recorded state and a factory."""
     fake_app = _FakeApp()
     _FakePalette.instances = []
+    _FakeBridgeController.start_result = True
     created: dict = {}
     original_theme = _theme.active_theme()
 
@@ -204,6 +220,22 @@ def bootstrap(monkeypatch, tmp_path):
     yield SimpleNamespace(app=fake_app, palette=_FakePalette,
                           created=created, install_instance=install_instance)
     _theme.set_theme(original_theme)
+
+
+@pytest.fixture(scope="session")
+def qapp():
+    """A real QApplication: ``main`` installs the Ctrl+G QShortcut only when
+    one exists (``_QtGuiApplication.instance() is not None``)."""
+    app_ = QApplication.instance() or QApplication([])
+    yield app_
+
+
+def _ctrl_g_shortcut(palette):
+    """The Ctrl+G shortcut ``main`` parents to the palette, or None."""
+    for shortcut in palette.findChildren(QShortcut):
+        if shortcut.key().toString() == "Ctrl+G":
+            return shortcut
+    return None
 
 
 # ── 1. hand-off lands: exit without a window ──────────────────────────────
@@ -305,9 +337,54 @@ def test_bridge_wiring_focuses_the_requested_cat(bootstrap, monkeypatch):
     assert ctl.stopped is True           # listener closed on quit
 
     palette = bootstrap.palette.instances[-1]
+    # The palette gets the controller, so its outbound path can use it.
+    assert palette.bridges == [ctl]
     ctl.focus_requested.emit(bridge.FocusRequest(key=341))
     assert palette.focused == [341]
     assert palette.engaged is True
+
+
+def test_ctrl_g_shortcut_asks_the_palette_to_show_the_focused_cat(
+        bootstrap, qapp, monkeypatch):
+    bootstrap.install_instance([True], toggle_ok=True)
+    monkeypatch.setattr(app.ui_config, "load",
+                        lambda: {"bridge_enabled": True, "bridge_port": 45699})
+    _FakeBridgeController.instances = []
+    monkeypatch.setattr(app.bridgectl, "BridgeController",
+                        _FakeBridgeController)
+
+    assert app.main(["--no-tray"]) == 0
+
+    palette = bootstrap.palette.instances[-1]
+    palette._focus = SimpleNamespace(db_key=777)
+    shortcut = _ctrl_g_shortcut(palette)
+    assert shortcut is not None, "main() installed no Ctrl+G shortcut"
+
+    shortcut.activated.emit()
+
+    # The shortcut must route through the palette's single outbound path.
+    assert palette.showed_in_game == [777]
+
+
+def test_ctrl_g_shortcut_without_a_focused_cat_asks_for_nothing(
+        bootstrap, qapp, monkeypatch):
+    bootstrap.install_instance([True], toggle_ok=True)
+    monkeypatch.setattr(app.ui_config, "load",
+                        lambda: {"bridge_enabled": True, "bridge_port": 45699})
+    _FakeBridgeController.instances = []
+    monkeypatch.setattr(app.bridgectl, "BridgeController",
+                        _FakeBridgeController)
+
+    assert app.main(["--no-tray"]) == 0
+
+    palette = bootstrap.palette.instances[-1]
+    palette._focus = None
+    shortcut = _ctrl_g_shortcut(palette)
+    assert shortcut is not None
+
+    shortcut.activated.emit()
+
+    assert palette.showed_in_game == []
 
 
 def test_bridge_does_not_start_when_disabled(bootstrap, monkeypatch):
@@ -317,3 +394,36 @@ def test_bridge_does_not_start_when_disabled(bootstrap, monkeypatch):
 
     assert app.main(["--no-tray"]) == 0
     assert _FakeBridgeController.instances == []
+    # No controller -> nothing is attached to the palette's outbound path.
+    assert bootstrap.palette.instances[-1].bridges == []
+
+
+def test_bridge_that_fails_to_start_is_not_attached(bootstrap, monkeypatch,
+                                                    caplog):
+    # A busy port must not leave the palette advertising "Show in game"
+    # through a controller that is not listening.
+    bootstrap.install_instance([True], toggle_ok=True)
+    monkeypatch.setattr(app.ui_config, "load",
+                        lambda: {"bridge_enabled": True, "bridge_port": 45699})
+    _FakeBridgeController.instances = []
+    monkeypatch.setattr(app.bridgectl, "BridgeController",
+                        _FakeBridgeController)
+    monkeypatch.setattr(_FakeBridgeController, "start_result", False)
+
+    with caplog.at_level(logging.WARNING):
+        assert app.main(["--no-tray"]) == 0
+
+    ctl = _FakeBridgeController.instances[-1]
+    assert ctl.started is True
+    assert ctl.stopped is True                 # teardown still runs
+    assert bootstrap.palette.instances[-1].bridges == []
+    assert any("not listening" in r.getMessage() for r in caplog.records)
+
+
+def test_no_ctrl_g_shortcut_when_the_bridge_is_disabled(bootstrap, qapp,
+                                                       monkeypatch):
+    bootstrap.install_instance([True], toggle_ok=True)
+
+    assert app.main(["--no-tray"]) == 0
+
+    assert _ctrl_g_shortcut(bootstrap.palette.instances[-1]) is None

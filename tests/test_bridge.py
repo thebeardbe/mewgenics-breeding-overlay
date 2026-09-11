@@ -9,6 +9,7 @@ file: sessions are duck-typed.
 from __future__ import annotations
 
 import json
+import logging
 import socket
 import threading
 import time
@@ -122,13 +123,28 @@ class Collector:
     def __init__(self):
         self.requests = []
         self.event = threading.Event()
+        # A semaphore per request lets a test block until *n* requests have
+        # arrived, without polling or sleeping.
+        self._delivered = threading.Semaphore(0)
 
     def __call__(self, request):
         self.requests.append(request)
+        self._delivered.release()
         self.event.set()
 
     def wait(self, timeout=3.0):
         return self.event.wait(timeout)
+
+    def wait_count(self, count, timeout=3.0):
+        """Block until *count* requests have been delivered (or time out)."""
+        end = time.monotonic() + timeout
+        for _ in range(count):
+            remaining = end - time.monotonic()
+            if remaining <= 0:
+                return False
+            if not self._delivered.acquire(timeout=remaining):
+                return False
+        return True
 
 
 def start_server():
@@ -243,3 +259,119 @@ def test_server_focus_handler_exception_does_not_kill_listener():
         assert server.running is True
     finally:
         server.stop()
+
+
+# ── registered-client cap ───────────────────────────────────────────────────
+def test_server_refuses_connections_beyond_the_cap(caplog):
+    server, collector = start_server()
+    clients = []
+    try:
+        # Fill every slot, proving each connection registered by its focus
+        # message (registration happens before the read loop dispatches).
+        for index in range(bridge.MAX_CLIENTS):
+            conn = socket.create_connection(
+                ("127.0.0.1", server.port), timeout=3.0)
+            conn.sendall((message(key=index) + "\n").encode("utf-8"))
+            clients.append(conn)
+        assert collector.wait_count(bridge.MAX_CLIENTS), "cap was not filled"
+        assert server.client_count == bridge.MAX_CLIENTS
+
+        with caplog.at_level(logging.WARNING,
+                            logger="mewgenics_overlay.bridge"):
+            extra = socket.create_connection(
+                ("127.0.0.1", server.port), timeout=3.0)
+            try:
+                extra.settimeout(3.0)
+                # A refused client is closed immediately, so it reads EOF.
+                assert extra.recv(1024) == b""
+            finally:
+                extra.close()
+
+        # The refused connection never counts against the live peers.
+        assert server.client_count == bridge.MAX_CLIENTS
+        assert any("client limit" in r.getMessage() for r in caplog.records)
+    finally:
+        for conn in clients:
+            conn.close()
+        server.stop()
+
+
+# ── outbound readiness check ────────────────────────────────────────────────
+class _FakeConn:
+    """Hashable stand-in for a registered client socket (no real fd)."""
+
+    def __init__(self, fail=False):
+        self.fail = fail
+        self.sent = []
+        self.closed = False
+
+    def sendall(self, data):
+        if self.fail:
+            raise OSError("peer went away mid-write")
+        self.sent.append(data)
+
+    def close(self):
+        self.closed = True
+
+
+def _install_select(monkeypatch, is_writable):
+    """Drive the readiness check without depending on real socket state.
+
+    ``select.select`` returns ``(readable, writable, exceptional)``. The fake
+    keeps that exact order, so an implementation that unpacks the wrong slot
+    is caught rather than accidentally satisfied.
+    """
+    def fake_select(rlist, wlist, xlist, timeout=0):
+        return ([c for c in rlist if is_writable(c)],
+                [c for c in wlist if is_writable(c)],
+                [])
+
+    monkeypatch.setattr(bridge, "select",
+                        SimpleNamespace(select=fake_select))
+
+
+def _fresh_server():
+    return bridge.BridgeServer(on_focus=lambda _r: None, port=0)
+
+
+def test_send_delivers_to_a_writable_peer(monkeypatch):
+    server = _fresh_server()
+    conn = _FakeConn()
+    assert server._register(conn) is True
+    _install_select(monkeypatch, lambda _c: True)
+
+    assert server.send({"v": 1, "type": "select", "key": 423}) == 1
+
+    assert json.loads(conn.sent[0].decode("utf-8")) == {
+        "v": 1, "type": "select", "key": 423}
+    assert server.client_count == 1
+
+
+def test_send_drops_a_non_writable_peer_and_logs(monkeypatch, caplog):
+    server = _fresh_server()
+    conn = _FakeConn()
+    assert server._register(conn) is True
+    _install_select(monkeypatch, lambda _c: False)
+
+    with caplog.at_level(logging.WARNING,
+                         logger="mewgenics_overlay.bridge"):
+        assert server.send({"v": 1, "type": "select", "key": 5}) == 0
+
+    # The stalled peer is gone, its socket closed, and it was never written.
+    assert conn.sent == []
+    assert conn.closed is True
+    assert server.client_count == 0
+    assert any("not writable" in r.getMessage() for r in caplog.records)
+
+
+def test_send_counts_only_successful_writes(monkeypatch):
+    server = _fresh_server()
+    good, bad = _FakeConn(), _FakeConn(fail=True)
+    assert server._register(good) is True
+    assert server._register(bad) is True
+    _install_select(monkeypatch, lambda _c: True)
+
+    assert server.send({"v": 1, "type": "select", "key": 7}) == 1
+
+    assert good.sent                       # the healthy peer got the line
+    assert server.client_count == 1        # the broken peer was dropped

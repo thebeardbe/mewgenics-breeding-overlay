@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import json
 import logging
+import select
 import socket
 import threading
 from dataclasses import dataclass
@@ -44,6 +45,10 @@ PROTOCOL_VERSION = 1
 MAX_LINE_BYTES = 4096
 LISTEN_BACKLOG = 8
 ACCEPT_TIMEOUT = 0.5
+#: Most peers registered at once. The mod keeps one connection open, so a
+#: handful of slots covers reconnects and a second mod; more is a bug or a
+#: hostile local process.
+MAX_CLIENTS = 8
 
 
 class ProtocolError(ValueError):
@@ -202,13 +207,31 @@ class BridgeServer:
     def send(self, payload: dict) -> int:
         """Send one JSON line to every connected peer; returns how many got it.
 
-        Safe to call from the UI thread. Dead peers are dropped silently.
+        Safe to call from the UI thread: each write only happens when the
+        socket is already writable, so a stalled peer is dropped instead of
+        blocking the caller. Dead peers are dropped too.
         """
         data = (json.dumps(payload, separators=(",", ":")) + "\n").encode("utf-8")
         with self._clients_lock:
             clients = list(self._clients)
         delivered = 0
         for conn in clients:
+            # Only write when the socket is immediately writable: a peer whose
+            # send buffer is full must never stall the UI thread. Such a peer
+            # is dropped rather than waited on.
+            try:
+                _, writable, _ = select.select([], [conn], [], 0)
+            except (OSError, ValueError):
+                writable = []
+            if not writable:
+                self._log.warning(
+                    "bridge: client not writable; dropping it")
+                self._unregister(conn)
+                try:
+                    conn.close()
+                except OSError:
+                    pass
+                continue
             try:
                 conn.sendall(data)
                 delivered += 1
@@ -216,9 +239,13 @@ class BridgeServer:
                 self._unregister(conn)
         return delivered
 
-    def _register(self, conn: socket.socket) -> None:
+    def _register(self, conn: socket.socket) -> bool:
+        """Add *conn* to the peer set; False when the client cap is reached."""
         with self._clients_lock:
+            if len(self._clients) >= MAX_CLIENTS:
+                return False
             self._clients.add(conn)
+            return True
 
     def _unregister(self, conn: socket.socket) -> None:
         with self._clients_lock:
@@ -289,7 +316,11 @@ class BridgeServer:
                 name="mewgenics-bridge-conn", daemon=True).start()
 
     def _handle(self, conn: socket.socket, peer: tuple) -> None:
-        self._register(conn)
+        if not self._register(conn):
+            self._log.warning("bridge: client limit (%d) reached; refusing %s",
+                              MAX_CLIENTS, peer)
+            conn.close()
+            return
         try:
             self._read_loop(conn, peer)
         finally:

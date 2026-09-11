@@ -31,6 +31,8 @@ MaladyLines = Callable[[object, float, Callable[[object, object, str], str]],
 EffectOf = Callable[[object, object, str], str]
 PinCat = Callable[[object, bool], None]
 FocusCat = Callable[[object], None]
+ShowInGame = Callable[[int], bool]
+BridgeAvailable = Callable[[], bool]
 
 
 def _pin_action_label(cat) -> str:
@@ -96,6 +98,8 @@ class PartnerActions(QObject):
         effect_of: EffectOf,
         on_pin: PinCat,
         on_focus: FocusCat,
+        on_show_in_game: Optional[ShowInGame] = None,
+        show_in_game_available: Optional[BridgeAvailable] = None,
         parent: Optional[QObject] = None,
     ) -> None:
         super().__init__(parent)
@@ -106,6 +110,8 @@ class PartnerActions(QObject):
         self._effect_of = effect_of
         self._on_pin = on_pin
         self._on_focus = on_focus
+        self._on_show_in_game = on_show_in_game
+        self._show_in_game_available = show_in_game_available
 
     def on_partner_selected(self) -> None:
         """Selection changed: show the inheritance detail for that row."""
@@ -132,9 +138,16 @@ class PartnerActions(QObject):
         partner = data[0].partner
         menu = QMenu(self._table)
         action = menu.addAction(_pin_action_label(partner))
+        show_action = None
+        if self._on_show_in_game is not None and (
+                self._show_in_game_available is None
+                or self._show_in_game_available()):
+            show_action = menu.addAction("Show in game")
         chosen = menu.exec(self._table.viewport().mapToGlobal(pos))
         if chosen is action:
             self._on_pin(partner, not getattr(partner, "is_pinned", False))
+        elif show_action is not None and chosen is show_action:
+            self._on_show_in_game(partner.db_key)
 
     def on_partner_double(self, item) -> None:
         """Double-click: analyse breeding from the partner's side instead."""

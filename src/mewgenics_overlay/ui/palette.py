@@ -47,6 +47,7 @@ from mewgenics_overlay.core.session import (
 )
 from mewgenics_overlay.ui import layout as _layout
 from mewgenics_overlay.ui.assets import AssetLoader
+from mewgenics_overlay.ui.bridgectl import BridgeController
 from mewgenics_overlay.ui.savecontroller import SaveController
 from mewgenics_overlay.ui.savepanel import base_name
 
@@ -124,6 +125,9 @@ class PaletteWindow(QWidget):
             self.toggle_activate,
             parent=self,
         )
+        # Outbound in-game bridge (the "Show in game" select); attached by
+        # app.main() once the BridgeController exists.
+        self._bridge: Optional[BridgeController] = None
         self._save = SaveController()   # session state + background queue + watcher
         # The resources.gpak effect tables load once, off the UI thread; the
         # drain runs first on every reloader poll tick (ui/assets.py).
@@ -504,6 +508,35 @@ class PaletteWindow(QWidget):
     def set_focus_key(self, db_key: int) -> None:
         """Programmatic focus (used by the future in-game bridge)."""
         self._tablectl.set_focus_key(db_key)
+
+    # ── in-game bridge (outbound "show in game") ────────────────────────────
+    def attach_bridge(self, bridge: BridgeController) -> None:
+        """Attach the in-game bridge that carries outbound selects."""
+        self._bridge = bridge
+
+    @property
+    def bridge_available(self) -> bool:
+        """True only when a bridge is attached and actually running."""
+        return self._bridge is not None and self._bridge.running
+
+    def show_in_game(self, db_key: int) -> bool:
+        """Ask the game to select the cat *db_key* (the one outbound path).
+
+        Returns False when no bridge is attached or no game answered.
+        """
+        if self._bridge is None:
+            log.info("bridge: not attached; cannot show cat key=%d in game",
+                     db_key)
+            self._set_status("in-game bridge is off")
+            return False
+        if self._bridge.send_select(db_key) > 0:
+            log.info("bridge: asked the game to select cat key=%d", db_key)
+            self._set_status("asked the game to select this cat")
+            return True
+        log.warning("bridge: no game connected; cannot show cat key=%d",
+                    db_key)
+        self._set_status("no game connected - is the mod running?")
+        return False
 
     def set_focus(self, cat: Cat) -> None:
         self._tablectl.set_focus(cat)

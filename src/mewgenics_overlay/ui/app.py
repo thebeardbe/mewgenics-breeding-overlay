@@ -238,7 +238,11 @@ def main(argv=None) -> int:
             palette._engage()
 
         bridge_ctl.focus_requested.connect(_on_bridge_focus)
-        if not bridge_ctl.start():
+        if bridge_ctl.start():
+            # Only attach a running bridge; the palette's bridge_available
+            # gate then hides "Show in game" while it is off.
+            palette.attach_bridge(bridge_ctl)
+        else:
             logging.warning("bridge: not listening this session (port %s busy?)",
                             bridge_ctl.port)
 
@@ -247,10 +251,7 @@ def main(argv=None) -> int:
             if cat is None:
                 logging.info("bridge: nothing focused to show in game")
                 return
-            if bridge_ctl.send_select(cat.db_key) > 0:
-                logging.info("bridge: asked the game to select cat key=%d", cat.db_key)
-            else:
-                logging.warning("bridge: no game connected; cannot show %s", cat.name)
+            palette.show_in_game(cat.db_key)
 
         # Ctrl+G: show the cat the overlay is focused on back in the game.
         # Guarded: a QShortcut needs a live QApplication (tests stub it out).

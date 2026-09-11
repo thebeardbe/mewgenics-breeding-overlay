@@ -184,6 +184,8 @@ def _build_breeding(window, root: QVBoxLayout) -> None:
         lambda a, b, n: window._tablectl.effect_for_name(a, b, n),
         on_pin=window.set_pinned,
         on_focus=window.set_focus,
+        on_show_in_game=window.show_in_game,
+        show_in_game_available=lambda: window.bridge_available,
         parent=window,
     )
 
