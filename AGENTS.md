@@ -44,7 +44,24 @@ QT_QPA_PLATFORM=offscreen python scripts/gui_smoke.py
 
 # run on Hyprland/Wayland (auto-detected)
 nix-build default.nix -o /tmp/mg-overlay && /tmp/mg-overlay/bin/mewgenics-overlay
+
+# live test with the game (Steam appid 686060)
+# The launch options already set on this machine load the mod under Proton:
+#   PROTON_LOG=1 WINEDLLOVERRIDES="version=n,b" %command%
+# Launch it again whenever the game has exited:
+steam steam://rungameid/686060
+# then watch both sides of the bridge:
+tail -f ~/.config/mewgenics-overlay/overlay.log
+tail -f ~/.local/share/Steam/steamapps/common/Mewgenics/mod_logs/chainloader.log
 ```
+
+In-game cat clicks cannot be simulated from here (`wtype` delivers no input on
+this session; verified against a plain terminal, so mouse input is out too). The
+game side of the bridge is therefore exercised with a stand-in TCP client on
+127.0.0.1:45780 sending `{"v":1,"type":"focus","key":N}`, and the overlay side
+with `hl.dsp.send_shortcut({mods='CTRL', key='g', window='class:mewgenics-overlay'})`
+to fire the in-overlay shortcut. See the AGENTS.md gotcha on the Lua dispatch
+syntax.
 
 Release = bump version in **exactly three files, atomically, never skips a
 file** (`pyproject.toml`, `default.nix`, `src/mewgenics_overlay/__init__.py`),
