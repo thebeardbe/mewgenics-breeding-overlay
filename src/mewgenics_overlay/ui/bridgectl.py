@@ -51,6 +51,11 @@ class BridgeController(QObject):
     def running(self) -> bool:
         return self._server.running
 
+    @property
+    def client_count(self) -> int:
+        """How many game clients (the mod) are connected right now."""
+        return self._server.client_count
+
     def start(self) -> bool:
         return self._server.start()
 

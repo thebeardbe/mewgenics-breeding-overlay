@@ -4,12 +4,14 @@
 outbound path: with no bridge attached it must log (INFO), post a status line
 and report failure; with a bridge that reaches no client it must warn, post a
 status line and report failure; and when a client receives the select it must
-report success and post a status line. ``bridge_available`` gates the menu item
-on a bridge that is attached *and* running.
+report success and post a status line naming the cat. ``in_game_available``
+gates the in-game actions on a bridge that is attached, running *and* has at
+least one game client connected; ``bridge_available`` only says the bridge
+itself is listening.
 
 Building a full ``PaletteWindow`` is heavy (save controller, watcher, asset
 loader, threads), so these tests call the real methods on the smallest
-stand-in that carries the attributes they read (``_bridge`` and
+stand-in that carries the attributes they read (``_bridge``, ``_session`` and
 ``_set_status``), the same convention as ``test_palette_shortcut.py``. The
 bridge controller is a recording fake, so no socket is opened.
 
@@ -38,31 +40,73 @@ from mewgenics_overlay.ui import palette  # noqa: E402
 LOG_NAME = "mewgenics_overlay.ui"
 
 
+class _FakeSignal:
+    """Minimal Qt-signal stand-in: records slots and emits synchronously."""
+
+    def __init__(self):
+        self._slots = []
+
+    def connect(self, slot):
+        self._slots.append(slot)
+
+    def emit(self, *args):
+        for slot in list(self._slots):
+            slot(*args)
+
+
 class _FakeBridge:
     """Records every select and returns a scripted delivery count."""
 
-    def __init__(self, delivered=1, running=True):
+    def __init__(self, delivered=1, running=True, clients=1):
         self.delivered = delivered
         self.running = running
+        #: Public connected-game count read by ``in_game_available``.
+        self.client_count = clients
         self.keys = []
+        # attach_bridge wires this signal to the re-gate slot.
+        self.game_online = _FakeSignal()
 
     def send_select(self, key):
         self.keys.append(key)
         return self.delivered
 
 
-def _host(bridge=None, statuses=None):
+def _session_with(*cats):
+    """Minimal Session whose ``by_key`` resolves the given cats by name."""
+    return SimpleNamespace(by_key={cat.db_key: cat for cat in cats})
+
+
+class _Host:
+    """The slice of the ``PaletteWindow`` surface the outbound path reads.
+
+    The real property objects are bound at class level so ``in_game_available``
+    (which itself reads ``self.bridge_available``) behaves exactly as it does
+    on the window, without constructing the heavy window.
+    """
+
+    _bridge = None
+    _session = None
+    _focus = None
+    bridge_available = palette.PaletteWindow.bridge_available
+    in_game_available = palette.PaletteWindow.in_game_available
+    _cat_name = palette.PaletteWindow._cat_name
+
+
+def _host(bridge=None, statuses=None, session=None):
     # PaletteWindow.__init__ always sets _bridge (to None until attach_bridge
-    # runs) and carries a _set_status(status) method; the stand-in carries the
-    # same surface, recording every status line the outbound path posts.
-    # attach_bridge also re-gates the card's "Show in game" button through
-    # _refresh_show_in_game, so the stand-in records that call too (the button
-    # gate itself is covered by test_show_in_game_button.py).
-    host = SimpleNamespace(_bridge=bridge)
+    # runs) and _session, and carries a _set_status(status) method; the
+    # stand-in carries the same surface, recording every status line the
+    # outbound path posts. attach_bridge also re-gates the card's "Show in
+    # game" button through refresh_show_in_game, so the stand-in records that
+    # call too (the button gate itself is covered by
+    # test_show_in_game_button.py).
+    host = _Host()
+    host._bridge = bridge
+    host._session = session
     host.statuses = [] if statuses is None else statuses
     host._set_status = host.statuses.append
     host.refreshes = []
-    host._refresh_show_in_game = lambda: host.refreshes.append(True)
+    host.refresh_show_in_game = lambda *_args: host.refreshes.append(True)
     return host
 
 
@@ -97,7 +141,11 @@ def test_an_explicit_none_bridge_is_the_same_silent_failure(caplog):
 
 # ── availability ───────────────────────────────────────────────────────────
 def _available(host):
-    return palette.PaletteWindow.bridge_available.fget(host)
+    return host.bridge_available
+
+
+def _in_game(host):
+    return host.in_game_available
 
 
 def test_bridge_available_is_false_without_a_bridge():
@@ -108,6 +156,34 @@ def test_bridge_available_is_false_without_a_bridge():
 def test_bridge_available_tracks_the_controller_running_state():
     assert _available(_host(_FakeBridge(running=True))) is True
     assert _available(_host(_FakeBridge(running=False))) is False
+
+
+# the in-game gate in its three states: no bridge, no game, game connected
+def test_in_game_available_is_false_without_a_bridge():
+    assert _in_game(_host()) is False
+    assert _in_game(_host(None)) is False
+
+
+def test_in_game_available_is_false_for_a_running_bridge_with_no_game():
+    host = _host(_FakeBridge(running=True, clients=0))
+    # The bridge itself is up, so the *bridge* is available...
+    assert _available(host) is True
+    # ...but no game can answer the select.
+    assert _in_game(host) is False
+
+
+def test_in_game_available_is_true_for_a_running_bridge_with_a_game():
+    host = _host(_FakeBridge(running=True, clients=1))
+    assert _in_game(host) is True
+
+
+def test_in_game_available_is_false_for_a_stopped_bridge_with_a_client():
+    # A running flag is required even when a stale client count lingers.
+    assert _in_game(_host(_FakeBridge(running=False, clients=1))) is False
+
+
+def test_in_game_available_counts_every_connected_client():
+    assert _in_game(_host(_FakeBridge(running=True, clients=3))) is True
 
 
 def test_attach_bridge_makes_availability_follow_the_controller():
@@ -122,6 +198,19 @@ def test_attach_bridge_makes_availability_follow_the_controller():
     palette.PaletteWindow.attach_bridge(host, stopped)
     assert _available(host) is False
     assert host.refreshes == [True, True]
+
+
+def test_attach_bridge_connects_the_game_online_signal_to_the_regate():
+    bridge = _FakeBridge(running=True)
+    host = _host()
+    palette.PaletteWindow.attach_bridge(host, bridge)
+    assert host.refreshes == [True]
+
+    # Every connect/disconnect notification must re-gate the card button.
+    bridge.game_online.emit(True)
+    bridge.game_online.emit(False)
+
+    assert host.refreshes == [True, True, True]
 
 
 # ── a bridge that delivers to nobody ───────────────────────────────────────
@@ -154,7 +243,8 @@ def test_a_negative_delivery_count_is_a_failure(caplog):
 # ── a bridge that delivers ─────────────────────────────────────────────────
 def test_delivered_select_returns_true_and_sends_the_key_once(caplog):
     bridge = _FakeBridge(delivered=1)
-    host = _host(bridge)
+    cat = SimpleNamespace(db_key=423, name="Meeko")
+    host = _host(bridge, session=_session_with(cat))
     with caplog.at_level(logging.INFO, logger=LOG_NAME):
         result = palette.PaletteWindow.show_in_game(host, 423)
 
@@ -164,7 +254,30 @@ def test_delivered_select_returns_true_and_sends_the_key_once(caplog):
     assert len(infos) == 1
     assert "423" in infos[0].getMessage()
     assert _records(caplog, logging.WARNING) == []
+    # The success line names the cat when the session can resolve the key.
+    assert host.statuses == ["asked the game to select Meeko"]
+
+
+def test_delivered_select_falls_back_to_a_generic_name_for_an_unknown_key():
+    # A select can name a key the current save does not know (a stale report);
+    # the status line must not fail, it just cannot name the cat.
+    bridge = _FakeBridge(delivered=1)
+    host = _host(bridge, session=_session_with(
+        SimpleNamespace(db_key=1, name="Someone else")))
+
+    assert palette.PaletteWindow.show_in_game(host, 999) is True
+
     assert host.statuses == ["asked the game to select this cat"]
+
+
+def test_delivered_select_names_a_unicode_cat_unchanged():
+    bridge = _FakeBridge(delivered=1)
+    cat = SimpleNamespace(db_key=42, name="Mèeko 🐱")
+    host = _host(bridge, session=_session_with(cat))
+
+    assert palette.PaletteWindow.show_in_game(host, 42) is True
+
+    assert host.statuses == ["asked the game to select Mèeko 🐱"]
 
 
 def test_delivery_to_several_clients_still_reports_success():
@@ -207,10 +320,10 @@ def test_attach_bridge_replaces_a_previous_controller():
 
 
 # ── the focused-cat guard shared by the button and the shortcut ────────────
-def _focused_host(cat, bridge=None):
+def _focused_host(cat, bridge=None, session=None):
     # The guard reads _focus and delegates to show_in_game; bind both the way a
     # real PaletteWindow carries them so the stand-in can exercise the guard.
-    host = _host(bridge)
+    host = _host(bridge, session=session)
     host._focus = cat
     host.show_in_game = lambda key: palette.PaletteWindow.show_in_game(host, key)
     return host
@@ -218,11 +331,12 @@ def _focused_host(cat, bridge=None):
 
 def test_show_focused_in_game_forwards_the_focused_key():
     bridge = _FakeBridge(delivered=1)
-    host = _focused_host(SimpleNamespace(db_key=341), bridge)
+    cat = SimpleNamespace(db_key=341, name="L'Via")
+    host = _focused_host(cat, bridge, session=_session_with(cat))
 
     assert palette.PaletteWindow.show_focused_in_game(host) is True
     assert bridge.keys == [341]
-    assert host.statuses == ["asked the game to select this cat"]
+    assert host.statuses == ["asked the game to select L'Via"]
 
 
 def test_show_focused_in_game_with_no_cat_logs_and_sends_nothing(caplog):

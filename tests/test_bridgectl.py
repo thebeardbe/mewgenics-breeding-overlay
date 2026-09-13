@@ -161,6 +161,27 @@ def test_game_online_reports_the_second_of_two_peers(controller):
     assert record.online == [True, True, True, False]
 
 
+# ── public client count ─────────────────────────────────────────────────────
+def test_client_count_is_public_and_tracks_connected_peers(controller):
+    # The palette's in_game_available reads this public property; it must
+    # mirror the server's own count as mod clients register and unregister.
+    ctl, _ = controller
+    assert ctl.client_count == 0
+
+    first, second = _FakeConn(), _FakeConn()
+    ctl._server._register(first)
+    assert ctl.client_count == 1
+
+    ctl._server._register(second)
+    assert ctl.client_count == 2
+
+    ctl._server._unregister(first)
+    assert ctl.client_count == 1
+
+    ctl._server._unregister(second)
+    assert ctl.client_count == 0
+
+
 def test_send_select_uses_the_protocol_version_and_key(controller,
                                                        monkeypatch):
     ctl, _ = controller

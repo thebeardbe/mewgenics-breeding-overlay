@@ -462,10 +462,11 @@ def test_menu_offers_show_in_game_when_availability_is_true(
         "Pin for breeding", "Show in game"]
 
 
-def test_menu_omits_show_in_game_when_the_bridge_is_unavailable(
+def test_menu_omits_show_in_game_when_no_game_is_connected(
         make_actions, fake_menu):
-    # A bridge that is attached but not running must keep the item hidden even
-    # though the callback exists.
+    # The palette injects ``lambda: window.in_game_available`` as this
+    # predicate, so a listening bridge with no game connected (or with the
+    # bridge off) must keep the item hidden even though the callback exists.
     partner = make_cat("Meeko", db_key=423)
     env = make_actions(make_row(partner),
                        on_show_in_game=lambda key: True,

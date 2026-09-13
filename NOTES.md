@@ -134,6 +134,16 @@ Waiting on the tester's results for v0.2.1 (Windows hotkey) and v0.2.2
   failures while the game runs would clear a user pin. Logged, and mitigated by
   the grace period, but it should be treated as "unknown" rather than "absent"
   (AGENTS.md §7: no data versus compute failed).
+- Tooltips still render Qt's default auto rich text (`QWidget` has no tooltip
+  text-format setter), and several tooltip builders interpolate save-derived cat,
+  disorder and defect names (`partnertable`, `donations_tab`, `bestmatch`, the
+  focus panel's health tip). A crafted save could therefore render markup in a
+  tooltip. Found by the reviewer while fixing the header labels, which are now
+  plain text. Fix as its own batch: one plain-tooltip helper (escape, convert
+  newlines, and keep the leading-space indentation the current tips rely on) and
+  route the save-derived builders through it. `theme.wrap_tooltip` is used by
+  only 9 of 47 `setToolTip` sites, so it is a good choke point but needs the
+  indentation preserved.
 - `core/livesave.py`: when the game has more than one `.sav` open at once
   (briefly, during a campaign switch) the detector returns whichever the
   directory scan yields first; the next 5 s tick corrects it. Seen live on

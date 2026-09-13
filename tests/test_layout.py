@@ -90,10 +90,11 @@ class FakePalette(QWidget):
         self._session = None
         self._assets = SimpleNamespace(assets=None)
         self._tablectl = None        # created by PaletteWindow *after* build
-        # layout.build hands this to PartnerActions as the "Show in game"
-        # availability predicate; the real palette derives it from a running
-        # bridge controller. Tests may set it False to hide the item.
-        self.bridge_available = True
+        # layout.build hands the predicate ``lambda: window.in_game_available``
+        # to PartnerActions as the "Show in game" availability gate; the real
+        # palette derives it from a running bridge with a game connected.
+        # Tests may set it False to hide the item.
+        self.in_game_available = True
 
     # callbacks connected by layout.build / the widgets it creates
     def _toggle_pin(self, checked):
@@ -166,7 +167,7 @@ class FakePalette(QWidget):
         self.calls.append(("show_in_game", db_key))
         return True
 
-    def _refresh_show_in_game(self):
+    def refresh_show_in_game(self):
         # layout.build calls this at the end of _wire_ui and installs it as the
         # coordinator's focus-change callback. The real re-gate of the card
         # button is covered by test_show_in_game_button.py.
@@ -472,12 +473,12 @@ def test_context_menu_show_in_game_reaches_the_host(make_host, monkeypatch,
     assert not any(c[0] == "pin_cat" for c in host.calls)
 
 
-def test_context_menu_hides_show_in_game_when_the_bridge_is_unavailable(
+def test_context_menu_hides_show_in_game_when_no_game_is_connected(
         make_host, monkeypatch, qapp):
-    # The predicate reaches the palette's bridge_available property: an
-    # attached-but-stopped bridge keeps the item out of the menu.
+    # The predicate reaches the palette's in_game_available property: a bridge
+    # with no game connected keeps the item out of the menu.
     host = make_host()
-    host.bridge_available = False
+    host.in_game_available = False
     menus: list = []
     monkeypatch.setattr(_pa, "QMenu",
                         lambda parent=None: _PickShowInGameMenu(menus))

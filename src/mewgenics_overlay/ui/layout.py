@@ -129,13 +129,13 @@ def _build_breeding(window, root: QVBoxLayout) -> None:
         "When checked, pairs that cannot breed (direct family, hater, "
         "sexuality blocks) are hidden instead of listed below."
     ))
-    # Outbound trigger for the focused cat: enablement is derived live from
-    # the bridge state and the current focus (see _refresh_show_in_game).
+    # Outbound trigger for the focused cat: visibility, enablement and
+    # tooltip are derived live from the game connection and the current focus
+    # (see refresh_show_in_game). While no game is connected it stays hidden,
+    # so it reserves no space in this row either.
     window._btn_show_in_game = QPushButton("Show in game")
+    window._btn_show_in_game.setVisible(False)
     window._btn_show_in_game.setEnabled(False)
-    window._btn_show_in_game.setToolTip(_wt(
-        "The in-game bridge is off, so the game cannot select this cat."
-    ))
     row2.addWidget(window._room_bar)
     row2.addStretch(1)
     row2.addWidget(window._btn_swap)
@@ -193,7 +193,7 @@ def _build_breeding(window, root: QVBoxLayout) -> None:
         on_pin=window.set_pinned,
         on_focus=window.set_focus,
         on_show_in_game=window.show_in_game,
-        show_in_game_available=lambda: window.bridge_available,
+        show_in_game_available=lambda: window.in_game_available,
         parent=window,
     )
 
@@ -217,7 +217,7 @@ def _build_coordinator(window) -> None:
         assets_getter=lambda: window._assets.assets,
         schedule=window._schedule_partners,
         on_selected=window._on_partner_selected,
-        on_focus_changed=window._refresh_show_in_game,
+        on_focus_changed=window.refresh_show_in_game,
         parent=window,
     )
 
@@ -305,4 +305,4 @@ def _wire_ui(window) -> None:
         lambda _checked: window._tablectl.recompute_partners())
     window._btn_show_in_game.clicked.connect(window._on_show_selected_in_game)
     # Sync the button now that the coordinator (and thus the focus) exists.
-    window._refresh_show_in_game()
+    window.refresh_show_in_game()

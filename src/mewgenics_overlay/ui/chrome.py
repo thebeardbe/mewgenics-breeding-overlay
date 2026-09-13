@@ -112,6 +112,11 @@ class TopBar(QWidget):
         self._status.setObjectName("muted")
         self._status.setStyleSheet(
             f"color:{_theme.C_STATUS}; font-size:11px;")
+        # Both labels can carry save-derived text (the save file's base name
+        # in the title, a cat name in the status): force PlainText at this
+        # choke point so a hostile name can never render as HTML.
+        for lbl in (self._title, self._status):
+            lbl.setTextFormat(Qt.TextFormat.PlainText)
         head.addWidget(grip)
         head.addWidget(self._title)
         head.addWidget(self._status, 1)

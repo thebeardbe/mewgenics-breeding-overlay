@@ -549,24 +549,25 @@ class PaletteWindow(QWidget):
         self.set_focus_key(key)
 
     # ── in-game bridge (outbound "show in game") ────────────────────────────
-    def _refresh_show_in_game(self) -> None:
+    def refresh_show_in_game(self) -> None:
         """Re-gate the card's "Show in game" button for the live state.
 
-        Called whenever the bridge availability or the selected cat changes,
-        so the button never offers an action the current state cannot fulfil.
+        Called whenever the bridge availability, the game connection or the
+        selected cat changes. With no game connected the button is hidden
+        (matching the partner context-menu item and reserving no space); once
+        a game is connected it is shown, enabled only when a cat is focused.
         """
         btn = getattr(self, "_btn_show_in_game", None)
         if btn is None:
             return
-        bridge_on = self.bridge_available
+        available = self.in_game_available
         has_cat = self._focus is not None
-        btn.setEnabled(bridge_on and has_cat)
-        if not bridge_on:
-            tip = "The in-game bridge is off, so the game cannot select this cat."
-        elif not has_cat:
-            tip = "Pick a cat first, then ask the game to select them."
-        else:
+        btn.setVisible(available)
+        btn.setEnabled(available and has_cat)
+        if has_cat:
             tip = "Ask the game to select this cat in game."
+        else:
+            tip = "Pick a cat first, then ask the game to select them."
         btn.setToolTip(_theme.wrap_tooltip(tip))
 
     def _on_show_selected_in_game(self) -> None:
@@ -574,14 +575,34 @@ class PaletteWindow(QWidget):
         self.show_focused_in_game()
 
     def attach_bridge(self, bridge: BridgeController) -> None:
-        """Attach the in-game bridge that carries outbound selects."""
+        """Attach the in-game bridge that carries outbound selects.
+
+        The controller's ``game_online`` signal re-gates the card button as
+        the mod connects and disconnects (delivered on the UI thread).
+        """
         self._bridge = bridge
-        self._refresh_show_in_game()
+        bridge.game_online.connect(self.refresh_show_in_game)
+        self.refresh_show_in_game()
 
     @property
     def bridge_available(self) -> bool:
         """True only when a bridge is attached and actually running."""
         return self._bridge is not None and self._bridge.running
+
+    @property
+    def in_game_available(self) -> bool:
+        """True when the bridge is listening *and* a game is connected.
+
+        The in-game actions need a game to answer them: a listening bridge
+        with no mod connected could only ever answer "no game connected".
+        """
+        return self.bridge_available and self._bridge.client_count > 0
+
+    def _cat_name(self, db_key: int) -> str:
+        """Display name of *db_key* in the current session, or a fallback."""
+        cat = self._session.by_key.get(db_key) if self._session else None
+        name = getattr(cat, "name", None)
+        return name if name else "this cat"
 
     def show_focused_in_game(self) -> bool:
         """Send the focused cat to the game via the outbound path.
@@ -608,7 +629,8 @@ class PaletteWindow(QWidget):
             return False
         if self._bridge.send_select(db_key) > 0:
             log.info("bridge: asked the game to select cat key=%d", db_key)
-            self._set_status("asked the game to select this cat")
+            self._set_status(
+                f"asked the game to select {self._cat_name(db_key)}")
             return True
         log.warning("bridge: no game connected; cannot show cat key=%d",
                     db_key)

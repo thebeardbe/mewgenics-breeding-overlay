@@ -407,8 +407,9 @@ def main(argv=None) -> int:
         bridge_ctl.save_reported.connect(_on_bridge_save)
         bridge_ctl.game_online.connect(_on_game_online)
         if bridge_ctl.start():
-            # Only attach a running bridge; the palette's bridge_available
-            # gate then hides "Show in game" while it is off.
+            # Only attach a running bridge; the palette's in_game_available
+            # gate then hides "Show in game" while it is off or no game is
+            # connected.
             palette.attach_bridge(bridge_ctl)
         else:
             logging.warning("bridge: not listening this session (port %s busy?)",
