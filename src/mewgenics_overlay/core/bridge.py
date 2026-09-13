@@ -17,10 +17,14 @@ thread (see ``ui/bridgectl.py``).
 Protocol (one JSON object per line, UTF-8)::
 
     {"v": 1, "type": "focus", "key": 341, "name": "L'Via"}
+    {"v": 1, "type": "save", "file": "steamcampaign02.sav"}
 
 ``key`` is the game's cat key, which is also the overlay's ``db_key`` (proven
 against the live game; see the mod repo's ``RESEARCH.md``). ``uid`` and ``name``
-are optional fallbacks for mods that cannot read the key.
+are optional fallbacks for mods that cannot read the key. A ``save`` message
+names the save file the game is currently playing; the file name is validated
+with :func:`mewgenics_overlay.core.livesave.is_save_file_name` and the UI side
+resolves it to a path (see ``core/livesave.py``).
 
 Security: the server binds loopback only. Any local process can focus a cat,
 which is harmless, but it cannot read anything or change game state.
@@ -34,12 +38,17 @@ import select
 import socket
 import threading
 from dataclasses import dataclass
-from typing import Callable, Optional
+from typing import Callable, Optional, Union
+
+from mewgenics_overlay.core import livesave
 
 log = logging.getLogger("mewgenics_overlay.bridge")
 
 DEFAULT_PORT = 45780
 PROTOCOL_VERSION = 1
+#: Inbound message types the mod may send.
+FOCUS_TYPE = "focus"
+SAVE_TYPE = "save"
 #: Reject anything longer: a real message is well under 200 bytes, so this only
 #: guards against a hostile or confused local process.
 MAX_LINE_BYTES = 4096
@@ -68,6 +77,22 @@ class FocusRequest:
     name: Optional[str] = None
 
 
+@dataclass(frozen=True, slots=True)
+class SaveRequest:
+    """The save file the game is currently playing, as sent by the mod.
+
+    ``file`` is always a bare ``.sav`` file name, never a path: the overlay
+    decides which copy on disk that refers to (see
+    :func:`mewgenics_overlay.core.livesave.resolve_save_path`).
+    """
+
+    file: str
+
+
+#: Anything the mod may send on one line.
+InboundMessage = Union[FocusRequest, SaveRequest]
+
+
 def _as_int(value: object) -> Optional[int]:
     """Best-effort int for JSON numbers and numeric strings, else None."""
     if isinstance(value, bool):
@@ -86,11 +111,12 @@ def _as_int(value: object) -> Optional[int]:
     return None
 
 
-def parse_message(raw: str) -> FocusRequest:
-    """Parse one protocol line into a :class:`FocusRequest`.
+def parse_message(raw: str) -> InboundMessage:
+    """Parse one protocol line into a :class:`FocusRequest` or :class:`SaveRequest`.
 
-    Raises :class:`ProtocolError` for malformed JSON, an unsupported version,
-    an unknown type, or a focus message with no usable identifier.
+    Raises :class:`ProtocolError` for malformed JSON, an unsupported version, an
+    unknown type, a focus message with no usable identifier, or a save message
+    whose file name is not a plain ``.sav`` name.
     """
     try:
         payload = json.loads(raw)
@@ -105,9 +131,15 @@ def parse_message(raw: str) -> FocusRequest:
         raise ProtocolError(f"unsupported protocol version {payload.get('v')!r}")
 
     message_type = payload.get("type")
-    if message_type != "focus":
-        raise ProtocolError(f"unsupported message type {message_type!r}")
+    if message_type == FOCUS_TYPE:
+        return _parse_focus(payload)
+    if message_type == SAVE_TYPE:
+        return _parse_save(payload)
+    raise ProtocolError(f"unsupported message type {message_type!r}")
 
+
+def _parse_focus(payload: dict) -> FocusRequest:
+    """Build a :class:`FocusRequest`, refusing one with no usable identifier."""
     request = FocusRequest(
         key=_as_int(payload.get("key")),
         uid=None if payload.get("uid") is None else str(payload["uid"]),
@@ -116,6 +148,15 @@ def parse_message(raw: str) -> FocusRequest:
     if request.key is None and request.uid is None and request.name is None:
         raise ProtocolError("focus message carries no key, uid or name")
     return request
+
+
+def _parse_save(payload: dict) -> SaveRequest:
+    """Build a :class:`SaveRequest`, refusing anything that is not a bare name."""
+    raw = payload.get("file")
+    text = raw.strip() if isinstance(raw, str) else ""
+    if not livesave.is_save_file_name(text):
+        raise ProtocolError(f"save message carries no plain .sav name: {raw!r}")
+    return SaveRequest(file=text)
 
 
 def resolve_focus_key(session, request: FocusRequest) -> Optional[int]:
@@ -157,8 +198,16 @@ def resolve_focus_key(session, request: FocusRequest) -> Optional[int]:
 class BridgeServer:
     """Loopback TCP server for bridge messages.
 
-    ``on_focus`` is called on a transport thread for every valid focus request;
-    exceptions it raises are logged, never allowed to kill the server.
+    Callbacks (all optional except ``on_focus``) run on whichever thread
+    observed the event - a connection thread for messages, the caller's thread
+    when ``stop()`` clears the peers - so the UI layer must hop to the main
+    thread (see ``ui/bridgectl.py``). Exceptions a callback raises are logged,
+    never allowed to kill the server.
+
+    ``on_focus``            every valid focus request.
+    ``on_save``             every valid save request, i.e. which save the game plays.
+    ``on_clients_changed``  the peer count after a client connected or went away,
+                            so the UI can show the game as connected.
     """
 
     def __init__(
@@ -167,8 +216,12 @@ class BridgeServer:
         host: str = "127.0.0.1",
         port: int = DEFAULT_PORT,
         parent_log: Optional[logging.Logger] = None,
+        on_save: Optional[Callable[[SaveRequest], None]] = None,
+        on_clients_changed: Optional[Callable[[int], None]] = None,
     ) -> None:
         self._on_focus = on_focus
+        self._on_save = on_save
+        self._on_clients_changed = on_clients_changed
         self._host = host
         self._requested_port = port
         self._log = parent_log or log
@@ -245,11 +298,27 @@ class BridgeServer:
             if len(self._clients) >= MAX_CLIENTS:
                 return False
             self._clients.add(conn)
-            return True
+            count = len(self._clients)
+        self._notify_clients(count)
+        return True
 
     def _unregister(self, conn: socket.socket) -> None:
         with self._clients_lock:
+            if conn not in self._clients:
+                return
             self._clients.discard(conn)
+            count = len(self._clients)
+        self._notify_clients(count)
+
+    def _notify_clients(self, count: int) -> None:
+        """Report the peer count; called with no lock held."""
+        callback = self._on_clients_changed
+        if callback is None:
+            return
+        try:
+            callback(count)
+        except Exception:
+            self._log.exception("bridge: client-count handler failed")
 
     # ── lifecycle ──────────────────────────────────────────────────────────
     def start(self) -> bool:
@@ -293,6 +362,8 @@ class BridgeServer:
                 conn.close()
             except OSError:
                 pass
+        if clients:
+            self._notify_clients(0)
         if self._thread is not None:
             self._thread.join(timeout=2.0)
             self._thread = None
@@ -354,13 +425,29 @@ class BridgeServer:
             self._log.warning("bridge: dropping oversized message from %s", peer)
             return
         try:
-            request = parse_message(line.decode("utf-8", errors="strict"))
+            message = parse_message(line.decode("utf-8", errors="strict"))
         except (ProtocolError, UnicodeDecodeError) as exc:
             self._log.warning("bridge: ignoring bad message from %s: %s", peer, exc)
             return
+        # A UI bug must never kill the listener thread, but it must leave a
+        # trace - silent bridge failures are the worst kind.
+        if isinstance(message, SaveRequest):
+            self._notify_save(message)
+        else:
+            self._notify_focus(message)
+
+    def _notify_focus(self, request: FocusRequest) -> None:
         try:
             self._on_focus(request)
         except Exception:
-            # A UI bug must never kill the listener thread, but it must leave
-            # a trace - silent bridge failures are the worst kind.
             self._log.exception("bridge: focus handler failed")
+
+    def _notify_save(self, request: SaveRequest) -> None:
+        if self._on_save is None:
+            self._log.debug("bridge: save %r reported; no handler installed",
+                            request.file)
+            return
+        try:
+            self._on_save(request)
+        except Exception:
+            self._log.exception("bridge: save handler failed")

@@ -249,7 +249,7 @@ def _build_settings(window, tabs: QTabWidget, outer: QVBoxLayout) -> None:
     from mewgenics_overlay.ui.settings_tab import SettingsTab
 
     window._save_panel = SavePanel(
-        window._settings, on_open=window.open_save)
+        window._settings, on_open=window.open_save_manual)
     actions = {
         "set_theme": window.apply_theme,
         "zoom_in": window._zoom_inc,

@@ -129,8 +129,19 @@ Waiting on the tester's results for v0.2.1 (Windows hotkey) and v0.2.2
   runtime without `stop()` (unexpected accept-loop error), the button stays
   enabled until the next focus change. A running-changed signal from
   `BridgeController` would fix it; the click degrades gracefully meanwhile.
+- `ui/app.py`: a failed live-save scan is folded into "game absent" (the
+  worker's exception handler leaves `present` False), so three consecutive scan
+  failures while the game runs would clear a user pin. Logged, and mitigated by
+  the grace period, but it should be treated as "unknown" rather than "absent"
+  (AGENTS.md §7: no data versus compute failed).
 - `ui/palette.py` is 615 lines, in the 601–1000 warning band. The bridge and
   outbound block (roughly lines 510–570) is the natural next extraction.
+- `core/bridge.py` is 453 lines and `core/livesave.py` 459, both in the 401–600
+  band; extract the peer registry from bridge and the process-matching helpers
+  from livesave before adding another concern to either.
+- `tests/test_bridge.py`: one test that uses a real loopback server, a collector
+  wait and cross-thread caplog failed once in nine full-suite runs (passed in
+  isolation). Likely a logging race in the listener thread.
 
 ## Refactor roadmap (complete)
 

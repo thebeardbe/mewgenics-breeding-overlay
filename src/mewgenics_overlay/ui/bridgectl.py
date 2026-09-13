@@ -23,12 +23,25 @@ class BridgeController(QObject):
 
     #: Emitted (queued) for every valid focus request, on the UI thread.
     focus_requested = Signal(object)
+    #: Emitted (queued) for every valid save report, on the UI thread. Carries
+    #: the :class:`~mewgenics_overlay.core.bridge.SaveRequest`.
+    save_reported = Signal(object)
+    #: Emitted (queued) when the game comes and goes: True while at least one
+    #: client (the mod) is connected, False once they all left.
+    game_online = Signal(bool)
 
     def __init__(self, port: int = bridge.DEFAULT_PORT,
                  parent: Optional[QObject] = None) -> None:
         super().__init__(parent)
         self._server = bridge.BridgeServer(
-            on_focus=self.focus_requested.emit, port=port)
+            on_focus=self.focus_requested.emit,
+            on_save=self.save_reported.emit,
+            on_clients_changed=self._on_clients_changed,
+            port=port)
+
+    def _on_clients_changed(self, count: int) -> None:
+        """Re-emit the peer count as a plain online/offline flag."""
+        self.game_online.emit(count > 0)
 
     @property
     def port(self) -> Optional[int]:

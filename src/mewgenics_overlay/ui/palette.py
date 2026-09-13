@@ -23,7 +23,7 @@ for the tray, the global hotkey and ``scripts/gui_smoke.py``.
 from __future__ import annotations
 
 import logging
-from typing import Optional
+from typing import Callable, Optional
 
 from PySide6.QtCore import Qt, QTimer
 import mewgenics_overlay.ui.theme as _theme
@@ -128,6 +128,10 @@ class PaletteWindow(QWidget):
         # Outbound in-game bridge (the "Show in game" select); attached by
         # app.main() once the BridgeController exists.
         self._bridge: Optional[BridgeController] = None
+        # Optional host hook: fires only for a save the *user* chose, never for
+        # an automatic follow (app.main wires it to the save-follow policy so
+        # the user's choice is pinned while the game stays online).
+        self.on_manual_open: Optional[Callable[[str], None]] = None
         self._save = SaveController()   # session state + background queue + watcher
         # The resources.gpak effect tables load once, off the UI thread; the
         # drain runs first on every reloader poll tick (ui/assets.py).
@@ -367,6 +371,24 @@ class PaletteWindow(QWidget):
         self._reloader.start(path)
         self._set_status("loading save…")
         self._reloader.request_reload()
+
+    def open_save_manual(self, path: str) -> None:
+        """A *user*-chosen save (slot, picker, ``--save``): note it, then load.
+
+        Only this path fires :attr:`on_manual_open`; an automatic follow calls
+        :meth:`open_save` directly so it never pins the user's view.
+        """
+        if self.on_manual_open is not None:
+            try:
+                self.on_manual_open(path)
+            except Exception:
+                log.exception("manual-open hook failed")
+        self.open_save(path)
+
+    @property
+    def current_save_path(self) -> Optional[str]:
+        """The save file currently loaded, or None before the first load."""
+        return self._settings.get("save_path")
 
     def _on_save_changed(self) -> None:
         """The watched save was rewritten: reload it (UI thread).

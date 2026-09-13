@@ -93,8 +93,12 @@ src/mewgenics_overlay/
   core/
     discovery.py          save + resources.gpak location (Windows/Proton/Linux)
     watcher.py            debounced file watcher + safe copy-before-read
-    bridge.py             in-game bridge: loopback TCP protocol, request -> db_key
-                          resolution, transport server (Qt-free; ui/bridgectl.py)
+    bridge.py             in-game bridge: loopback TCP protocol (focus + which save
+                          the game plays), request -> db_key resolution, transport
+                          server (Qt-free; ui/bridgectl.py)
+    livesave.py           live save: the save the running game holds open (scanned
+                          via /proc), a mod-reported save name -> full path, and
+                          SaveFollowPolicy (decide when to follow that save)
     session.py            parse wrapper: cats, alive/dead, current_day,
                           npc_progress_flags, rank_partners(stimulation),
                           same-sex straight block, display_location ("Outside house")
@@ -139,7 +143,8 @@ src/mewgenics_overlay/
     donations_tab.py      Donations tab: NPC dropdown, candidate table with
                           Donate?/Maybe/Keep ratings + reasons, pin context menu
     app.py                bootstrap: theme-from-config, tray, hotkey install,
-                          file logger + excepthook, Hyprland/xcb + gtk3-theme fix
+                          save-follow the game's save, file logger + excepthook,
+                          Hyprland/xcb + gtk3-theme fix
     hotkey.py             Windows global hotkey: RegisterHotKey + native filter
                           (both MSG event types), rebind, WinError reporting
     hotkeybinding.py      pure hotkey combo model (parse/format/vk/mods, per-DE syntax)
@@ -162,11 +167,18 @@ save on disk ──> discovery finds it ──> Session.parse (vendor parser)
 Session ──> palette model (breeding rows / donation slots)
 GameAssets (async gpak) ──> defect effect text, furniture Stim/Comfort
 Background worker threads + token guard → results drained by a UI poll timer
+Game 'save' report + 5 s /proc scan ──> SaveFollowPolicy ──> palette.open_save
 ```
 
 Key invariants:
 - All heavy parsing/scoring runs on background threads; the UI thread only
   adopts results whose generation token is still current.
+- The overlay **follows the save the game is actually playing**
+  (`core/livesave.py`): the mod's `save` report and a 5 s `/proc` scan of the
+  game's open descriptor both feed `SaveFollowPolicy`, which loads the game's
+  save unless the user opened another one while the game is online (a *pin* is
+  lifted when the game itself switches campaign). `follow_game_save` in
+  `config.json` (default on) turns the following off.
 - The palette carries its **own stylesheet** (see §7) and re-renders theme
   colours on switch; Donations tab is refreshed from the palette.
 
@@ -229,6 +241,8 @@ Key invariants:
 | `test_windowstate.py`, `test_zoom.py`, `test_themectl.py`, `test_updatenotice.py`, `test_aboutdialog.py` | frameless window state, zoom, themes, update notice, About/report helpers |
 | `test_hotkeybinding.py`, `test_hotkey.py`, `test_hotkeyctl.py`, `test_hotkey_palette.py` | hotkey combo model, Windows filter (both MSG event types), rebind, controller |
 | `test_singleton.py`, `test_desktopshortcut.py`, `test_shortcutworker.py`, `test_app_bootstrap.py` | `--toggle` channel, per-DE shortcut setup, background worker, CLI bootstrap |
+| `test_bridge.py`, `test_bridgectl.py`, `test_livesave.py`, `test_livesave_scanner.py` | in-game bridge protocol (focus, select and save messages, client cap, non-blocking send, client count), live-save detector and the follow/pin policy with its offline grace period, off-thread scan delivering on the UI thread |
+| `test_show_in_game.py`, `test_show_in_game_button.py`, `test_raisewindow.py` | the shared outbound select path (shortcut, context menu, card button), and the Hyprland raise fallback in both `hyprctl` dispatch flavours |
 
 Plus `scripts/gui_smoke.py` for the real UI offscreen.
 

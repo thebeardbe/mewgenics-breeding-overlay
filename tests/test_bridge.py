@@ -375,3 +375,209 @@ def test_send_counts_only_successful_writes(monkeypatch):
 
     assert good.sent                       # the healthy peer got the line
     assert server.client_count == 1        # the broken peer was dropped
+
+
+# ── save reports (which save the game is playing) ───────────────────────────
+def save_message(file):
+    return json.dumps({"v": bridge.PROTOCOL_VERSION, "type": "save",
+                       "file": file})
+
+
+def start_server_with_save():
+    """Server with both callbacks, so save reports never land as focus ones."""
+    focus = Collector()
+    saves = Collector()
+    server = bridge.BridgeServer(on_focus=focus, on_save=saves, port=0)
+    assert server.start() is True
+    return server, focus, saves
+
+
+def send_lines(port, lines):
+    """Send every line down *one* connection, proving it survives them all."""
+    with socket.create_connection(("127.0.0.1", port), timeout=3.0) as sock:
+        for line in lines:
+            sock.sendall(line.encode("utf-8") + b"\n")
+
+
+def test_parse_save_message_reads_the_file_name():
+    req = bridge.parse_message(save_message("steamcampaign02.sav"))
+    assert isinstance(req, bridge.SaveRequest)
+    assert req.file == "steamcampaign02.sav"
+
+
+def test_parse_save_message_strips_surrounding_whitespace():
+    assert bridge.parse_message(save_message(" steamcampaign02.sav ")).file == \
+        "steamcampaign02.sav"
+
+
+@pytest.mark.parametrize("file", [
+    "../../steamcampaign01.sav",       # traversal
+    "..\\..\\steamcampaign01.sav",
+    "sub/steamcampaign01.sav",         # path separator
+    "C:steamcampaign01.sav",           # drive specifier
+    "/steam/root/steamcampaign01.sav",  # absolute path
+    "notes.txt",                       # not a save
+    "steamcampaign01.sav.exe",         # wrong suffix
+    "", " ", "..", ".",
+    None, 123, ["steamcampaign01.sav"], {"name": "steamcampaign01.sav"},
+])
+def test_parse_rejects_a_bad_save_file_name(file):
+    with pytest.raises(bridge.ProtocolError):
+        bridge.parse_message(save_message(file))
+
+
+def test_server_delivers_a_save_request():
+    server, focus, saves = start_server_with_save()
+    try:
+        send(server.port, save_message("steamcampaign02.sav"))
+        assert saves.wait(), "no save report delivered"
+        assert saves.requests[0].file == "steamcampaign02.sav"
+        assert saves.requests[0] == bridge.SaveRequest("steamcampaign02.sav")
+        # A save report must never be mistaken for a focus request.
+        assert focus.requests == []
+    finally:
+        server.stop()
+
+
+@pytest.mark.parametrize("bad", [
+    save_message("../../steamcampaign01.sav"),
+    save_message("sub/steamcampaign01.sav"),
+    save_message("notes.txt"),
+    save_message(123),
+    save_message(None),
+    '{"v": 1, "type": "save"}',                      # no file at all
+    '{"v": 1, "type": "select", "key": 341}',        # unknown type
+    '{"v": 99, "type": "save", "file": "a.sav"}',    # wrong version
+])
+def test_server_rejects_a_bad_save_message_and_keeps_the_connection(bad):
+    server, focus, saves = start_server_with_save()
+    try:
+        send_lines(server.port, [bad, message(key=349)])
+
+        assert focus.wait(), "connection did not survive the rejected message"
+        assert focus.requests[-1].key == 349
+        assert saves.requests == []
+        assert server.running is True
+    finally:
+        server.stop()
+
+
+def test_server_reports_a_save_when_no_handler_is_installed(caplog):
+    # A build without an on_save callback must ignore the report (with a
+    # trace) instead of crashing the listener thread.
+    collector = Collector()
+    server = bridge.BridgeServer(on_focus=collector, port=0)
+    assert server.start() is True
+    try:
+        with caplog.at_level(logging.DEBUG, logger="mewgenics_overlay.bridge"):
+            send(server.port, save_message("steamcampaign01.sav"))
+            send(server.port, message(key=341))
+        assert collector.wait(), "listener died on an unhandled save report"
+        assert any("no handler installed" in r.getMessage()
+                   for r in caplog.records)
+    finally:
+        server.stop()
+
+
+# ── client-count callback (drives the UI's "game connected" flag) ───────────
+class CountRecorder:
+    """Record every client count, waiting for the *n*-th without sleeping."""
+
+    def __init__(self):
+        self.values = []
+        self._cv = threading.Condition()
+
+    def __call__(self, count):
+        with self._cv:
+            self.values.append(count)
+            self._cv.notify_all()
+
+    def wait_for(self, count, timeout=3.0):
+        end = time.monotonic() + timeout
+        with self._cv:
+            while len(self.values) < count:
+                remaining = end - time.monotonic()
+                if remaining <= 0:
+                    return False
+                self._cv.wait(remaining)
+        return True
+
+
+def start_server_with_counts():
+    counts = CountRecorder()
+    server = bridge.BridgeServer(on_focus=lambda _r: None, port=0,
+                                 on_clients_changed=counts)
+    assert server.start() is True
+    return server, counts
+
+
+def test_client_count_fires_on_connect_and_disconnect():
+    server, counts = start_server_with_counts()
+    client = None
+    try:
+        client = socket.create_connection(("127.0.0.1", server.port),
+                                          timeout=3.0)
+        assert counts.wait_for(1), "connect did not change the count"
+        assert counts.values[:1] == [1]
+
+        client.close()
+        assert counts.wait_for(2), "disconnect did not change the count"
+        assert counts.values[:2] == [1, 0]
+    finally:
+        if client is not None:
+            client.close()
+        server.stop()
+
+
+def test_client_count_fires_on_stop_with_a_client_connected():
+    server, counts = start_server_with_counts()
+    client = None
+    try:
+        client = socket.create_connection(("127.0.0.1", server.port),
+                                          timeout=3.0)
+        assert counts.wait_for(1)
+
+        server.stop()
+
+        assert counts.wait_for(2), "stop did not report the game offline"
+        assert counts.values[:2] == [1, 0]
+    finally:
+        if client is not None:
+            client.close()
+        server.stop()
+
+
+def test_stop_without_clients_does_not_report():
+    server, counts = start_server_with_counts()
+    try:
+        server.stop()
+        assert counts.values == []
+    finally:
+        server.stop()
+
+
+def test_a_connection_refused_by_the_cap_never_changes_the_count():
+    server, counts = start_server_with_counts()
+    clients = []
+    extra = None
+    try:
+        for _ in range(bridge.MAX_CLIENTS):
+            clients.append(socket.create_connection(
+                ("127.0.0.1", server.port), timeout=3.0))
+        assert counts.wait_for(bridge.MAX_CLIENTS), "cap was not filled"
+        assert counts.values == list(range(1, bridge.MAX_CLIENTS + 1))
+
+        extra = socket.create_connection(("127.0.0.1", server.port),
+                                         timeout=3.0)
+        extra.settimeout(3.0)
+        # The refused client is closed immediately, so it reads EOF. Once that
+        # is observed the server has already taken the refusal path, which must
+        # not have notified anyone.
+        assert extra.recv(1024) == b""
+        assert counts.values == list(range(1, bridge.MAX_CLIENTS + 1))
+    finally:
+        for conn in clients:
+            conn.close()
+        if extra is not None:
+            extra.close()
+        server.stop()

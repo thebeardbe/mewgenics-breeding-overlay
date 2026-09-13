@@ -31,6 +31,10 @@ DEFAULTS = {
     # In-game bridge (mewgenics-breeding-mod): loopback TCP focus requests.
     "bridge_enabled": True,
     "bridge_port": bridge.DEFAULT_PORT,
+    # Follow the save the game is actually playing: on a connect and every few
+    # seconds, detect the game's open save (or take the mod's report) and load
+    # it. Off keeps the overlay on the user's own choice.
+    "follow_game_save": True,
     # Where the About-box "Report a problem" button points. None uses the
     # built-in default (the self-hosted Bugbox form); override it to point at
     # a different report form.

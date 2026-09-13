@@ -26,11 +26,12 @@ import pytest  # noqa: E402
 pytest.importorskip("PySide6")
 pytest.importorskip("lz4")
 
-from PySide6.QtCore import QObject  # noqa: E402
+from PySide6.QtCore import QObject, QTimer  # noqa: E402
 from PySide6.QtGui import QShortcut  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from mewgenics_overlay.core import bridge  # noqa: E402
+from mewgenics_overlay.core import livesave  # noqa: E402
 from mewgenics_overlay.ui import app  # noqa: E402
 from mewgenics_overlay.ui import desktopshortcut  # noqa: E402
 from mewgenics_overlay.ui import hotkeybinding  # noqa: E402
@@ -93,6 +94,14 @@ class _FakePalette(QObject):
         self.focused = []
         self.engaged = False
         self._focus = None
+        # Save-follow wiring (app.main): the policy hook for a *user*-chosen
+        # save, and the recorded load calls. ``current_save_path`` is what the
+        # policy compares a detected save against.
+        self.on_manual_open = None
+        self.statuses = []
+        self.opened = []                     # every load, automatic or manual
+        self.manual_opens = []               # only user-chosen ones
+        self._current_save = None
         # Outbound "show in game" path, as main() drives it: the shortcut calls
         # the shared focused-cat guard, which delegates to show_in_game. The
         # guard is bound from the real PaletteWindow so app.py's wiring is
@@ -127,8 +136,24 @@ class _FakePalette(QObject):
     def _save_geometry(self):
         pass
 
+    @property
+    def current_save_path(self):
+        return self._current_save
+
     def open_save(self, path):
-        pass
+        self.opened.append(path)
+        self._current_save = path
+
+    def open_save_manual(self, path):
+        # Mirrors PaletteWindow.open_save_manual: the user's choice goes
+        # through the hook (pin) and is then loaded like any other save.
+        self.manual_opens.append(path)
+        if self.on_manual_open is not None:
+            self.on_manual_open(path)
+        self.open_save(path)
+
+    def _set_status(self, text):
+        self.statuses.append(text)
 
     def show(self):
         self.shown = True
@@ -147,6 +172,8 @@ class _FakeBridgeController:
     def __init__(self, port=0, parent=None):
         self.port = port
         self.focus_requested = _FakeSignal()
+        self.save_reported = _FakeSignal()
+        self.game_online = _FakeSignal()
         self.started = False
         self.stopped = False
         self.sent = []
@@ -225,6 +252,13 @@ def bootstrap(monkeypatch, tmp_path):
 
     yield SimpleNamespace(app=fake_app, palette=_FakePalette,
                           created=created, install_instance=install_instance)
+    # A palette carries a live 5 s follow timer; if one outlives its test it
+    # fires during another module's processEvents() and spins real /proc scans.
+    # Stop every timer and drop the palettes before the next test begins.
+    for palette in list(_FakePalette.instances):
+        for timer in palette.findChildren(QTimer):
+            timer.stop()
+    _FakePalette.instances = []
     _theme.set_theme(original_theme)
 
 
@@ -433,3 +467,495 @@ def test_no_ctrl_g_shortcut_when_the_bridge_is_disabled(bootstrap, qapp,
     assert app.main(["--no-tray"]) == 0
 
     assert _ctrl_g_shortcut(bootstrap.palette.instances[-1]) is None
+
+
+# ── 6. following the save the game is actually playing ─────────────────────
+class _Detection:
+    """Records ``find_live_save`` calls and returns a scripted path."""
+
+    def __init__(self, path=None):
+        self.path = path
+        self.calls = 0
+
+    def __call__(self, *args, **kwargs):
+        self.calls += 1
+        return self.path
+
+
+class _FakeScanner(QObject):
+    """Synchronous stand-in for ``app.LiveSaveScanner``.
+
+    The real scanner runs on a worker thread and delivers through a queued Qt
+    signal, which no test can wait on without an event loop. This fake keeps
+    ``main``'s wiring intact but runs the scan and the handler on the calling
+    (UI) thread, so the policy and palette logic is deterministic. The real
+    scanner's off-thread hop is covered by its own tests below.
+    """
+
+    instances: list["_FakeScanner"] = []
+    #: ``() -> (live_save_or_None, game_present)``, set per test.
+    scan = staticmethod(lambda: (None, False))
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.handler = None
+        self.requests = 0
+        _FakeScanner.instances.append(self)
+
+    def set_handler(self, handler):
+        self.handler = handler
+
+    def request(self):
+        self.requests += 1
+        if self.handler is not None:
+            found, present = _FakeScanner.scan()
+            self.handler(found, present)
+
+
+def enable_follow(monkeypatch, bootstrap, *, detected=None, follow_enabled=True,
+                  saves=None, present=None, detector=True):
+    """Enable the bridge + follow feature with every seam scripted.
+
+    Returns the detection recorder, the presence flag holder, and the real
+    (but recorded) ``SaveFollowPolicy`` instances ``main`` builds, so tests can
+    assert on the policy state, not only on the resulting loads. *present*
+    overrides the reported process presence (which otherwise mirrors whether a
+    save was detected); *detector* says whether the host exposes a process
+    table.
+    """
+    bootstrap.install_instance([True], toggle_ok=True)
+    monkeypatch.setattr(app.ui_config, "load", lambda: {
+        "bridge_enabled": True,
+        "bridge_port": 45699,
+        "follow_game_save": follow_enabled,
+    })
+    _FakeBridgeController.instances = []
+    monkeypatch.setattr(app.bridgectl, "BridgeController", _FakeBridgeController)
+
+    detection = _Detection(detected)
+    monkeypatch.setattr(app.livesave, "find_live_save", detection)
+    presence = {"value": present if present is not None else bool(detected)}
+    monkeypatch.setattr(app.livesave, "game_process_running",
+                        lambda: presence["value"])
+    monkeypatch.setattr(app.livesave, "detector_available", lambda: detector)
+
+    def _scan():
+        found = detection()
+        return found, bool(found) or presence["value"]
+
+    _FakeScanner.instances = []
+    _FakeScanner.scan = staticmethod(_scan)
+    monkeypatch.setattr(app, "LiveSaveScanner", _FakeScanner)
+
+    policies = []
+    real_policy = livesave.SaveFollowPolicy
+
+    def recording_policy(enabled=True, **kwargs):
+        policy = real_policy(enabled=enabled, **kwargs)
+        policies.append(policy)
+        return policy
+
+    monkeypatch.setattr(app.livesave, "SaveFollowPolicy", recording_policy)
+
+    if saves is not None:
+        monkeypatch.setattr(app.livesave.discovery, "find_all_saves",
+                            lambda: list(saves))
+    return SimpleNamespace(detect=detection, policies=policies,
+                           present=presence, scanner=_FakeScanner)
+
+
+def _follow_timer(palette):
+    """The one 5-second follow timer ``main`` parents to the palette."""
+    timers = [t for t in palette.findChildren(QTimer)
+              if t.interval() == app.FOLLOW_POLL_MS]
+    assert len(timers) == 1, "main() did not create exactly one follow timer"
+    return timers[0]
+
+
+def test_the_game_connecting_marks_it_online_and_scans_once(bootstrap, qapp,
+                                                            monkeypatch):
+    helper = enable_follow(monkeypatch, bootstrap,
+                           detected="/steam/root/game.sav")
+    assert app.main(["--no-tray"]) == 0
+    ctl = _FakeBridgeController.instances[-1]
+    palette = bootstrap.palette.instances[-1]
+
+    ctl.game_online.emit(True)
+
+    assert "game connected" in palette.statuses
+    assert helper.detect.calls == 1
+    assert palette.opened == ["/steam/root/game.sav"]
+    assert helper.policies[-1].online is True
+
+
+def test_connecting_without_a_detectable_save_marks_the_policy_online(
+        bootstrap, qapp, monkeypatch):
+    # `note_game_online()` runs before the scan, so a connect that finds no
+    # save still leaves the policy online: a user open from now on pins.
+    helper = enable_follow(monkeypatch, bootstrap, detected=None)
+    assert app.main(["--no-tray"]) == 0
+    ctl = _FakeBridgeController.instances[-1]
+    palette = bootstrap.palette.instances[-1]
+
+    ctl.game_online.emit(True)
+
+    assert helper.detect.calls == 1
+    assert "game connected" in palette.statuses
+    assert helper.policies[-1].online is True
+    assert palette.opened == []
+
+
+def test_a_manual_open_after_a_save_less_connect_pins_and_stays(bootstrap,
+                                                                qapp, monkeypatch):
+    # The full changed window end to end: connect with nothing detectable,
+    # then a user-chosen save pins; a later detection must not yank it away.
+    helper = enable_follow(monkeypatch, bootstrap, detected=None)
+    assert app.main(["--no-tray"]) == 0
+    ctl = _FakeBridgeController.instances[-1]
+    palette = bootstrap.palette.instances[-1]
+    ctl.game_online.emit(True)
+    assert helper.policies[-1].online is True
+
+    palette.open_save_manual("/steam/root/user.sav")
+
+    assert helper.policies[-1].pinned is True
+    assert palette.opened == ["/steam/root/user.sav"]
+
+    # The game's own save is now detectable; the pin still wins.
+    helper.detect.path = "/steam/root/game.sav"
+    _follow_timer(palette).timeout.emit()
+
+    assert helper.policies[-1].pinned is True
+    assert palette.opened == ["/steam/root/user.sav"]
+
+
+def test_a_different_game_save_lifts_the_pin_set_after_a_save_less_connect(
+        bootstrap, qapp, monkeypatch):
+    # The window's pin survives the game's *first* detected save (there is no
+    # earlier game save to differ from), but a later different save means the
+    # game itself switched campaign, so the pin lifts and the overlay follows.
+    helper = enable_follow(monkeypatch, bootstrap, detected=None)
+    assert app.main(["--no-tray"]) == 0
+    ctl = _FakeBridgeController.instances[-1]
+    palette = bootstrap.palette.instances[-1]
+    ctl.game_online.emit(True)
+    palette.open_save_manual("/steam/root/user.sav")
+
+    helper.detect.path = "/steam/root/game.sav"
+    _follow_timer(palette).timeout.emit()
+    assert helper.policies[-1].pinned is True
+
+    helper.detect.path = "/steam/root/other.sav"
+    _follow_timer(palette).timeout.emit()
+
+    assert helper.policies[-1].pinned is False
+    assert palette.opened == ["/steam/root/user.sav", "/steam/root/other.sav"]
+
+
+def test_a_disconnect_alone_keeps_the_game_online_with_a_detector(
+        bootstrap, qapp, monkeypatch):
+    # With a process table the scan is the authority: a mod disconnect is not
+    # proof the game quit, so the online flag (and any pin) survives.
+    helper = enable_follow(monkeypatch, bootstrap, detector=True)
+    assert app.main(["--no-tray"]) == 0
+    ctl = _FakeBridgeController.instances[-1]
+    palette = bootstrap.palette.instances[-1]
+    ctl.game_online.emit(True)
+    palette.open_save_manual("/steam/root/user.sav")
+    assert helper.policies[-1].pinned is True
+
+    ctl.game_online.emit(False)
+
+    assert helper.policies[-1].online is True
+    assert helper.policies[-1].pinned is True
+
+
+def test_a_disconnect_clears_the_online_state_without_a_detector(
+        bootstrap, qapp, monkeypatch):
+    # No /proc detector: the bridge is the only signal, so a disconnect keeps
+    # its old meaning and clears the game's online state.
+    helper = enable_follow(monkeypatch, bootstrap, detector=False)
+    assert app.main(["--no-tray"]) == 0
+    ctl = _FakeBridgeController.instances[-1]
+
+    ctl.game_online.emit(True)
+    ctl.game_online.emit(False)
+
+    assert helper.policies[-1].online is False
+
+
+def test_a_reported_save_is_resolved_and_loaded(bootstrap, qapp, monkeypatch):
+    helper = enable_follow(
+        monkeypatch, bootstrap,
+        saves=[{"path": "/steam/root/steamcampaign02.sav", "root": "/steam/root",
+                "mtime": 1.0}])
+    assert app.main(["--no-tray"]) == 0
+    ctl = _FakeBridgeController.instances[-1]
+    palette = bootstrap.palette.instances[-1]
+
+    ctl.save_reported.emit(bridge.SaveRequest(file="steamcampaign02.sav"))
+
+    assert palette.opened == ["/steam/root/steamcampaign02.sav"]
+    # The mod's report alone puts the game online (no connect signal needed).
+    assert helper.policies[-1].online is True
+
+
+def test_a_reported_save_that_is_not_on_disk_is_ignored(bootstrap, qapp,
+                                                        monkeypatch):
+    helper = enable_follow(monkeypatch, bootstrap, saves=[])
+    assert app.main(["--no-tray"]) == 0
+    ctl = _FakeBridgeController.instances[-1]
+    palette = bootstrap.palette.instances[-1]
+
+    ctl.save_reported.emit(bridge.SaveRequest(file="steamcampaign02.sav"))
+
+    assert palette.opened == []
+    assert helper.policies[-1].online is False
+
+
+def test_the_periodic_scan_is_wired_to_the_detector(bootstrap, qapp,
+                                                    monkeypatch):
+    helper = enable_follow(monkeypatch, bootstrap,
+                           detected="/steam/root/steamcampaign03.sav")
+    assert app.main(["--no-tray"]) == 0
+    palette = bootstrap.palette.instances[-1]
+    timer = _follow_timer(palette)
+    assert timer.isActive() is True
+
+    timer.timeout.emit()
+
+    assert helper.detect.calls == 1
+    assert palette.opened == ["/steam/root/steamcampaign03.sav"]
+
+
+def test_a_periodic_scan_that_finds_nothing_changes_nothing(bootstrap, qapp,
+                                                            monkeypatch):
+    helper = enable_follow(monkeypatch, bootstrap, detected=None)
+    assert app.main(["--no-tray"]) == 0
+    palette = bootstrap.palette.instances[-1]
+
+    _follow_timer(palette).timeout.emit()
+
+    assert helper.detect.calls == 1
+    assert palette.opened == []
+
+
+def test_an_auto_followed_save_does_not_pin(bootstrap, qapp, monkeypatch):
+    helper = enable_follow(monkeypatch, bootstrap,
+                           detected="/steam/root/steamcampaign03.sav")
+    assert app.main(["--no-tray"]) == 0
+    palette = bootstrap.palette.instances[-1]
+
+    _follow_timer(palette).timeout.emit()
+
+    assert palette.opened == ["/steam/root/steamcampaign03.sav"]
+    assert palette.manual_opens == []
+    assert helper.policies[-1].pinned is False
+
+
+def test_a_user_chosen_save_pins_while_the_game_is_online(bootstrap, qapp,
+                                                          monkeypatch):
+    helper = enable_follow(monkeypatch, bootstrap,
+                           detected="/steam/root/game.sav")
+    assert app.main(["--no-tray"]) == 0
+    ctl = _FakeBridgeController.instances[-1]
+    palette = bootstrap.palette.instances[-1]
+    ctl.game_online.emit(True)
+
+    palette.open_save_manual("/steam/root/user.sav")
+
+    assert helper.policies[-1].pinned is True
+    # The connect scan auto-loaded the game's save first, then the user picked.
+    assert palette.opened == ["/steam/root/game.sav", "/steam/root/user.sav"]
+
+    # An automatic follow must not yank the view away from the user's choice.
+    _follow_timer(palette).timeout.emit()
+
+    assert palette.opened == ["/steam/root/game.sav", "/steam/root/user.sav"]
+
+
+def test_a_user_chosen_save_while_offline_does_not_pin(bootstrap, qapp,
+                                                       monkeypatch):
+    # The game goes offline through the grace period, not through a disconnect
+    # (which a present detector ignores). Only then does a manual open stop
+    # pinning.
+    helper = enable_follow(monkeypatch, bootstrap, detector=True,
+                           detected=None, present=False)
+    assert app.main(["--no-tray"]) == 0
+    ctl = _FakeBridgeController.instances[-1]
+    palette = bootstrap.palette.instances[-1]
+    ctl.game_online.emit(True)
+    ctl.game_online.emit(False)
+    assert helper.policies[-1].online is True
+
+    for _ in range(helper.policies[-1].offline_grace_scans):
+        _follow_timer(palette).timeout.emit()
+    assert helper.policies[-1].online is False
+
+    palette.open_save_manual("/steam/root/user.sav")
+
+    assert helper.policies[-1].pinned is False
+    assert palette.opened == ["/steam/root/user.sav"]
+
+
+def test_the_game_switching_campaign_lifts_the_user_pin(bootstrap, qapp,
+                                                        monkeypatch):
+    helper = enable_follow(
+        monkeypatch, bootstrap, detected="/steam/root/old.sav",
+        saves=[{"path": "/steam/root/new.sav", "root": "/steam/root",
+                "mtime": 2.0}])
+    assert app.main(["--no-tray"]) == 0
+    ctl = _FakeBridgeController.instances[-1]
+    palette = bootstrap.palette.instances[-1]
+    ctl.game_online.emit(True)
+    _follow_timer(palette).timeout.emit()               # game on old.sav
+    palette.open_save_manual("/steam/root/user.sav")     # user pins
+    assert helper.policies[-1].pinned is True
+
+    ctl.save_reported.emit(bridge.SaveRequest(file="new.sav"))
+
+    assert palette.opened == ["/steam/root/old.sav", "/steam/root/user.sav",
+                              "/steam/root/new.sav"]
+    assert helper.policies[-1].pinned is False
+
+
+def test_follow_disabled_means_no_scan_and_no_switch(bootstrap, qapp,
+                                                     monkeypatch):
+    helper = enable_follow(monkeypatch, bootstrap,
+                           detected="/steam/root/game.sav",
+                           follow_enabled=False)
+    assert app.main(["--no-tray"]) == 0
+    ctl = _FakeBridgeController.instances[-1]
+    palette = bootstrap.palette.instances[-1]
+
+    assert helper.policies[-1].enabled is False
+    assert _follow_timer(palette).isActive() is False
+
+    _follow_timer(palette).timeout.emit()
+    ctl.game_online.emit(True)
+
+    # The disabled policy short-circuits the scan (and never loads).
+    assert helper.detect.calls == 0
+    assert palette.opened == []
+
+
+def test_the_periodic_scan_offlines_the_game_after_the_grace_period(
+        bootstrap, qapp, monkeypatch):
+    # The grace period is driven by the periodic process scan: a lone bridge
+    # disconnect does not end the game, but enough absent scans do.
+    helper = enable_follow(monkeypatch, bootstrap, detector=True,
+                           detected=None, present=False)
+    assert app.main(["--no-tray"]) == 0
+    ctl = _FakeBridgeController.instances[-1]
+    palette = bootstrap.palette.instances[-1]
+    ctl.game_online.emit(True)              # connect scans once
+    ctl.game_online.emit(False)             # ...then disconnects
+    assert helper.policies[-1].online is True
+
+    grace = helper.policies[-1].offline_grace_scans
+    timer = _follow_timer(palette)
+    for _ in range(grace - 1):
+        timer.timeout.emit()
+        assert helper.policies[-1].online is True
+
+    timer.timeout.emit()                    # the grace-th absent scan
+    assert helper.policies[-1].online is False
+    # One scan on connect, then one per timer tick.
+    assert helper.scanner.instances[-1].requests == grace + 1
+
+
+def test_a_present_process_without_a_save_keeps_the_game_online(
+        bootstrap, qapp, monkeypatch):
+    # A running game with no save open (menu, between campaigns) is present,
+    # not gone, and must not be reported as offline.
+    helper = enable_follow(monkeypatch, bootstrap, detector=True,
+                           detected=None, present=True)
+    assert app.main(["--no-tray"]) == 0
+    palette = bootstrap.palette.instances[-1]
+
+    timer = _follow_timer(palette)
+    for _ in range(helper.policies[-1].offline_grace_scans + 1):
+        timer.timeout.emit()
+
+    assert helper.policies[-1].online is True
+    assert palette.opened == []
+
+
+def test_a_present_process_resets_the_apps_grace_period(bootstrap, qapp,
+                                                       monkeypatch):
+    helper = enable_follow(monkeypatch, bootstrap, detector=True,
+                           detected=None, present=False)
+    assert app.main(["--no-tray"]) == 0
+    palette = bootstrap.palette.instances[-1]
+    timer = _follow_timer(palette)
+
+    # One detected save puts the game online...
+    helper.detect.path = "/steam/root/game.sav"
+    timer.timeout.emit()
+    assert helper.policies[-1].online is True
+
+    # ...then the save disappears and two absent scans accumulate.
+    helper.detect.path = None
+    timer.timeout.emit()
+    timer.timeout.emit()
+    assert helper.policies[-1].online is True
+
+    # A present process resets that count, so the grace starts over.
+    helper.present["value"] = True
+    timer.timeout.emit()
+    helper.present["value"] = False
+    timer.timeout.emit()
+    timer.timeout.emit()
+    assert helper.policies[-1].online is True
+
+    timer.timeout.emit()
+    assert helper.policies[-1].online is False
+
+
+# ── 7. startup --save and the game already running ─────────────────────────
+def test_startup_save_pins_when_the_game_is_already_running(bootstrap, qapp,
+                                                            monkeypatch):
+    # The explicit startup choice must be applied *after* the game is known to
+    # be online, so it pins instead of being overridden by the live save.
+    helper = enable_follow(monkeypatch, bootstrap, detector=True,
+                           detected=None, present=True)
+
+    assert app.main(["--save", "/steam/root/chosen.sav", "--no-tray"]) == 0
+
+    palette = bootstrap.palette.instances[-1]
+    policy = helper.policies[-1]
+    assert policy.online is True
+    assert policy.pinned is True
+    assert policy.pinned_path == "/steam/root/chosen.sav"
+    assert palette.manual_opens == ["/steam/root/chosen.sav"]
+    assert palette.opened == ["/steam/root/chosen.sav"]
+
+
+def test_startup_save_does_not_pin_when_the_game_is_not_running(
+        bootstrap, qapp, monkeypatch):
+    helper = enable_follow(monkeypatch, bootstrap, detector=True,
+                           detected=None, present=False)
+
+    assert app.main(["--save", "/steam/root/chosen.sav", "--no-tray"]) == 0
+
+    palette = bootstrap.palette.instances[-1]
+    policy = helper.policies[-1]
+    assert policy.online is False
+    assert policy.pinned is False
+    assert palette.opened == ["/steam/root/chosen.sav"]
+
+
+def test_startup_save_does_not_pin_without_a_detector(bootstrap, qapp,
+                                                      monkeypatch):
+    # No process table: the overlay cannot confirm the game is online at
+    # startup, so the choice is loaded but not pinned.
+    helper = enable_follow(monkeypatch, bootstrap, detector=False,
+                           detected=None, present=True)
+
+    assert app.main(["--save", "/steam/root/chosen.sav", "--no-tray"]) == 0
+
+    palette = bootstrap.palette.instances[-1]
+    assert helper.policies[-1].pinned is False
+    assert palette.opened == ["/steam/root/chosen.sav"]
+
+

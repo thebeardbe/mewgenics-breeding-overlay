@@ -148,6 +148,12 @@ class FakePalette(QWidget):
     def open_save(self, path):
         self.calls.append(("open_save", path))
 
+    def open_save_manual(self, path):
+        # layout.build hands this to SavePanel as the slot-card/picker open;
+        # the real PaletteWindow notes a user choice and then loads.
+        self.calls.append(("open_save_manual", path))
+        self.open_save(path)
+
     def set_pinned(self, cat, on):
         self.calls.append(("pin_cat", cat, on))
 

@@ -19,19 +19,90 @@ import argparse
 import logging
 import os
 import sys
+import threading
 
-from PySide6.QtCore import Qt, QPoint
+from PySide6.QtCore import Qt, QPoint, QObject, QTimer, Signal
 from PySide6.QtGui import QAction, QColor, QGuiApplication, QIcon, QKeySequence, QPainter, QPixmap, QShortcut
 from PySide6.QtGui import QGuiApplication as _QtGuiApplication  # real class, not test-stubbed
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
 from mewgenics_overlay import __version__
 from mewgenics_overlay.core import bridge
+from mewgenics_overlay.core import livesave
 from mewgenics_overlay.ui import bridgectl
 from mewgenics_overlay.ui import config as ui_config
 from mewgenics_overlay.ui import singleton
 from mewgenics_overlay.ui import theme as _theme
 from mewgenics_overlay.ui.palette import PaletteWindow
+
+log = logging.getLogger("mewgenics_overlay.app")
+
+#: How often an overlay with no mod connected scans for the game's open save.
+FOLLOW_POLL_MS = 5000
+
+
+class LiveSaveScanner(QObject):
+    """Run one process scan off the UI thread and hand the result back.
+
+    A full :func:`~mewgenics_overlay.core.livesave.find_live_save` pass walks
+    every process's ``/proc`` entry and measured about 8 ms with a few hundred
+    processes, enough to stall the UI thread on the 5 s follow timer. The scan
+    runs on a short-lived daemon thread and its result is emitted from there;
+    Qt queues that emission to this object's thread (the UI thread), so the
+    policy and the palette are only ever touched on the UI thread. A request
+    while a scan is in flight is dropped, so a slow scan cannot pile up.
+    """
+
+    #: Emitted per finished scan with ``(live_save_or_None, game_present)``.
+    scanned = Signal(object)
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self._busy = False
+        self._handler = None
+        # A method of this QObject is the receiver, so Qt sees the worker
+        # thread's emission as cross-thread and queues it to this object's
+        # thread (the UI thread). A plain Python callable would not be safe.
+        self.scanned.connect(self._deliver)
+
+    def set_handler(self, handler) -> None:
+        """Set the callable that receives ``(save, present)`` on the UI thread."""
+        self._handler = handler
+
+    def request(self) -> None:
+        """Start one scan unless a previous one is still running."""
+        if self._busy:
+            return
+        self._busy = True
+        threading.Thread(target=self._run, name="livesave-scan",
+                         daemon=True).start()
+
+    def _deliver(self, result) -> None:
+        """Mark the scan done and hand the result on (UI thread)."""
+        self._busy = False
+        if self._handler is not None:
+            self._handler(*result)
+
+    def _run(self) -> None:
+        found, present = None, False
+        try:
+            try:
+                found = livesave.find_live_save()
+                present = bool(found) or livesave.game_process_running()
+            except Exception:
+                # find_live_save never raises by design, but a worker thread
+                # that died silently would stop the feature; log and carry on.
+                log.exception("follow: live-save scan failed")
+            # The emission shares this guarded region: if this object's C++
+            # side was deleted while the scan was in flight, emit raises
+            # RuntimeError, which is logged and swallowed like any other
+            # worker failure instead of killing the thread.
+            self.scanned.emit((found, present))
+        except Exception:
+            log.exception("follow: live-save result emission failed")
+            # _deliver normally clears the flag; a failed emission means it
+            # never ran, so clear it here or every later scan is skipped.
+            self._busy = False
 
 
 def _make_tray_icon() -> QIcon:
@@ -223,6 +294,106 @@ def main(argv=None) -> int:
     # In-game bridge: the companion mod sends focus requests over loopback TCP.
     # The controller re-emits them on the UI thread; resolution against the
     # live save stays here so the mod only ever sends a cat key.
+    #
+    # Before the bridge, set up following the save the game is actually
+    # playing (core/livesave.py). The policy only decides; loading stays with
+    # palette.open_save. Detection runs from a timer so an overlay-only install
+    # with no mod (nothing to report) still follows.
+    # The grace is counted in scans (``livesave.DEFAULT_OFFLINE_GRACE_SCANS``);
+    # at FOLLOW_POLL_MS it is about 15 s before the game is judged gone.
+    follow = livesave.SaveFollowPolicy(
+        enabled=bool(settings.get("follow_game_save", True)))
+    palette.on_manual_open = follow.note_manual_open
+
+    # The detector can only vouch for the game on hosts with a process table
+    # (/proc). Elsewhere the bridge is the only signal, and a mod disconnect
+    # keeps its old meaning: the game went away. Computed once - the root does
+    # not move at runtime.
+    detector_available = livesave.detector_available()
+    mod_connected = False
+
+    def _feed_game_save(path: str) -> None:
+        """Record a detected/reported save and switch if the policy says so.
+
+        The current save is resolved before the comparison because one file
+        can be spelled through a symlinked library path; without this a scan
+        and a user choice of the same save would read as a campaign switch.
+        """
+        current = livesave.canonical_path(palette.current_save_path)
+        target = follow.note_game_save(path, current)
+        if target:
+            logging.info("follow: game is on %s; loading it", target)
+            palette.open_save(target)
+
+    scanner = LiveSaveScanner(palette)
+
+    def _on_scan_result(found, present: bool) -> None:
+        """Adopt one live-save scan, back on the UI thread."""
+        if not follow.enabled:
+            return
+        if found:
+            _feed_game_save(found)
+            return
+        if present or mod_connected:
+            # The process is there (menus, between campaigns) or the mod is
+            # still connected: the game is online, so the pin stays.
+            follow.note_game_process(True)
+            return
+        if follow.note_game_process(False):
+            logging.info("follow: game process absent for %d scans; offline",
+                         follow.offline_grace_scans)
+
+    scanner.set_handler(_on_scan_result)
+
+    def _detect_live_save() -> None:
+        """Ask the scanner for one scan; the scan runs off the UI thread.
+
+        A full pass measured about 8 ms with a few hundred processes, so it is
+        not run inline on the UI thread. :class:`LiveSaveScanner` drops a
+        request while a scan is in flight, so a slow scan cannot pile ticks
+        up. The early ``enabled`` check makes a disabled overlay pay nothing.
+        """
+        if not follow.enabled or not detector_available:
+            return
+        scanner.request()
+
+    follow_timer = QTimer(palette)
+    follow_timer.setInterval(FOLLOW_POLL_MS)
+    follow_timer.timeout.connect(_detect_live_save)
+    if follow.enabled and detector_available:
+        follow_timer.start()
+
+    def _on_bridge_save(request) -> None:
+        """The mod told us which save the game is playing."""
+        path = livesave.resolve_save_path(request.file)
+        if path is None:
+            logging.info("follow: mod reported save %r but it is not on disk",
+                         request.file)
+            return
+        _feed_game_save(path)
+
+    def _on_game_online(online: bool) -> None:
+        """The mod connected or left: update the connection status.
+
+        A disconnect on its own is not proof the game quit: with a detector
+        available only the process scan decides that (after the grace period).
+        Where there is no detector (no /proc) the disconnect keeps its old
+        meaning and clears the pin.
+        """
+        nonlocal mod_connected
+        mod_connected = online
+        if not online:
+            logging.info("follow: game disconnected")
+        else:
+            palette._set_status("game connected")
+            logging.info("follow: game connected; scanning for its save")
+        # Connecting marks the game online even before a save is known, so a
+        # manual open from now on pins. A disconnect only clears the pin where
+        # no process detector exists to confirm the game has really gone.
+        follow.note_bridge_connection(online, detector_available)
+        if online:
+            _detect_live_save()
+
     bridge_ctl = None
     if settings.get("bridge_enabled", True):
         bridge_ctl = bridgectl.BridgeController(
@@ -238,6 +409,8 @@ def main(argv=None) -> int:
             palette._engage()
 
         bridge_ctl.focus_requested.connect(_on_bridge_focus)
+        bridge_ctl.save_reported.connect(_on_bridge_save)
+        bridge_ctl.game_online.connect(_on_game_online)
         if bridge_ctl.start():
             # Only attach a running bridge; the palette's bridge_available
             # gate then hides "Show in game" while it is off.
@@ -256,7 +429,14 @@ def main(argv=None) -> int:
             show_cat.activated.connect(_show_focused_cat_in_game)
 
     if args.save:
-        palette.open_save(args.save)
+        # Apply the explicit startup choice before the queued "game
+        # connected" notification arrives, so an already-running game is
+        # marked online first and the choice pins instead of being overridden
+        # by the live save. With no game running the detector sees nothing and
+        # the choice stays unpinned.
+        if detector_available and livesave.game_process_running():
+            follow.note_game_online()
+        palette.open_save_manual(args.save)
     if not args.hidden:
         palette.show()
 

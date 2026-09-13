@@ -131,6 +131,11 @@ shows itself.
 
 - Listens on `127.0.0.1:45780` by default. Change `bridge_port` in `config.json`,
   or set `bridge_enabled` to `false`, to control it.
+- The overlay follows the save the game is actually playing: the mod reports
+  which campaign is open (`{"v": 1, "type": "save", "file": "steamcampaign02.sav"}`),
+  and an overlay-only install with no mod is detected from the save file the
+  game holds open. Switching campaign in game switches the overlay. Set
+  `follow_game_save` to `false` in `config.json` to stay on your own choice.
 - Protocol: one JSON object per line, e.g.
   `{"v": 1, "type": "focus", "key": 341}`. `key` is the game's cat key, which is
   the overlay's `db_key`; `uid` and `name` are accepted as fallbacks.
