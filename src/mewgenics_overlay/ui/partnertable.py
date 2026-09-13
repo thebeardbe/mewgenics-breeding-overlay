@@ -391,10 +391,10 @@ class PartnerTableWidget(QTableWidget):
             it_family = QTableWidgetItem(rel.label)
             it_family.setToolTip(self._family_tooltip(row))
             it_gap = QTableWidgetItem(f"{rel.gen_gap:+d}" if rel.gen_gap else "0")
-            it_gap.setToolTip(
+            it_gap.setToolTip(_theme.rich_tooltip(
                 f"Generation gap for {p.name}: focused gen − partner gen "
                 f"= {rel.gen_gap:+d}."
-            )
+            ))
 
             it_room = QTableWidgetItem(display_location(p))
             it_risk = QTableWidgetItem(f"{row.risk_pct:.1f}%" if ok else "-")
@@ -407,17 +407,16 @@ class PartnerTableWidget(QTableWidget):
                 # Compute failed in the worker: show a distinct marker, not
                 # an identical empty cell ("we don't know" vs "no defects").
                 it_defects = QTableWidgetItem("-")
-                it_defects.setToolTip(_theme.wrap_tooltip(
+                it_defects.setToolTip(_theme.rich_tooltip(_theme.wrap_tooltip(
                     "Defect information is unavailable for this pair - "
                     "scoring failed (details in the log). The Risk column "
-                    "remains the safer guide here."))
+                    "remains the safer guide here.")))
             else:
                 defects_text = _defects_summary(row, self._stim)
                 it_defects = QTableWidgetItem(defects_text)
-                it_defects.setToolTip(
-                    _theme.wrap_tooltip("\n".join(self.pair_malady_lines(row, self._stim))
-                        or "Both parents clean.")
-                )
+                it_defects.setToolTip(_theme.rich_tooltip(_theme.wrap_tooltip(
+                    "\n".join(self.pair_malady_lines(row, self._stim))
+                    or "Both parents clean.")))
             it_note = QTableWidgetItem(_note_text(row, kids))
 
             if ok:
@@ -460,7 +459,7 @@ class PartnerTableWidget(QTableWidget):
                 for it in (it_risk, it_comp, it_exp, it_7):
                     it.setToolTip("No values - this pair cannot breed. "
                                   "Reason is in the Note column.")
-            it_room.setToolTip(f"Current location of {p.name}.")
+            it_room.setToolTip(_theme.rich_tooltip(f"Current location of {p.name}."))
             it_note.setToolTip(
                 (row.reason if (not ok and row.reason) else "")
                 + (f"Existing kittens: {_kittens_label(row)}" if kids else "")
@@ -512,7 +511,7 @@ class PartnerTableWidget(QTableWidget):
             lines.append("No shared family history that matters - the "
                          "safest kind of pairing.")
         lines.append("Longer explanation: hover the Family heading above.")
-        return _theme.wrap_tooltip("\n".join(lines))
+        return _theme.rich_tooltip(_theme.wrap_tooltip("\n".join(lines)))
 
     def _partner_tooltip(self, row: PartnerRow, kids: list[str]) -> str:
         p = row.partner
@@ -557,7 +556,7 @@ class PartnerTableWidget(QTableWidget):
             if label:
                 lines.append(f"   ({label})")
         lines.append("Double-click to analyse breeding from this cat.")
-        return _theme.wrap_tooltip("\n".join(lines))
+        return _theme.rich_tooltip(_theme.wrap_tooltip("\n".join(lines)))
 
     def pair_malady_lines(self, row: PartnerRow,
                            stimulation: float = 50.0,

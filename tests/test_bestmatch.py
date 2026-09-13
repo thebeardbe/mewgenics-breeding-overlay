@@ -31,6 +31,7 @@ import pytest  # noqa: E402
 pytest.importorskip("PySide6")
 pytest.importorskip("lz4")
 
+from PySide6.QtGui import QTextDocument  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from mewgenics_overlay.ui import bestmatch as _bm  # noqa: E402
@@ -257,7 +258,11 @@ def test_tooltip_contains_breakdown_and_click_hint(make_bar):
     assert "nightly attempt:" in tip
     assert "risk:" in tip
     assert "score:" in tip
-    assert tip.rstrip().endswith("Click to select this partner.")
+    # The tip is rich text now (ui.theme.rich_tooltip wraps it in <qt>), so
+    # check the rendered text, which is what the user reads.
+    doc = QTextDocument()
+    doc.setHtml(tip)
+    assert doc.toPlainText().rstrip().endswith("Click to select this partner.")
 
 
 def test_malady_lines_are_appended_to_the_tooltip(make_bar):

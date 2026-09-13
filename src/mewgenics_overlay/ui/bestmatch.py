@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
 
 from mewgenics_overlay.core.recommend import recommend as recommend_best
 from mewgenics_overlay.ui.partnertable import night_chance
+from mewgenics_overlay.ui.theme import rich_tooltip as _rich
 from mewgenics_overlay.ui.theme import wrap_tooltip as _wt
 
 _HIGH_RISK_PCT = 35.0        # banner appends a warning above this risk %
@@ -206,7 +207,7 @@ class BestMatchBar(QWidget):
         if malady:
             tool += "\n\n" + "\n".join(malady)
         tool += "\n\nClick to select this partner."
-        self._btn_best.setToolTip(_wt(tool))
+        self._btn_best.setToolTip(_rich(_wt(tool)))
         self._btn_best.setVisible(True)
 
     # ── user input ─────────────────────────────────────────────────────────

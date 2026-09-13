@@ -306,4 +306,4 @@ class DonationsTab(QWidget):
         lines.append(f"Suitable for: {slot.npc} ({slot.wants})")
         room = getattr(cat, "room", "") or getattr(cat, "status", "")
         lines.append(f"Where: {room or '?'}")
-        return _wt("\n".join(lines))
+        return _theme.rich_tooltip(_wt("\n".join(lines)))

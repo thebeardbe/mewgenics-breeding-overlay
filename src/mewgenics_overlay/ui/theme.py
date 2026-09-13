@@ -14,6 +14,7 @@ active theme, so render-time code follows live switches.
 
 from __future__ import annotations
 
+import html
 import re
 
 # Tray/logo brand colours (theme-independent)
@@ -258,6 +259,28 @@ def risk_color(risk_pct: float) -> str:
 def gender_badge(gender: str) -> str:
     g = (gender or "?").strip().lower()
     return {"male": "♂", "female": "♀", "?": "?"}.get(g, "?")
+
+
+def rich_tooltip(text: str) -> str:
+    """Return *text* as safe rich text for a tooltip.
+
+    Qt renders a tooltip as rich text as soon as the string looks like
+    markup, and ``QWidget.setToolTip`` has no text-format setter, so any
+    save-derived text (cat, disorder, defect and room names, gpak effect
+    text) could otherwise inject HTML. Escape the whole string here and wrap
+    it in ``<qt>`` so Qt always treats the tip as rich text.
+
+    ``wrap_tooltip`` already hard-wraps lines and keeps their leading
+    indentation; rich text would collapse that whitespace, so newlines
+    become ``<br>`` and leading spaces become non-breaking spaces. This is
+    the single place tooltip escaping happens - callers pass plain text.
+    """
+    escaped = html.escape(text or "", quote=False)
+    out: list[str] = []
+    for line in escaped.split("\n"):
+        indent = len(line) - len(line.lstrip(" "))
+        out.append("&nbsp;" * indent + line[indent:])
+    return "<qt>" + "<br>".join(out) + "</qt>"
 
 
 def wrap_tooltip(text: str, width: int = 88) -> str:

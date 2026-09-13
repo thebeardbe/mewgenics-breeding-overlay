@@ -144,6 +144,12 @@ Waiting on the tester's results for v0.2.1 (Windows hotkey) and v0.2.2
   route the save-derived builders through it. `theme.wrap_tooltip` is used by
   only 9 of 47 `setToolTip` sites, so it is a good choke point but needs the
   indentation preserved.
+- Tooltips are now escaped through `theme.rich_tooltip`, with one exception: the
+  partner table's Note cell tip (`partnertable.py` around line 463) is set raw.
+  It is safe today because the reason text cannot carry a cat name (the vendor
+  only interpolates names when the pairing is compatible, and the session blanks
+  the reason in that case), but routing it through the helper removes the
+  dependence on that cross-module invariant. One line, defense in depth.
 - `core/livesave.py`: when the game has more than one `.sav` open at once
   (briefly, during a campaign switch) the detector returns whichever the
   directory scan yields first; the next 5 s tick corrects it. Seen live on

@@ -55,13 +55,13 @@ class FocusedCatPanel(QWidget):
             lbl.setTextFormat(Qt.TextFormat.PlainText)
         self._cat_health.setWordWrap(True)
         self.restyle()
-        self._cat_health.setToolTip(_theme.wrap_tooltip(
+        self._cat_health.setToolTip(_theme.rich_tooltip(_theme.wrap_tooltip(
             "Things this cat carries that can be passed on to kittens.\n"
             "• Disorders - a 15% chance per parent that carries one of "
             "passing a random disorder to the kitten.\n"
             "• Birth defects - kittens inherit these per body part; pick a "
             "partner to see the exact odds for that pairing."
-        ))
+        )))
 
         for w in (self._cat_name, self._cat_meta, self._cat_stats,
                   self._cat_lovers, self._cat_health):
@@ -107,13 +107,13 @@ class FocusedCatPanel(QWidget):
             meta += f" · inbred {cat.inbredness * 100:.0f}%"
         pin = f"{_theme.PIN} " if getattr(cat, "is_pinned", False) else ""
         self._cat_name.setText(f"{pin}{cat.name}")
-        self._cat_name.setToolTip(_theme.wrap_tooltip(
+        self._cat_name.setToolTip(_theme.rich_tooltip(_theme.wrap_tooltip(
             f"{cat.name}  (save id {cat.db_key})\n"
             "The cat you are analysing. Double-click a partner to switch "
             "the analysis to them."
-        ))
+        )))
         self._cat_meta.setText(meta)
-        self._cat_meta.setToolTip(_theme.wrap_tooltip(
+        self._cat_meta.setToolTip(_theme.rich_tooltip(_theme.wrap_tooltip(
             f"{_theme.gender_label(cat.gender)} · {display_location(cat)} · "
             f"generation {cat.generation} (0 = stray, each generation adds "
             f"depth and shared ancestry)"
@@ -123,7 +123,7 @@ class FocusedCatPanel(QWidget):
             + (f"\nInbreeding coefficient {cat.inbredness * 100:.1f}% = kinship "
                "of this cat's parents - flagged above 3%."
                if cat.inbredness > 0.03 else "")
-        ))
+        )))
         self._cat_stats.setText(_stats_html(cat))
         self._cat_stats.setToolTip(_theme.wrap_tooltip(
             "Base stats (STR DEX CON INT SPD CHA LCK, 0–7) - the birth stats "
@@ -154,8 +154,8 @@ class FocusedCatPanel(QWidget):
             f"{_theme.WARN} " + " · ".join(health_bits)
             if health_bits else ""
         )
-        self._cat_health.setToolTip(_theme.wrap_tooltip(
-            self._health_tooltip(cat, disorders, own_defects, effect_for)))
+        self._cat_health.setToolTip(_theme.rich_tooltip(_theme.wrap_tooltip(
+            self._health_tooltip(cat, disorders, own_defects, effect_for))))
 
     def _health_tooltip(self, cat: Cat, disorders, own_defects,
                         effect_for) -> str:
