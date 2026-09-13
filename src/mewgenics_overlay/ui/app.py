@@ -292,8 +292,9 @@ def main(argv=None) -> int:
     app.aboutToQuit.connect(palette._save_geometry)
 
     # In-game bridge: the companion mod sends focus requests over loopback TCP.
-    # The controller re-emits them on the UI thread; resolution against the
-    # live save stays here so the mod only ever sends a cat key.
+    # The controller re-emits them on the UI thread; the palette resolves the
+    # reported key against its own live save and selects the cat silently, so
+    # an in-game click does not yank focus out of the game.
     #
     # Before the bridge, set up following the save the game is actually
     # playing (core/livesave.py). The policy only decides; loading stays with
@@ -400,13 +401,7 @@ def main(argv=None) -> int:
             port=int(settings.get("bridge_port", bridge.DEFAULT_PORT)))
 
         def _on_bridge_focus(request) -> None:
-            key = bridge.resolve_focus_key(palette._session, request)
-            if key is None:
-                logging.info("bridge: no cat for %r in the current save", request)
-                return
-            logging.info("bridge: focusing cat key=%d", key)
-            palette.set_focus_key(key)
-            palette._engage()
+            palette.select_reported_cat(request)
 
         bridge_ctl.focus_requested.connect(_on_bridge_focus)
         bridge_ctl.save_reported.connect(_on_bridge_save)

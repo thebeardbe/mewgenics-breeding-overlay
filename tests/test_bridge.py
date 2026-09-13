@@ -13,6 +13,7 @@ import logging
 import socket
 import threading
 import time
+from contextlib import contextmanager
 from types import SimpleNamespace
 
 import pytest
@@ -462,19 +463,72 @@ def test_server_rejects_a_bad_save_message_and_keeps_the_connection(bad):
         server.stop()
 
 
-def test_server_reports_a_save_when_no_handler_is_installed(caplog):
+class LogRecordWaiter(logging.Handler):
+    """Capture bridge log records and wait for one as the handler runs.
+
+    A save report is dispatched by a connection (transport) thread, so a
+    ``caplog.at_level`` block can exit before that thread has logged; the
+    assertion then races the capture. This handler stays installed for the
+    whole test and lets the test wait for the record itself, so the outcome
+    does not depend on a second message being processed first.
+    """
+
+    def __init__(self):
+        super().__init__(level=logging.DEBUG)
+        self.records: list[logging.LogRecord] = []
+        self._cv = threading.Condition()
+
+    def emit(self, record):
+        with self._cv:
+            self.records.append(record)
+            self._cv.notify_all()
+
+    def wait_for(self, predicate, timeout=3.0):
+        """Block until *predicate* matches a captured record (or time out)."""
+        end = time.monotonic() + timeout
+        with self._cv:
+            while True:
+                if any(predicate(record) for record in self.records):
+                    return True
+                remaining = end - time.monotonic()
+                if remaining <= 0:
+                    return False
+                self._cv.wait(remaining)
+
+
+@contextmanager
+def capture_bridge_records(logger_name="mewgenics_overlay.bridge"):
+    """Keep a waiting log handler installed for the whole ``with`` block."""
+    logger = logging.getLogger(logger_name)
+    handler = LogRecordWaiter()
+    previous_level = logger.level
+    logger.addHandler(handler)
+    logger.setLevel(logging.DEBUG)
+    try:
+        yield handler
+    finally:
+        logger.removeHandler(handler)
+        logger.setLevel(previous_level)
+
+
+def test_server_reports_a_save_when_no_handler_is_installed():
     # A build without an on_save callback must ignore the report (with a
-    # trace) instead of crashing the listener thread.
+    # trace) instead of crashing the listener thread. The trace is logged by
+    # the connection's transport thread, so wait for that record while the
+    # capture is still installed rather than racing the capture block.
     collector = Collector()
     server = bridge.BridgeServer(on_focus=collector, port=0)
     assert server.start() is True
     try:
-        with caplog.at_level(logging.DEBUG, logger="mewgenics_overlay.bridge"):
+        with capture_bridge_records() as logs:
             send(server.port, save_message("steamcampaign01.sav"))
+            assert logs.wait_for(
+                lambda r: "no handler installed" in r.getMessage()
+            ), "unhandled save report left no trace"
+
+            # The listener survived it: a following focus request is handled.
             send(server.port, message(key=341))
-        assert collector.wait(), "listener died on an unhandled save report"
-        assert any("no handler installed" in r.getMessage()
-                   for r in caplog.records)
+            assert collector.wait(), "listener died on an unhandled save report"
     finally:
         server.stop()
 

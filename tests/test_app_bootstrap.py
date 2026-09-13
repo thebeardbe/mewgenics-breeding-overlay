@@ -88,10 +88,12 @@ class _FakePalette(QObject):
         self.shown = False
         self.shutdown_called = False
         self.uninstalled = False
-        # Bridge wiring reads the live session and focuses a cat key.
+        # Bridge wiring hands a focus report to the palette, which resolves it
+        # against its own live session (``select_reported_cat``).
         self._session = SimpleNamespace(
             by_key={341: SimpleNamespace(db_key=341)}, cats=[])
         self.focused = []
+        self.reported = []
         self.engaged = False
         self._focus = None
         # Save-follow wiring (app.main): the policy hook for a *user*-chosen
@@ -120,6 +122,14 @@ class _FakePalette(QObject):
 
     def set_focus_key(self, db_key):
         self.focused.append(db_key)
+
+    def select_reported_cat(self, request):
+        # The real method bound from PaletteWindow: it resolves the reported
+        # key against the palette's *own* ``_session`` and selects the cat.
+        # Recording the request lets a test prove app.py routes through this
+        # public method instead of reaching for the private ``_session``.
+        self.reported.append(request)
+        palette.PaletteWindow.select_reported_cat(self, request)
 
     def _engage(self):
         self.engaged = True
@@ -362,7 +372,8 @@ def test_shortcut_cli_remove_failure_exits_nonzero(monkeypatch, capsys):
 
 
 # ── 5. in-game bridge wiring ──────────────────────────────────────────────
-def test_bridge_wiring_focuses_the_requested_cat(bootstrap, monkeypatch):
+def test_bridge_wiring_selects_the_requested_cat_without_engaging(
+        bootstrap, monkeypatch):
     bootstrap.install_instance([True], toggle_ok=True)
     monkeypatch.setattr(app.ui_config, "load",
                         lambda: {"bridge_enabled": True, "bridge_port": 45699})
@@ -379,9 +390,17 @@ def test_bridge_wiring_focuses_the_requested_cat(bootstrap, monkeypatch):
     palette = bootstrap.palette.instances[-1]
     # The palette gets the controller, so its outbound path can use it.
     assert palette.bridges == [ctl]
-    ctl.focus_requested.emit(bridge.FocusRequest(key=341))
+
+    request = bridge.FocusRequest(key=341)
+    ctl.focus_requested.emit(request)
+
+    # app.py hands the request to the palette's public method, which resolves
+    # it against the palette's own live session and selects the cat...
+    assert palette.reported == [request]
     assert palette.focused == [341]
-    assert palette.engaged is True
+    # ...and selecting must not engage the window (show/raise/activate/focus),
+    # which would steal focus from the running game.
+    assert palette.engaged is False
 
 
 def test_ctrl_g_shortcut_asks_the_palette_to_show_the_focused_cat(

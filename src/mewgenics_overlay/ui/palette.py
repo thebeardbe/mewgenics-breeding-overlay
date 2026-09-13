@@ -40,6 +40,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from mewgenics_overlay.core import bridge
 from mewgenics_overlay.core.maladies import defect_effect_text
 from mewgenics_overlay.core.session import (
     Cat,
@@ -530,6 +531,22 @@ class PaletteWindow(QWidget):
     def set_focus_key(self, db_key: int) -> None:
         """Programmatic focus (used by the future in-game bridge)."""
         self._tablectl.set_focus_key(db_key)
+
+    def select_reported_cat(self, request) -> None:
+        """Apply an in-game selection report to the overlay's own session.
+
+        Resolves the mod's reported key against the current save and selects
+        the matching cat, exactly like a user pick. The update is silent: it
+        never shows, raises, activates or focuses the window, so an in-game
+        click cannot pull focus from the game. The selected cat is already in
+        place whenever the user next summons the overlay.
+        """
+        key = bridge.resolve_focus_key(self._session, request)
+        if key is None:
+            log.info("bridge: no cat for %r in the current save", request)
+            return
+        log.info("bridge: focusing cat key=%d", key)
+        self.set_focus_key(key)
 
     # ── in-game bridge (outbound "show in game") ────────────────────────────
     def _refresh_show_in_game(self) -> None:
