@@ -134,6 +134,11 @@ Waiting on the tester's results for v0.2.1 (Windows hotkey) and v0.2.2
   failures while the game runs would clear a user pin. Logged, and mitigated by
   the grace period, but it should be treated as "unknown" rather than "absent"
   (AGENTS.md §7: no data versus compute failed).
+- `core/livesave.py`: when the game has more than one `.sav` open at once
+  (briefly, during a campaign switch) the detector returns whichever the
+  directory scan yields first; the next 5 s tick corrects it. Seen live on
+  2026-09-13. Prefer the most recently opened descriptor, or the newest mtime,
+  if a wrong load is ever observed in practice.
 - `ui/palette.py` is 615 lines, in the 601–1000 warning band. The bridge and
   outbound block (roughly lines 510–570) is the natural next extraction.
 - `core/bridge.py` is 453 lines and `core/livesave.py` 459, both in the 401–600
