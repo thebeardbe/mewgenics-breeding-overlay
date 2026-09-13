@@ -126,8 +126,8 @@ PYTHONPATH=src python -m mewgenics_overlay.cli donate
 
 The overlay can be driven from inside Mewgenics by the companion mod
 (`mewgenics-breeding-mod`). When you ask the mod to analyse a cat, it sends a
-small JSON line over a loopback TCP socket, and the overlay focuses that cat and
-shows itself.
+small JSON line over a loopback TCP socket, and the overlay selects that cat
+(silently by default, or pulling itself to the front on request).
 
 - Listens on `127.0.0.1:45780` by default. Change `bridge_port` in `config.json`,
   or set `bridge_enabled` to `false`, to control it.
@@ -139,6 +139,10 @@ shows itself.
 - Protocol: one JSON object per line, e.g.
   `{"v": 1, "type": "focus", "key": 341}`. `key` is the game's cat key, which is
   the overlay's `db_key`; `uid` and `name` are accepted as fallbacks.
+- `{"v": 1, "type": "raise", "key": 341}` is a `focus` that also brings the
+  overlay to the front and gives it keyboard focus. Use it for an in-game button
+  the player deliberately pressed; a plain `focus` stays silent so clicking cats
+  in game does not steal focus.
 - Loopback only. A local process can focus a cat, but it cannot read anything or
   change game state.
 - **Ctrl+G** sends the focused cat the other way: the game selects that cat, so

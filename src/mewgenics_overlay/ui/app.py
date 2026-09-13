@@ -403,7 +403,11 @@ def main(argv=None) -> int:
         def _on_bridge_focus(request) -> None:
             palette.select_reported_cat(request)
 
+        def _on_bridge_raise(request) -> None:
+            palette.raise_reported_cat(request)
+
         bridge_ctl.focus_requested.connect(_on_bridge_focus)
+        bridge_ctl.raise_requested.connect(_on_bridge_raise)
         bridge_ctl.save_reported.connect(_on_bridge_save)
         bridge_ctl.game_online.connect(_on_game_online)
         if bridge_ctl.start():

@@ -17,6 +17,7 @@ thread (see ``ui/bridgectl.py``).
 Protocol (one JSON object per line, UTF-8)::
 
     {"v": 1, "type": "focus", "key": 341, "name": "L'Via"}
+    {"v": 1, "type": "raise", "key": 341}
     {"v": 1, "type": "save", "file": "steamcampaign02.sav"}
 
 ``key`` is the game's cat key, which is also the overlay's ``db_key`` (proven
@@ -25,6 +26,12 @@ are optional fallbacks for mods that cannot read the key. A ``save`` message
 names the save file the game is currently playing; the file name is validated
 with :func:`mewgenics_overlay.core.livesave.is_save_file_name` and the UI side
 resolves it to a path (see ``core/livesave.py``).
+
+``focus`` and ``raise`` carry the same identifiers and are validated the same
+way. The difference is what the overlay does: ``focus`` selects the cat
+silently so an in-game click cannot steal keyboard focus, while ``raise``
+selects the cat *and* brings the overlay to the front, for a call-to-action
+button the player deliberately pressed.
 
 Security: the server binds loopback only. Any local process can focus a cat,
 which is harmless, but it cannot read anything or change game state.
@@ -48,6 +55,7 @@ DEFAULT_PORT = 45780
 PROTOCOL_VERSION = 1
 #: Inbound message types the mod may send.
 FOCUS_TYPE = "focus"
+RAISE_TYPE = "raise"
 SAVE_TYPE = "save"
 #: Reject anything longer: a real message is well under 200 bytes, so this only
 #: guards against a hostile or confused local process.
@@ -78,6 +86,17 @@ class FocusRequest:
 
 
 @dataclass(frozen=True, slots=True)
+class RaiseRequest(FocusRequest):
+    """A request to select a cat *and* bring the overlay to the front.
+
+    Carries the same identifiers as :class:`FocusRequest` and is validated the
+    same way. It exists as its own type so the server can dispatch it to the
+    ``on_raise`` callback instead of ``on_focus``: unlike a focus report,
+    taking keyboard focus is wanted here because the player clicked in game.
+    """
+
+
+@dataclass(frozen=True, slots=True)
 class SaveRequest:
     """The save file the game is currently playing, as sent by the mod.
 
@@ -90,7 +109,7 @@ class SaveRequest:
 
 
 #: Anything the mod may send on one line.
-InboundMessage = Union[FocusRequest, SaveRequest]
+InboundMessage = Union[FocusRequest, RaiseRequest, SaveRequest]
 
 
 def _as_int(value: object) -> Optional[int]:
@@ -112,11 +131,11 @@ def _as_int(value: object) -> Optional[int]:
 
 
 def parse_message(raw: str) -> InboundMessage:
-    """Parse one protocol line into a :class:`FocusRequest` or :class:`SaveRequest`.
+    """Parse one protocol line into a focus/raise or save request.
 
     Raises :class:`ProtocolError` for malformed JSON, an unsupported version, an
-    unknown type, a focus message with no usable identifier, or a save message
-    whose file name is not a plain ``.sav`` name.
+    unknown type, a focus or raise message with no usable identifier, or a save
+    message whose file name is not a plain ``.sav`` name.
     """
     try:
         payload = json.loads(raw)
@@ -133,21 +152,35 @@ def parse_message(raw: str) -> InboundMessage:
     message_type = payload.get("type")
     if message_type == FOCUS_TYPE:
         return _parse_focus(payload)
+    if message_type == RAISE_TYPE:
+        return _parse_raise(payload)
     if message_type == SAVE_TYPE:
         return _parse_save(payload)
     raise ProtocolError(f"unsupported message type {message_type!r}")
 
 
+def _parse_identifiers(
+    payload: dict, kind: str,
+) -> tuple[Optional[int], Optional[str], Optional[str]]:
+    """Read key/uid/name, refusing a message with no usable identifier."""
+    key = _as_int(payload.get("key"))
+    uid = None if payload.get("uid") is None else str(payload["uid"])
+    name = None if payload.get("name") is None else str(payload["name"])
+    if key is None and uid is None and name is None:
+        raise ProtocolError(f"{kind} message carries no key, uid or name")
+    return key, uid, name
+
+
 def _parse_focus(payload: dict) -> FocusRequest:
     """Build a :class:`FocusRequest`, refusing one with no usable identifier."""
-    request = FocusRequest(
-        key=_as_int(payload.get("key")),
-        uid=None if payload.get("uid") is None else str(payload["uid"]),
-        name=None if payload.get("name") is None else str(payload["name"]),
-    )
-    if request.key is None and request.uid is None and request.name is None:
-        raise ProtocolError("focus message carries no key, uid or name")
-    return request
+    key, uid, name = _parse_identifiers(payload, FOCUS_TYPE)
+    return FocusRequest(key=key, uid=uid, name=name)
+
+
+def _parse_raise(payload: dict) -> RaiseRequest:
+    """Build a :class:`RaiseRequest`, refusing one with no usable identifier."""
+    key, uid, name = _parse_identifiers(payload, RAISE_TYPE)
+    return RaiseRequest(key=key, uid=uid, name=name)
 
 
 def _parse_save(payload: dict) -> SaveRequest:
@@ -206,6 +239,9 @@ class BridgeServer:
 
     ``on_focus``            every valid focus request.
     ``on_save``             every valid save request, i.e. which save the game plays.
+    ``on_raise``            every valid raise request, i.e. select and show the
+                            overlay; optional, a raise with no handler is logged
+                            and ignored like the others.
     ``on_clients_changed``  the peer count after a client connected or went away,
                             so the UI can show the game as connected.
     """
@@ -218,9 +254,11 @@ class BridgeServer:
         parent_log: Optional[logging.Logger] = None,
         on_save: Optional[Callable[[SaveRequest], None]] = None,
         on_clients_changed: Optional[Callable[[int], None]] = None,
+        on_raise: Optional[Callable[[RaiseRequest], None]] = None,
     ) -> None:
         self._on_focus = on_focus
         self._on_save = on_save
+        self._on_raise = on_raise
         self._on_clients_changed = on_clients_changed
         self._host = host
         self._requested_port = port
@@ -433,6 +471,8 @@ class BridgeServer:
         # trace - silent bridge failures are the worst kind.
         if isinstance(message, SaveRequest):
             self._notify_save(message)
+        elif isinstance(message, RaiseRequest):
+            self._notify_raise(message)
         else:
             self._notify_focus(message)
 
@@ -441,6 +481,16 @@ class BridgeServer:
             self._on_focus(request)
         except Exception:
             self._log.exception("bridge: focus handler failed")
+
+    def _notify_raise(self, request: RaiseRequest) -> None:
+        if self._on_raise is None:
+            self._log.debug("bridge: raise for key=%r reported; no handler installed",
+                            request.key)
+            return
+        try:
+            self._on_raise(request)
+        except Exception:
+            self._log.exception("bridge: raise handler failed")
 
     def _notify_save(self, request: SaveRequest) -> None:
         if self._on_save is None:

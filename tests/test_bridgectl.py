@@ -4,8 +4,8 @@
 a Qt signal, so ``app.main``'s slots run on the UI thread. These tests drive the
 controller's callbacks synchronously (the loopback transport itself, fakes and
 malformed input are covered by ``test_bridge.py``) and assert the payloads on
-the new ``save_reported`` and ``game_online`` signals plus the existing
-``focus_requested`` one.
+the new ``raise_requested``, ``save_reported`` and ``game_online`` signals plus
+the existing ``focus_requested`` one.
 """
 
 from __future__ import annotations
@@ -39,11 +39,15 @@ class Recorder(QObject):
     def __init__(self):
         super().__init__()
         self.focus = []
+        self.raises = []
         self.saves = []
         self.online = []
 
     def on_focus(self, request):
         self.focus.append(request)
+
+    def on_raise(self, request):
+        self.raises.append(request)
 
     def on_save(self, request):
         self.saves.append(request)
@@ -64,6 +68,7 @@ def controller(qapp):
     record = Recorder()
     ctl = bridgectl.BridgeController(port=0)
     ctl.focus_requested.connect(record.on_focus)
+    ctl.raise_requested.connect(record.on_raise)
     ctl.save_reported.connect(record.on_save)
     ctl.game_online.connect(record.on_online)
     yield ctl, record
@@ -113,6 +118,64 @@ def test_focus_requested_carries_the_focus_request(controller):
 
     assert [(r.key, r.name) for r in record.focus] == [(341, "L'Via")]
     assert record.saves == []
+
+
+# ── raise_requested ─────────────────────────────────────────────────────────
+def test_raise_requested_carries_the_raise_request(controller):
+    ctl, record = controller
+
+    dispatch(ctl, {"v": 1, "type": "raise", "key": 341})
+
+    assert len(record.raises) == 1
+    request = record.raises[0]
+    assert type(request) is bridge.RaiseRequest
+    assert request.key == 341
+    # A raise is never also delivered as a focus request.
+    assert record.focus == []
+    assert record.saves == []
+
+
+def test_focus_requested_does_not_fire_raise_requested(controller):
+    ctl, record = controller
+
+    dispatch(ctl, {"v": 1, "type": "focus", "key": 349})
+
+    assert [r.key for r in record.focus] == [349]
+    assert record.raises == []
+
+
+def test_raise_requested_does_not_fire_focus_requested(controller):
+    ctl, record = controller
+
+    dispatch(ctl, {"v": 1, "type": "raise", "key": 349})
+
+    assert [r.key for r in record.raises] == [349]
+    assert record.focus == []
+
+
+@pytest.mark.parametrize("payload", [
+    {"v": 1, "type": "raise"},                    # no identifier
+    {"v": 1, "type": "raise", "key": True},       # bool key
+    {"v": 99, "type": "raise", "key": 341},      # wrong version
+    {"type": "raise", "key": 341},                # missing version
+])
+def test_raise_requested_is_silent_for_a_rejected_raise(controller, payload):
+    ctl, record = controller
+
+    dispatch(ctl, payload)
+
+    assert record.raises == []
+    assert record.focus == []
+    assert record.saves == []
+
+
+def test_a_save_report_does_not_fire_raise_requested(controller):
+    ctl, record = controller
+
+    dispatch(ctl, {"v": 1, "type": "save", "file": "steamcampaign02.sav"})
+
+    assert record.raises == []
+    assert len(record.saves) == 1
 
 
 # ── game_online ─────────────────────────────────────────────────────────────

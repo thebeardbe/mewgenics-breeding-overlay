@@ -548,6 +548,21 @@ class PaletteWindow(QWidget):
         log.info("bridge: focusing cat key=%d", key)
         self.set_focus_key(key)
 
+    def raise_reported_cat(self, request) -> None:
+        """Select an in-game reported cat and bring the overlay to the front.
+
+        The mirror image of :meth:`select_reported_cat`: it reuses that method
+        so the cat is resolved and selected identically, then engages the
+        window through the normal summon path. Unlike focus, raising is wanted
+        here because it follows an explicit click on the mod's in-game button.
+        The overlay still comes up when the request names no cat in the current
+        save (the click asked for the overlay regardless); the decision is
+        logged either way.
+        """
+        self.select_reported_cat(request)
+        log.info("bridge: raising overlay for raise request %r", request)
+        self._engage()
+
     # ── in-game bridge (outbound "show in game") ────────────────────────────
     def refresh_show_in_game(self) -> None:
         """Re-gate the card's "Show in game" button for the live state.

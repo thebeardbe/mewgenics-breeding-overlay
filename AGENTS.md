@@ -58,8 +58,9 @@ tail -f ~/.local/share/Steam/steamapps/common/Mewgenics/mod_logs/chainloader.log
 In-game cat clicks cannot be simulated from here (`wtype` delivers no input on
 this session; verified against a plain terminal, so mouse input is out too). The
 game side of the bridge is therefore exercised with a stand-in TCP client on
-127.0.0.1:45780 sending `{"v":1,"type":"focus","key":N}`, and the overlay side
-with `hl.dsp.send_shortcut({mods='CTRL', key='g', window='class:mewgenics-overlay'})`
+127.0.0.1:45780 sending `{"v":1,"type":"focus","key":N}` (or
+`{"v":1,"type":"raise","key":N}` to also pull the overlay to the front), and
+the overlay side with `hl.dsp.send_shortcut({mods='CTRL', key='g', window='class:mewgenics-overlay'})`
 to fire the in-overlay shortcut. See the AGENTS.md gotcha on the Lua dispatch
 syntax.
 
@@ -93,9 +94,10 @@ src/mewgenics_overlay/
   core/
     discovery.py          save + resources.gpak location (Windows/Proton/Linux)
     watcher.py            debounced file watcher + safe copy-before-read
-    bridge.py             in-game bridge: loopback TCP protocol (focus + which save
-                          the game plays), request -> db_key resolution, transport
-                          server (Qt-free; ui/bridgectl.py)
+    bridge.py             in-game bridge: loopback TCP protocol (focus, raise to
+                          show the overlay, + which save the game plays), request
+                          -> db_key resolution, transport server
+                          (Qt-free; ui/bridgectl.py)
     livesave.py           live save: the save the running game holds open (scanned
                           via /proc), a mod-reported save name -> full path, and
                           SaveFollowPolicy (decide when to follow that save)

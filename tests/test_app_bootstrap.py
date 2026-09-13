@@ -131,6 +131,8 @@ class _FakePalette(QObject):
         self.reported.append(request)
         palette.PaletteWindow.select_reported_cat(self, request)
 
+    raise_reported_cat = palette.PaletteWindow.raise_reported_cat
+
     def _engage(self):
         self.engaged = True
 
@@ -182,6 +184,7 @@ class _FakeBridgeController:
     def __init__(self, port=0, parent=None):
         self.port = port
         self.focus_requested = _FakeSignal()
+        self.raise_requested = _FakeSignal()
         self.save_reported = _FakeSignal()
         self.game_online = _FakeSignal()
         self.started = False

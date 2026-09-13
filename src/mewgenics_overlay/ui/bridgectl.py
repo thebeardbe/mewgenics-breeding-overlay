@@ -23,6 +23,9 @@ class BridgeController(QObject):
 
     #: Emitted (queued) for every valid focus request, on the UI thread.
     focus_requested = Signal(object)
+    #: Emitted (queued) for every valid raise request, on the UI thread. A raise
+    #: asks the overlay to select the cat *and* come to the front.
+    raise_requested = Signal(object)
     #: Emitted (queued) for every valid save report, on the UI thread. Carries
     #: the :class:`~mewgenics_overlay.core.bridge.SaveRequest`.
     save_reported = Signal(object)
@@ -35,6 +38,7 @@ class BridgeController(QObject):
         super().__init__(parent)
         self._server = bridge.BridgeServer(
             on_focus=self.focus_requested.emit,
+            on_raise=self.raise_requested.emit,
             on_save=self.save_reported.emit,
             on_clients_changed=self._on_clients_changed,
             port=port)

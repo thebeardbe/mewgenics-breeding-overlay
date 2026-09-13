@@ -635,3 +635,227 @@ def test_a_connection_refused_by_the_cap_never_changes_the_count():
         if extra is not None:
             extra.close()
         server.stop()
+
+
+# ── raise requests (select the cat *and* show the overlay) ──────────────────
+def raise_message(**fields):
+    payload = {"v": bridge.PROTOCOL_VERSION, "type": "raise"}
+    payload.update(fields)
+    return json.dumps(payload)
+
+
+def start_server_with_raise():
+    """Server with both callbacks, so a raise never lands as a focus one."""
+    focus = Collector()
+    raises = Collector()
+    server = bridge.BridgeServer(on_focus=focus, on_raise=raises, port=0)
+    assert server.start() is True
+    return server, focus, raises
+
+
+def test_parse_raise_message_reads_key_uid_and_name():
+    req = bridge.parse_message(
+        raise_message(key=341, uid="0xabc", name="L'Via"))
+    assert (req.key, req.uid, req.name) == (341, "0xabc", "L'Via")
+
+
+def test_parse_raise_message_is_its_own_type():
+    # Dispatch keys off the type: a raise must be a RaiseRequest (which is
+    # still a FocusRequest, so the resolver accepts it) and never a plain one.
+    req = bridge.parse_message(raise_message(key=341))
+    assert type(req) is bridge.RaiseRequest
+    assert isinstance(req, bridge.FocusRequest)
+
+
+def test_parse_focus_message_is_not_a_raise_request():
+    req = bridge.parse_message(message(key=341))
+    assert type(req) is bridge.FocusRequest
+    assert not isinstance(req, bridge.RaiseRequest)
+
+
+def test_parse_raise_accepts_a_numeric_key_as_string():
+    assert bridge.parse_message(raise_message(key="341")).key == 341
+
+
+def test_parse_raise_allows_uid_only():
+    req = bridge.parse_message(raise_message(uid="0xabc"))
+    assert req.key is None and req.uid == "0xabc"
+
+
+def test_parse_raise_allows_name_only():
+    req = bridge.parse_message(raise_message(name="L'Via"))
+    assert req.key is None and req.name == "L'Via"
+
+
+def test_parse_raise_accepts_key_zero():
+    # 0 is a real game key, not a "missing" sentinel.
+    assert bridge.parse_message(raise_message(key=0)).key == 0
+
+
+def test_parse_raise_without_an_identifier_names_the_raise_type():
+    # The same rule as focus, with the raise wording so the log is diagnosable.
+    with pytest.raises(bridge.ProtocolError, match="raise message carries no"):
+        bridge.parse_message(raise_message())
+
+
+@pytest.mark.parametrize("line", [
+    "",                          # blank
+    "{not json",                 # malformed
+    "[1, 2, 3]",                 # not an object
+    '{"v": 1, "type": "nope"}',  # unknown type
+    '{"type": "raise", "key": 1}',          # missing version
+    '{"v": 99, "type": "raise", "key": 1}',   # wrong version
+    '{"v": 1, "type": "raise"}',              # no identifier
+    '{"v": 1, "type": "raise", "key": true}',   # bool is not a key
+    '{"v": 1, "type": "raise", "key": null}',   # null key
+])
+def test_parse_rejects_bad_raise_messages(line):
+    with pytest.raises(bridge.ProtocolError):
+        bridge.parse_message(line)
+
+
+def test_resolve_accepts_a_raise_request(session):
+    # A raise carries the same identifiers, so the same resolver handles it.
+    assert bridge.resolve_focus_key(session, bridge.RaiseRequest(key=341)) == 341
+    req = bridge.RaiseRequest(uid="0xDAE1444862DC29FA")
+    assert bridge.resolve_focus_key(session, req) == 349
+
+
+def test_server_delivers_a_raise_request():
+    server, focus, raises = start_server_with_raise()
+    try:
+        send(server.port, raise_message(key=341, name="L'Via"))
+        assert raises.wait(), "no raise request delivered"
+        assert raises.requests[0] == bridge.RaiseRequest(key=341, name="L'Via")
+        # A raise must never be mistaken for a focus report.
+        assert focus.requests == []
+    finally:
+        server.stop()
+
+
+def test_a_focus_message_never_fires_the_raise_callback():
+    server, focus, raises = start_server_with_raise()
+    try:
+        send(server.port, message(key=349))
+        assert focus.wait(), "focus not delivered"
+        assert focus.requests[0].key == 349
+        assert raises.requests == []
+    finally:
+        server.stop()
+
+
+def test_raise_and_focus_are_dispatched_separately_on_one_connection():
+    server, focus, raises = start_server_with_raise()
+    try:
+        send_lines(server.port, [raise_message(key=1), message(key=2),
+                                 raise_message(key=3), message(key=4)])
+
+        assert raises.wait_count(2), "raises not delivered"
+        assert focus.wait_count(2), "focuses not delivered"
+        assert [r.key for r in raises.requests] == [1, 3]
+        assert [r.key for r in focus.requests] == [2, 4]
+        assert server.running is True
+    finally:
+        server.stop()
+
+
+@pytest.mark.parametrize("bad", [
+    "not json at all",
+    raise_message(),                                    # no identifier
+    raise_message(key=True),                            # bool key
+    raise_message(key=None),                            # null key
+    json.dumps({"v": 99, "type": "raise", "key": 341}),  # wrong version
+    json.dumps({"type": "raise", "key": 341}),        # missing version
+])
+def test_server_rejects_a_bad_raise_and_keeps_the_connection(bad):
+    server, focus, raises = start_server_with_raise()
+    try:
+        send_lines(server.port, [bad, message(key=349)])
+
+        assert focus.wait(), "connection did not survive the rejected raise"
+        assert focus.requests[-1].key == 349
+        assert raises.requests == []
+        assert server.running is True
+    finally:
+        server.stop()
+
+
+def test_a_rejected_raise_keeps_the_other_clients_alive():
+    # One client's malformed raise must not drop that client, and must not
+    # disturb a second client's valid raise.
+    server, focus, raises = start_server_with_raise()
+    bad = good = None
+    try:
+        bad = socket.create_connection(("127.0.0.1", server.port), timeout=3.0)
+        good = socket.create_connection(("127.0.0.1", server.port), timeout=3.0)
+        deadline = time.time() + 2.0
+        while server.client_count < 2 and time.time() < deadline:
+            time.sleep(0.01)
+        assert server.client_count == 2
+
+        bad.sendall((raise_message() + "\n").encode("utf-8"))
+        good.sendall((raise_message(key=341) + "\n").encode("utf-8"))
+
+        assert raises.wait(), "the other client's raise was dropped"
+        assert raises.requests[0].key == 341
+        # Both peers are still registered: the server can write to each.
+        assert server.send({"v": 1, "type": "select", "key": 1}) == 2
+    finally:
+        for conn in (bad, good):
+            if conn is not None:
+                conn.close()
+        server.stop()
+
+
+def test_a_rejected_raise_is_logged_like_a_bad_focus_message():
+    collector = Collector()
+    server = bridge.BridgeServer(on_focus=collector, port=0)
+    assert server.start() is True
+    try:
+        with capture_bridge_records() as logs:
+            send(server.port, raise_message())   # no identifier
+            assert logs.wait_for(
+                lambda r: r.levelno == logging.WARNING
+                and "ignoring bad message" in r.getMessage()
+                and "raise message carries no key, uid or name"
+                in r.getMessage()
+            ), "rejected raise was not logged"
+    finally:
+        server.stop()
+
+
+def test_server_raise_handler_exception_does_not_kill_listener():
+    def explode(_request):
+        raise RuntimeError("boom")
+
+    focus = Collector()
+    server = bridge.BridgeServer(on_focus=focus, on_raise=explode, port=0)
+    assert server.start() is True
+    try:
+        send(server.port, raise_message(key=341))
+        send(server.port, message(key=349))
+        assert focus.wait(), "raise handler failure killed the listener"
+        assert server.running is True
+    finally:
+        server.stop()
+
+
+def test_server_reports_a_raise_when_no_handler_is_installed():
+    # A build without an on_raise callback must ignore the raise (with a
+    # trace) rather than crash the listener thread, exactly like a save report
+    # with no on_save handler.
+    collector = Collector()
+    server = bridge.BridgeServer(on_focus=collector, port=0)
+    assert server.start() is True
+    try:
+        with capture_bridge_records() as logs:
+            send(server.port, raise_message(key=341))
+            assert logs.wait_for(
+                lambda r: "no handler installed" in r.getMessage()
+                and "raise" in r.getMessage()
+            ), "unhandled raise left no trace"
+
+            send(server.port, message(key=349))
+            assert collector.wait(), "listener died on an unhandled raise"
+    finally:
+        server.stop()
