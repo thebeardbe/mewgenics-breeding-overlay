@@ -34,6 +34,7 @@ from mewgenics_overlay.core import bridge  # noqa: E402
 from mewgenics_overlay.ui import app  # noqa: E402
 from mewgenics_overlay.ui import desktopshortcut  # noqa: E402
 from mewgenics_overlay.ui import hotkeybinding  # noqa: E402
+from mewgenics_overlay.ui import palette  # noqa: E402
 from mewgenics_overlay.ui import theme as _theme  # noqa: E402
 
 
@@ -92,9 +93,14 @@ class _FakePalette(QObject):
         self.focused = []
         self.engaged = False
         self._focus = None
-        # Outbound "show in game" path (palette.attach_bridge/show_in_game).
+        # Outbound "show in game" path, as main() drives it: the shortcut calls
+        # the shared focused-cat guard, which delegates to show_in_game. The
+        # guard is bound from the real PaletteWindow so app.py's wiring is
+        # exercised against the production entry point.
         self.bridges = []
         self.showed_in_game = []
+
+    show_focused_in_game = palette.PaletteWindow.show_focused_in_game
 
     def attach_bridge(self, bridge_ctl):
         self.bridges.append(bridge_ctl)

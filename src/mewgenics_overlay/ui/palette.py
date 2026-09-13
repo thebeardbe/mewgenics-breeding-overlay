@@ -510,14 +510,52 @@ class PaletteWindow(QWidget):
         self._tablectl.set_focus_key(db_key)
 
     # ── in-game bridge (outbound "show in game") ────────────────────────────
+    def _refresh_show_in_game(self) -> None:
+        """Re-gate the card's "Show in game" button for the live state.
+
+        Called whenever the bridge availability or the selected cat changes,
+        so the button never offers an action the current state cannot fulfil.
+        """
+        btn = getattr(self, "_btn_show_in_game", None)
+        if btn is None:
+            return
+        bridge_on = self.bridge_available
+        has_cat = self._focus is not None
+        btn.setEnabled(bridge_on and has_cat)
+        if not bridge_on:
+            tip = "The in-game bridge is off, so the game cannot select this cat."
+        elif not has_cat:
+            tip = "Pick a cat first, then ask the game to select them."
+        else:
+            tip = "Ask the game to select this cat in game."
+        btn.setToolTip(_theme.wrap_tooltip(tip))
+
+    def _on_show_selected_in_game(self) -> None:
+        """Card button: send the selected cat through the outbound path."""
+        self.show_focused_in_game()
+
     def attach_bridge(self, bridge: BridgeController) -> None:
         """Attach the in-game bridge that carries outbound selects."""
         self._bridge = bridge
+        self._refresh_show_in_game()
 
     @property
     def bridge_available(self) -> bool:
         """True only when a bridge is attached and actually running."""
         return self._bridge is not None and self._bridge.running
+
+    def show_focused_in_game(self) -> bool:
+        """Send the focused cat to the game via the outbound path.
+
+        Shared by the card's "Show in game" button and the Ctrl+G shortcut:
+        logs when nothing is focused and returns False; otherwise returns
+        whether the game took the select (see :meth:`show_in_game`).
+        """
+        cat = self._focus
+        if cat is None:
+            log.info("bridge: nothing focused to show in game")
+            return False
+        return self.show_in_game(cat.db_key)
 
     def show_in_game(self, db_key: int) -> bool:
         """Ask the game to select the cat *db_key* (the one outbound path).

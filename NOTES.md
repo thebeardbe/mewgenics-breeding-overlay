@@ -123,7 +123,14 @@ Waiting on the tester's results for v0.2.1 (Windows hotkey) and v0.2.2
   with a stalled peer; distinguish them for diagnostics.
 - `ui/app.py`: the bind-failure log interpolates `bridge_ctl.port`, which is
   `None` before a successful bind, so it reads "port None busy?". Log the
-  configured port instead.
+  configured port instead. Hit live on 2026-09-12 while two instances raced.
+- `ui/palette.py`: the selected-cat card's "Show in game" button is re-gated on
+  focus changes and on `attach_bridge` only. If the bridge server thread dies at
+  runtime without `stop()` (unexpected accept-loop error), the button stays
+  enabled until the next focus change. A running-changed signal from
+  `BridgeController` would fix it; the click degrades gracefully meanwhile.
+- `ui/palette.py` is 615 lines, in the 601–1000 warning band. The bridge and
+  outbound block (roughly lines 510–570) is the natural next extraction.
 
 ## Refactor roadmap (complete)
 

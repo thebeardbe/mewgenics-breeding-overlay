@@ -247,11 +247,7 @@ def main(argv=None) -> int:
                             bridge_ctl.port)
 
         def _show_focused_cat_in_game() -> None:
-            cat = palette._focus
-            if cat is None:
-                logging.info("bridge: nothing focused to show in game")
-                return
-            palette.show_in_game(cat.db_key)
+            palette.show_focused_in_game()
 
         # Ctrl+G: show the cat the overlay is focused on back in the game.
         # Guarded: a QShortcut needs a live QApplication (tests stub it out).

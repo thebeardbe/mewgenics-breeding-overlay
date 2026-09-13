@@ -48,6 +48,7 @@ class TableCoordinator(QObject):
         assets_getter: Callable[[], object],
         schedule: Callable[[], None],
         on_selected: Callable[[], None],
+        on_focus_changed: Optional[Callable[[], None]] = None,
         parent: Optional[QObject] = None,
     ) -> None:
         super().__init__(parent)
@@ -61,6 +62,7 @@ class TableCoordinator(QObject):
         self._assets_getter = assets_getter
         self._schedule = schedule
         self._on_selected = on_selected
+        self._on_focus_changed = on_focus_changed
         self._focus: Optional[Cat] = None
 
     # ── state (read-only, for the host's own wiring) ───────────────────────
@@ -95,7 +97,13 @@ class TableCoordinator(QObject):
         self._searchbox.set_text_silently("")
         self._searchbox.clear_focus()
         self.show_focus(cat)
+        self._notify_focus_changed()
         self._schedule()
+
+    def _notify_focus_changed(self) -> None:
+        """Tell the host the selected cat changed (its controls re-gate)."""
+        if self._on_focus_changed is not None:
+            self._on_focus_changed()
 
     def clear_focus(self) -> None:
         self._focus = None
@@ -112,6 +120,7 @@ class TableCoordinator(QObject):
         self._table.setRowCount(0)
         self._searchbox.set_text_silently("")
         self._detail.setText("Select a partner row for inheritance detail.")
+        self._notify_focus_changed()
 
     def has_content(self) -> bool:
         """True when a cat is focused or partner rows are rendered."""

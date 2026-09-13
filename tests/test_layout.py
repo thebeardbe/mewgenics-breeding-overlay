@@ -160,6 +160,16 @@ class FakePalette(QWidget):
         self.calls.append(("show_in_game", db_key))
         return True
 
+    def _refresh_show_in_game(self):
+        # layout.build calls this at the end of _wire_ui and installs it as the
+        # coordinator's focus-change callback. The real re-gate of the card
+        # button is covered by test_show_in_game_button.py.
+        self.calls.append(("refresh_show_in_game",))
+
+    def _on_show_selected_in_game(self):
+        # layout.build connects the card's "Show in game" button to this slot.
+        self.calls.append(("show_selected_in_game",))
+
     def apply_theme(self, key):
         self.calls.append(("theme", key))
 

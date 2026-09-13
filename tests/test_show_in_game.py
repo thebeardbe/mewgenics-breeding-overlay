@@ -55,9 +55,14 @@ def _host(bridge=None, statuses=None):
     # PaletteWindow.__init__ always sets _bridge (to None until attach_bridge
     # runs) and carries a _set_status(status) method; the stand-in carries the
     # same surface, recording every status line the outbound path posts.
+    # attach_bridge also re-gates the card's "Show in game" button through
+    # _refresh_show_in_game, so the stand-in records that call too (the button
+    # gate itself is covered by test_show_in_game_button.py).
     host = SimpleNamespace(_bridge=bridge)
     host.statuses = [] if statuses is None else statuses
     host._set_status = host.statuses.append
+    host.refreshes = []
+    host._refresh_show_in_game = lambda: host.refreshes.append(True)
     return host
 
 
@@ -112,9 +117,11 @@ def test_attach_bridge_makes_availability_follow_the_controller():
 
     palette.PaletteWindow.attach_bridge(host, running)
     assert _available(host) is True
+    assert host.refreshes == [True]
 
     palette.PaletteWindow.attach_bridge(host, stopped)
     assert _available(host) is False
+    assert host.refreshes == [True, True]
 
 
 # ── a bridge that delivers to nobody ───────────────────────────────────────
@@ -180,6 +187,7 @@ def test_attach_bridge_stores_the_controller_and_makes_it_reachable():
     palette.PaletteWindow.attach_bridge(host, ctl)
 
     assert host._bridge is ctl
+    assert host.refreshes == [True]
     assert palette.PaletteWindow.show_in_game(host, 12) is True
     assert ctl.keys == [12]
 
@@ -191,6 +199,41 @@ def test_attach_bridge_replaces_a_previous_controller():
     palette.PaletteWindow.attach_bridge(host, first)
     palette.PaletteWindow.attach_bridge(host, second)
 
+    assert host._bridge is second
+    assert host.refreshes == [True, True]
     assert palette.PaletteWindow.show_in_game(host, 55) is True
     assert first.keys == []
     assert second.keys == [55]
+
+
+# ── the focused-cat guard shared by the button and the shortcut ────────────
+def _focused_host(cat, bridge=None):
+    # The guard reads _focus and delegates to show_in_game; bind both the way a
+    # real PaletteWindow carries them so the stand-in can exercise the guard.
+    host = _host(bridge)
+    host._focus = cat
+    host.show_in_game = lambda key: palette.PaletteWindow.show_in_game(host, key)
+    return host
+
+
+def test_show_focused_in_game_forwards_the_focused_key():
+    bridge = _FakeBridge(delivered=1)
+    host = _focused_host(SimpleNamespace(db_key=341), bridge)
+
+    assert palette.PaletteWindow.show_focused_in_game(host) is True
+    assert bridge.keys == [341]
+    assert host.statuses == ["asked the game to select this cat"]
+
+
+def test_show_focused_in_game_with_no_cat_logs_and_sends_nothing(caplog):
+    bridge = _FakeBridge(delivered=1)
+    host = _focused_host(None, bridge)
+
+    with caplog.at_level(logging.INFO, logger=LOG_NAME):
+        assert palette.PaletteWindow.show_focused_in_game(host) is False
+
+    assert bridge.keys == []
+    infos = _records(caplog, logging.INFO)
+    assert len(infos) == 1
+    assert "nothing focused" in infos[0].getMessage()
+    assert host.statuses == []
