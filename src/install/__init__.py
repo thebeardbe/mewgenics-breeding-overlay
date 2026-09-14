@@ -1,1 +1,1 @@
-"""One-click install planning: decide what an install would do, without doing it."""
+"""One-click installers: plan what an install would do, then do it."""

@@ -524,6 +524,22 @@ def test_duplicate_destinations_are_compared_case_insensitively():
         )
 
 
+def test_a_mod_file_that_would_land_on_the_overlay_is_refused():
+    # The overlay binary is placed in the game folder by name, and the
+    # Mewjector loader lands there too. An overlay built as ``version.dll``
+    # would silently overwrite the loader (or be overwritten by it), so the
+    # collision check must include the overlay placement, not just the mod
+    # files.
+    with pytest.raises(UnknownInstallInput):
+        plan_install(
+            OS_LINUX,
+            VARIANT_STANDALONE,
+            game_dir=LINUX_GAME_DIR,
+            overlay_binary="/nonexistent/build/" + MEWJECTOR_LOADER_NAME,
+            mod_files=LOADER_MOD_FILES,
+        )
+
+
 # ── input normalisation ────────────────────────────────────────────────────
 @pytest.mark.parametrize("os_name", ["LINUX", " Linux ", "NixOS", "Windows"])
 def test_os_names_are_normalised(os_name):

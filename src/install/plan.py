@@ -240,18 +240,19 @@ def _mod_placements(
 
 
 def _require_distinct_destinations(placements: list[FilePlacement]) -> None:
-    """Refuse two mod files that would be written to the same destination.
+    """Refuse any two placements that would be written to one destination.
 
-    Destinations are compared case-insensitively: Windows folds file-name
-    case, so ``Mod.dll`` and ``mod.dll`` collide there even though the strings
-    differ.
+    This includes the overlay binary, so a mod file named like the overlay is
+    refused instead of silently overwriting it. Destinations are compared
+    case-insensitively: Windows folds file-name case, so ``Mod.dll`` and
+    ``mod.dll`` collide there even though the strings differ.
     """
     seen: dict[str, str] = {}
     for placement in placements:
         key = placement.destination.lower()
         if key in seen:
             raise UnknownInstallInput(
-                "mod files %s and %s would land at the same destination %s; "
+                "files %s and %s would land at the same destination %s; "
                 "case is ignored because Windows folds file names"
                 % (seen[key], placement.source, placement.destination)
             )
@@ -381,7 +382,7 @@ def plan_install(
     Raises :class:`UnknownInstallInput` for an OS or variant that is not
     recognised, or for contradictory paths (mod files with ``overlay-only``,
     none with a mod variant, ``standalone`` without the full loader set,
-    ``mewtator`` with loader files, or two mod files that would land at one
+    ``mewtator`` with loader files, or two files that would land at one
     destination).
     """
     os_key = _require_known_os(os_name)
@@ -452,11 +453,10 @@ def plan_install(
                     % (MEWJECTOR_LOADER_NAME, MEWJECTOR_CONFIG_NAME)
                 )
         uses_loader = has_loader
-        mod_placements = _mod_placements(
+        placements += _mod_placements(
             path_cls, game_dir, sources, variant_key
         )
-        _require_distinct_destinations(mod_placements)
-        placements += mod_placements
+        _require_distinct_destinations(placements)
 
     dll_override = _dll_override(os_key, uses_loader, proton_compatdata_dir)
     launch_option = _launch_option(os_key, variant_key, game_dir, dll_override)
