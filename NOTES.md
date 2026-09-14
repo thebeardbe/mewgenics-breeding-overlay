@@ -175,3 +175,28 @@ Waiting on the tester's results for v0.2.1 (Windows hotkey) and v0.2.2
   hotkeybinding, hotkey, hotkeyctl, singleton, desktopshortcut,
   shortcut_common, shortcut_backends, shortcut_hyprland, shortcutworker.
 - Remaining size item is `partnertable.py` (627 lines) — see v0.3.0 item 5.
+
+## Installers (in progress, 2026-09-14)
+
+- Done and committed: the planner (`src/install/plan.py`: achievements matrix,
+  file placements, DLL override, refusals) and the executor
+  (`src/install/apply.py`: atomic staging with backup and rollback, dry run,
+  refuses while the game runs where a process table exists, always prints the
+  achievements line), plus `install.sh` for Linux and NixOS. Batches 3 and 4.
+  1686 tests green.
+- Written but NOT yet tested, reviewed or committed: the CLI `install`
+  subcommand in `src/mewgenics_overlay/cli.py`, plus `install.ps1` and
+  `install.bat`. They need the test-writer pass, the gates, the reviewer and a
+  commit before they count as done.
+- Blocking gap for the Windows story: the release builds only the GUI binary.
+  `packaging/build_windows.bat` and `.github/workflows/release.yml` must also
+  build `mewgenics-overlay-cli` (PyInstaller, `--collect-submodules install`),
+  or the Windows installer falls back to requiring Python, which defeats the
+  point of a one-click install.
+- Also open: the mewtator `-modpaths` value is a POSIX path handed to a Windows
+  binary under Proton, so its form needs confirming on a real Mewtator run;
+  `install.bat` has no pause, so a double-click console closes before the report
+  can be read; and `install.ps1` Steam library discovery is logic-checked only,
+  never run on Windows.
+- Next after that: batch 7, the docs and the achievements matrix in the README
+  and an `INSTALL.md`, then the release.
