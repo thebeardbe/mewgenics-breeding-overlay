@@ -56,6 +56,7 @@ from mewgenics_overlay.core.session import STAT_NAMES  # noqa: E402
 from mewgenics_overlay.ui import config as _cfg  # noqa: E402
 from mewgenics_overlay.ui import layout as _layout  # noqa: E402
 from mewgenics_overlay.ui import palette  # noqa: E402
+from mewgenics_overlay.ui import selectecho  # noqa: E402
 from mewgenics_overlay.ui.bridgectl import BridgeController  # noqa: E402
 from mewgenics_overlay.ui.theme import wrap_tooltip as _wt  # noqa: E402
 
@@ -169,6 +170,9 @@ class ShowInGameHost(QWidget):
         self._assets = SimpleNamespace(assets=None)
         self._tablectl = None            # created by layout.build
         self._bridge = None
+        # The real window always carries one (PaletteWindow.__init__); the
+        # outbound path records into the real filter.
+        self._select_echo = selectecho.SelectEchoFilter()
         self.statuses = []
         self.calls = []
 

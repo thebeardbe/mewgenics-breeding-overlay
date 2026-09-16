@@ -42,6 +42,7 @@ from PySide6.QtWidgets import QApplication, QWidget  # noqa: E402
 
 from mewgenics_overlay.core import bridge  # noqa: E402
 from mewgenics_overlay.ui import palette  # noqa: E402
+from mewgenics_overlay.ui import selectecho  # noqa: E402
 
 LOG_NAME = "mewgenics_overlay.ui"
 
@@ -71,12 +72,17 @@ class RaiseHost(QWidget):
     select_reported_cat = palette.PaletteWindow.select_reported_cat
     raise_reported_cat = palette.PaletteWindow.raise_reported_cat
     set_focus_key = palette.PaletteWindow.set_focus_key
+    # Both entry points delegate to this shared resolution helper.
+    _apply_reported_selection = palette.PaletteWindow._apply_reported_selection
 
     def __init__(self, session):
         super().__init__()
         self._session = session
         self.events = []
         self._tablectl = _RecordingTable(self.events)
+        # The real window always carries one (PaletteWindow.__init__); the
+        # echo filter is real here so the focus path runs unmodified.
+        self._select_echo = selectecho.SelectEchoFilter()
         self.window_ops = []
 
     def _engage(self):

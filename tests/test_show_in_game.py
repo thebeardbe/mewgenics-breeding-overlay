@@ -36,6 +36,7 @@ pytest.importorskip("PySide6")
 pytest.importorskip("lz4")
 
 from mewgenics_overlay.ui import palette  # noqa: E402
+from mewgenics_overlay.ui import selectecho  # noqa: E402
 
 LOG_NAME = "mewgenics_overlay.ui"
 
@@ -103,6 +104,9 @@ def _host(bridge=None, statuses=None, session=None):
     host = _Host()
     host._bridge = bridge
     host._session = session
+    # The real window always carries one (PaletteWindow.__init__); a fresh
+    # filter per host keeps the echo state from leaking between tests.
+    host._select_echo = selectecho.SelectEchoFilter()
     host.statuses = [] if statuses is None else statuses
     host._set_status = host.statuses.append
     host.refreshes = []

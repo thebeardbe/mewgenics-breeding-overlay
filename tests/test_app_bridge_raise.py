@@ -62,7 +62,9 @@ def test_a_raise_signal_selects_and_engages_through_the_palette(
     ctl.raise_requested.emit(request)
 
     # The raise reaches the palette's raise entry point, which selects the
-    # reported cat and then engages the window.
-    assert palette.reported == [request]
+    # reported cat and then engages the window. The echo check lives on the
+    # focus path only, so the raise must bypass it entirely.
+    assert palette.raised == [request]
+    assert palette.reported == []
     assert palette.focused == [341]
     assert palette.engaged is True

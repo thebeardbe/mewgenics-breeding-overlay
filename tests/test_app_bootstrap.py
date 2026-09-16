@@ -36,6 +36,7 @@ from mewgenics_overlay.ui import app  # noqa: E402
 from mewgenics_overlay.ui import desktopshortcut  # noqa: E402
 from mewgenics_overlay.ui import hotkeybinding  # noqa: E402
 from mewgenics_overlay.ui import palette  # noqa: E402
+from mewgenics_overlay.ui import selectecho  # noqa: E402
 from mewgenics_overlay.ui import theme as _theme  # noqa: E402
 
 
@@ -94,8 +95,12 @@ class _FakePalette(QObject):
             by_key={341: SimpleNamespace(db_key=341)}, cats=[])
         self.focused = []
         self.reported = []
+        self.raised = []
         self.engaged = False
         self._focus = None
+        # The real window always carries one (PaletteWindow.__init__); the
+        # real select_reported_cat below reads it.
+        self._select_echo = selectecho.SelectEchoFilter()
         # Save-follow wiring (app.main): the policy hook for a *user*-chosen
         # save, and the recorded load calls. ``current_save_path`` is what the
         # policy compares a detected save against.
@@ -112,6 +117,8 @@ class _FakePalette(QObject):
         self.showed_in_game = []
 
     show_focused_in_game = palette.PaletteWindow.show_focused_in_game
+    # The real select_reported_cat delegates to this shared resolution helper.
+    _apply_reported_selection = palette.PaletteWindow._apply_reported_selection
 
     def attach_bridge(self, bridge_ctl):
         self.bridges.append(bridge_ctl)
@@ -131,7 +138,13 @@ class _FakePalette(QObject):
         self.reported.append(request)
         palette.PaletteWindow.select_reported_cat(self, request)
 
-    raise_reported_cat = palette.PaletteWindow.raise_reported_cat
+    def raise_reported_cat(self, request):
+        # The raise entry point deliberately does *not* go through
+        # select_reported_cat: the focus path's echo check must never suppress
+        # an explicit in-game click. Recording it proves app.py routed the
+        # raise message to this entry point rather than to focus.
+        self.raised.append(request)
+        palette.PaletteWindow.raise_reported_cat(self, request)
 
     def _engage(self):
         self.engaged = True

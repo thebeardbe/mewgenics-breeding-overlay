@@ -41,6 +41,7 @@ from PySide6.QtWidgets import QApplication, QWidget  # noqa: E402
 
 from mewgenics_overlay.core import bridge  # noqa: E402
 from mewgenics_overlay.ui import palette  # noqa: E402
+from mewgenics_overlay.ui import selectecho  # noqa: E402
 
 LOG_NAME = "mewgenics_overlay.ui"
 
@@ -67,11 +68,16 @@ class ReportedCatHost(QWidget):
 
     select_reported_cat = palette.PaletteWindow.select_reported_cat
     set_focus_key = palette.PaletteWindow.set_focus_key
+    # The real select_reported_cat delegates to this shared resolution helper.
+    _apply_reported_selection = palette.PaletteWindow._apply_reported_selection
 
     def __init__(self, session):
         super().__init__()
         self._session = session
         self._tablectl = _RecordingTable()
+        # The real window always carries one (PaletteWindow.__init__); the
+        # echo filter is real here so select_reported_cat runs unmodified.
+        self._select_echo = selectecho.SelectEchoFilter()
         self.window_ops = []
 
     def show(self):  # noqa: N802 (Qt API)

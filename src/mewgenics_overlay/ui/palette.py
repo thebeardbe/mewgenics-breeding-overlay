@@ -68,6 +68,7 @@ from mewgenics_overlay.ui import hotkeybinding
 from .hotkeyctl import HotkeyController
 from .pinning import PinningStore
 from .reloader import ReloadCoordinator
+from .selectecho import SelectEchoFilter
 
 log = logging.getLogger("mewgenics_overlay.ui")
 
@@ -129,6 +130,9 @@ class PaletteWindow(QWidget):
         # Outbound in-game bridge (the "Show in game" select); attached by
         # app.main() once the BridgeController exists.
         self._bridge: Optional[BridgeController] = None
+        # Remembers the keys we just asked the game for, so the mod's report
+        # of that same selection is not applied as if the player clicked it.
+        self._select_echo = SelectEchoFilter()
         # Optional host hook: fires only for a save the *user* chose, never for
         # an automatic follow (app.main wires it to the save-follow policy so
         # the user's choice is pinned while the game stays online).
@@ -540,6 +544,26 @@ class PaletteWindow(QWidget):
         never shows, raises, activates or focuses the window, so an in-game
         click cannot pull focus from the game. The selected cat is already in
         place whenever the user next summons the overlay.
+
+        A report for a key the overlay just asked the game to select is the
+        echo of that command, not a player action, so it is dropped: acting on
+        it would re-focus whatever was sent, which for a partner-row send is
+        the partner and silently re-roots the analysis.
+        """
+        key = request.key
+        if key is not None and self._select_echo.is_echo(key):
+            log.debug(
+                "bridge: ignoring focus echo for key=%r (we just asked the "
+                "game for it)", key)
+            return
+        self._apply_reported_selection(request)
+
+    def _apply_reported_selection(self, request) -> None:
+        """Resolve *request* against the current save and select the cat.
+
+        Shared by the silent focus path and :meth:`raise_reported_cat`; the
+        echo check belongs to the focus path only, because a raise is always
+        an explicit player action and must never be dropped.
         """
         key = bridge.resolve_focus_key(self._session, request)
         if key is None:
@@ -551,15 +575,16 @@ class PaletteWindow(QWidget):
     def raise_reported_cat(self, request) -> None:
         """Select an in-game reported cat and bring the overlay to the front.
 
-        The mirror image of :meth:`select_reported_cat`: it reuses that method
-        so the cat is resolved and selected identically, then engages the
-        window through the normal summon path. Unlike focus, raising is wanted
-        here because it follows an explicit click on the mod's in-game button.
+        The mirror image of :meth:`select_reported_cat`: it uses the same
+        resolution and selection helper, so the cat is selected identically,
+        then engages the window through the normal summon path. Unlike focus,
+        raising is wanted here because it follows an explicit click on the
+        mod's in-game button, so the echo filter deliberately does not apply.
         The overlay still comes up when the request names no cat in the current
         save (the click asked for the overlay regardless); the decision is
         logged either way.
         """
-        self.select_reported_cat(request)
+        self._apply_reported_selection(request)
         log.info("bridge: raising overlay for raise request %r", request)
         self._engage()
 
@@ -643,6 +668,11 @@ class PaletteWindow(QWidget):
             self._set_status("in-game bridge is off")
             return False
         if self._bridge.send_select(db_key) > 0:
+            # Remember the key *after* the send: the mod's report of it is
+            # queued behind this call on the UI thread, so it cannot arrive
+            # before we record it. A failed send is not recorded, so a real
+            # click after a command that reached nobody is never swallowed.
+            self._select_echo.note_request(db_key)
             log.info("bridge: asked the game to select cat key=%d", db_key)
             self._set_status(
                 f"asked the game to select {self._cat_name(db_key)}")

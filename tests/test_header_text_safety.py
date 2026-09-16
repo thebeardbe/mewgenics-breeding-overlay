@@ -43,6 +43,7 @@ from PySide6.QtCore import Qt  # noqa: E402
 from PySide6.QtWidgets import QApplication, QLabel  # noqa: E402
 
 from mewgenics_overlay.ui import palette  # noqa: E402
+from mewgenics_overlay.ui import selectecho  # noqa: E402
 from mewgenics_overlay.ui import theme as _theme  # noqa: E402
 from mewgenics_overlay.ui.chrome import TopBar  # noqa: E402
 from mewgenics_overlay.ui.savepanel import base_name  # noqa: E402
@@ -184,6 +185,9 @@ def _host(bar, bridge=None, session=None):
     host._session = session
     host._chrome = bar
     host._settings = {}
+    # The real window always carries one (PaletteWindow.__init__); a fresh
+    # filter per host keeps the echo state from leaking between tests.
+    host._select_echo = selectecho.SelectEchoFilter()
     return host
 
 
