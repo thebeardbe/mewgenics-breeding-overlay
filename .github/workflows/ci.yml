@@ -56,6 +56,36 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt "PySide6-Essentials>=6.5" pytest
 
+      # No save is committed here: Mewgenics saves are game data and shipping
+      # them in the repository is not ours to do. Three modules in the suite
+      # read MEWGENICS_SAMPLE_SAV and skip when it is unset, which would leave
+      # the save-dependent cases unenforced in CI. Fetch one from the upstream
+      # parser project instead, pinned to the exact revision the vendored
+      # engine was synced from (the branch would drift underneath us) and
+      # hash-checked so a substituted archive fails the job instead of being
+      # parsed. Deliberately fatal: if the sample cannot be fetched the job
+      # fails rather than quietly going back to skipping.
+      - name: Fetch a sample save
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL -o "$RUNNER_TEMP/saves.zip" \
+            https://raw.githubusercontent.com/whyayala/MewgenicsBreedingManager/032bffb968ae35a9904547ae06054633ebc9865b/tools/saves/saves.zip
+          echo "0d9b999fa44980bc18b1ee3316c1ee3784cc5cfbdafdda88ede5e8807eeb6764  $RUNNER_TEMP/saves.zip" | sha256sum -c -
+          python - <<'PY'
+          import os
+          import zipfile
+
+          dest = os.path.join(os.environ["RUNNER_TEMP"], "sample-save")
+          os.makedirs(dest, exist_ok=True)
+          archive = os.path.join(os.environ["RUNNER_TEMP"], "saves.zip")
+          with zipfile.ZipFile(archive) as zf:
+              zf.extract("21cats.sav", dest)
+          save = os.path.join(dest, "21cats.sav")
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env_file:
+              env_file.write(f"MEWGENICS_SAMPLE_SAV={save}\n")
+          PY
+
       - name: Run tests
         # No path passed: pyproject.toml [tool.pytest.ini_options] already
         # declares testpaths = ["tests"].

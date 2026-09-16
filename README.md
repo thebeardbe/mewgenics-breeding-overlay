@@ -185,6 +185,10 @@ MEWGENICS_SAMPLE_SAV=/path/to/a/save.sav pytest tests/
 (stat inheritance, ability/disorder/defect odds, sexuality, kinship,
 compatibility) to the public game-code documentation.)
 
+No save is committed to the repository, so the variable above is how a
+contributor runs the save-dependent cases locally. CI fetches a pinned upstream
+sample automatically (hash-checked), so those cases are enforced there too.
+
 ## License
 
 MIT. Parser/genetics engine vendored from [MewgenicsBreedingManager](https://github.com/frankieg33/MewgenicsBreedingManager) (MIT, © 2026 frankieg33) and its [maintained fork by whyayala](https://github.com/whyayala/MewgenicsBreedingManager) (MIT, v5.9.5, game-1.1 rules) — see `src/mewgenics_overlay/vendor/_VENDORED.md`.
