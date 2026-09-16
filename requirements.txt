@@ -1,5 +1,9 @@
 # Core engine dependency only (no GUI).
 lz4>=4.0
 
+# Windows only: the live-save detector reads the game's open files through
+# psutil there (/proc does not exist). Linux uses /proc and does not need it.
+psutil>=5.9; sys_platform == "win32"
+
 # Optional: run the overlay UI (Qt Widgets only — Essentials keeps it lean).
 # PySide6-Essentials>=6.5

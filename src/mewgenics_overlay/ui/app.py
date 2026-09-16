@@ -397,8 +397,11 @@ def main(argv=None) -> int:
 
     bridge_ctl = None
     if settings.get("bridge_enabled", True):
-        bridge_ctl = bridgectl.BridgeController(
-            port=int(settings.get("bridge_port", bridge.DEFAULT_PORT)))
+        # The configured port, before the bind: ``bridge_ctl.port`` is None
+        # until the socket is actually listening, so logging it would read
+        # "port None busy?".
+        bridge_port = int(settings.get("bridge_port", bridge.DEFAULT_PORT))
+        bridge_ctl = bridgectl.BridgeController(port=bridge_port)
 
         def _on_bridge_focus(request) -> None:
             palette.select_reported_cat(request)
@@ -416,8 +419,11 @@ def main(argv=None) -> int:
             # connected.
             palette.attach_bridge(bridge_ctl)
         else:
-            logging.warning("bridge: not listening this session (port %s busy?)",
-                            bridge_ctl.port)
+            logging.warning("bridge: not listening this session (port %d busy?)",
+                            bridge_port)
+            palette._set_status(
+                f"⚠ bridge port {bridge_port} is in use - another instance or "
+                "program appears to own it; the game cannot connect")
 
         def _show_focused_cat_in_game() -> None:
             palette.show_focused_in_game()

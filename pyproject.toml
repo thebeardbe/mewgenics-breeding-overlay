@@ -9,7 +9,12 @@ description = "Live breeding-manager overlay for Mewgenics: pick a cat, see rank
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
-dependencies = ["lz4>=4.0"]
+dependencies = [
+    "lz4>=4.0",
+    # Windows has no /proc, so the live-save detector reads the game's open
+    # files through psutil there; the released Windows build must bundle it.
+    "psutil>=5.9; sys_platform == 'win32'",
+]
 
 [project.optional-dependencies]
 ui = ["PySide6-Essentials>=6.5"]

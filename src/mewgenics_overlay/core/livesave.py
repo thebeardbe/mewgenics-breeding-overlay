@@ -2,7 +2,10 @@
 
 Under Proton the game keeps its campaign save open for the whole session, so
 the save being played is visible as one of the game process's file descriptors
-(``/proc/<pid>/fd/*``). This module:
+(``/proc/<pid>/fd/*``). Windows has no process table to read, so there the same
+answer comes from psutil, which lists the game process's open files (see
+:mod:`mewgenics_overlay.core.livesave_psutil`); psutil is optional and without
+it the detector is simply unavailable. This module:
 
   * :func:`find_live_save` locates that descriptor and returns its canonical
     path (symlinks resolved, so it spells the file the same way as discovery),
@@ -27,6 +30,7 @@ from pathlib import Path
 from typing import Iterable, Optional, Union
 
 from mewgenics_overlay.core import discovery
+from mewgenics_overlay.core import livesave_psutil
 
 log = logging.getLogger("mewgenics_overlay.livesave")
 
@@ -40,6 +44,10 @@ DEFAULT_PROC_ROOT = "/proc"
 DEFAULT_GAME_EXE = "Mewgenics.exe"
 #: Only descriptors whose target ends like this are considered saves.
 DEFAULT_SAVE_SUFFIX = ".sav"
+#: Windows has no ``/proc``; there the detector reads the process table through
+#: psutil instead (see :mod:`mewgenics_overlay.core.livesave_psutil`). Selected
+#: once, as the host platform cannot move at runtime.
+_IS_WINDOWS = os.name == "nt"
 #: Consecutive process-absent scans before the game is judged offline. At the
 #: caller's poll interval this is a short grace period, not an immediate quit.
 DEFAULT_OFFLINE_GRACE_SCANS = 3
@@ -171,23 +179,16 @@ def _is_under_temp(target: str) -> bool:
     return canon.startswith(root.rstrip(os.sep) + os.sep)
 
 
-def _save_descriptor(pid_dir: Path, suffix: str) -> Optional[str]:
-    """Canonical path of this process's first non-temp descriptor ending *suffix*."""
-    fd_dir = pid_dir / "fd"
-    try:
-        entries = sorted(fd_dir.iterdir(), key=lambda p: _numeric_key(p.name))
-    except OSError as exc:
-        log.debug("livesave: cannot scan %s: %s", fd_dir, exc)
-        return None
-    for entry in entries:
-        try:
-            target = os.readlink(entry)
-        except OSError as exc:
-            log.debug("livesave: cannot read link %s: %s", entry, exc)
-            continue
-        # A deleted file shows as "<path> (deleted)" and so never matches.
-        # Match case-insensitively, as :func:`is_save_file_name` does, so an
-        # upper-case save name on disk is still found.
+def _first_live_save(candidates: Iterable[str], suffix: str) -> Optional[str]:
+    """Canonical path of the first non-temp candidate ending in *suffix*.
+
+    Shared by the ``/proc`` and psutil backends so both apply one rule: match
+    the suffix case-insensitively (as :func:`is_save_file_name` does, so an
+    upper-case save name on disk is still found) and never follow a temp copy
+    of a save. A deleted descriptor target shows as ``"<path> (deleted)"`` and
+    so never matches.
+    """
+    for target in candidates:
         if not target.casefold().endswith(suffix.casefold()):
             continue
         if _is_under_temp(target):
@@ -197,10 +198,28 @@ def _save_descriptor(pid_dir: Path, suffix: str) -> Optional[str]:
     return None
 
 
+def _save_descriptor(pid_dir: Path, suffix: str) -> Optional[str]:
+    """Canonical path of this process's first non-temp descriptor ending *suffix*."""
+    fd_dir = pid_dir / "fd"
+    try:
+        entries = sorted(fd_dir.iterdir(), key=lambda p: _numeric_key(p.name))
+    except OSError as exc:
+        log.debug("livesave: cannot scan %s: %s", fd_dir, exc)
+        return None
+    targets = []
+    for entry in entries:
+        try:
+            targets.append(os.readlink(entry))
+        except OSError as exc:
+            log.debug("livesave: cannot read link %s: %s", entry, exc)
+    return _first_live_save(targets, suffix)
+
+
 def find_live_save(
     proc_root: str = DEFAULT_PROC_ROOT,
     game_exe: str = DEFAULT_GAME_EXE,
     suffix: str = DEFAULT_SAVE_SUFFIX,
+    psutil_module: object = livesave_psutil.PSUTIL_UNSET,
 ) -> Optional[str]:
     """Return the canonical save path the running game has open, or None.
 
@@ -210,11 +229,22 @@ def find_live_save(
     not run this on a UI thread; it is cheap per process and read errors are
     debug-logged and skipped, never fatal.
 
-    *proc_root* is injectable so tests can use a fake tree.
+    Where no process table exists (Windows) the game's open files are read
+    through psutil instead; that enumerates handles and is more expensive, so
+    the off-UI-thread rule applies even more strongly there. *proc_root* is
+    injectable so tests can use a fake tree, and *psutil_module* is injectable
+    so the Windows backend can be exercised without the library or a real
+    process table.
     """
     exe = game_exe.casefold()
     if not exe or not suffix:
         return None
+    if livesave_psutil.use_backend(_IS_WINDOWS, proc_root, psutil_module):
+        module = livesave_psutil.resolve(psutil_module)
+        if module is None:
+            return None
+        return livesave_psutil.find_live_save(module, game_exe, suffix,
+                                              _first_live_save)
     for pid_dir in _matching_processes(proc_root, exe):
         target = _save_descriptor(pid_dir, suffix)
         if target:
@@ -228,28 +258,40 @@ def find_live_save(
 def game_process_running(
     proc_root: str = DEFAULT_PROC_ROOT,
     game_exe: str = DEFAULT_GAME_EXE,
+    psutil_module: object = livesave_psutil.PSUTIL_UNSET,
 ) -> bool:
     """True when a process named *game_exe* is running.
 
     Separate from :func:`find_live_save` because a running game with no save
     open (menus, between campaigns) still counts as present: the follow policy
-    must not treat that as the game having quit.
+    must not treat that as the game having quit. On Windows there is no
+    ``/proc``, so the same question goes to psutil (*psutil_module* is
+    injectable for tests).
     """
     exe = game_exe.casefold()
     if not exe:
         return False
+    if livesave_psutil.use_backend(_IS_WINDOWS, proc_root, psutil_module):
+        module = livesave_psutil.resolve(psutil_module)
+        return module is not None and livesave_psutil.game_running(
+            module, game_exe)
     for _pid_dir in _matching_processes(proc_root, exe):
         return True
     return False
 
 
-def detector_available(proc_root: str = DEFAULT_PROC_ROOT) -> bool:
-    """True when this host exposes a process table the detector can scan.
+def detector_available(
+    proc_root: str = DEFAULT_PROC_ROOT,
+    psutil_module: object = livesave_psutil.PSUTIL_UNSET,
+) -> bool:
+    """True when this host exposes a way to see the running game.
 
-    Linux has ``/proc``; Windows has no equivalent here, so there the detector
-    is off and the bridge is the only signal for the game coming and going.
+    Linux has ``/proc``; Windows has no process table, so there the detector is
+    available only when the optional psutil is installed. With no detector the
+    bridge is the only signal for the game coming and going (see
+    :class:`SaveFollowPolicy`). *psutil_module* is injectable for tests.
     """
-    return Path(proc_root).is_dir()
+    return livesave_psutil.available(_IS_WINDOWS, proc_root, psutil_module)
 
 
 def _is_safe_full_path(text: str) -> bool:
