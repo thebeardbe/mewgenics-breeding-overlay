@@ -1,9 +1,9 @@
 """WindowController: OS-level window behaviour extracted from PaletteWindow.
 
 ``mewgenics_overlay.ui.windowstate.WindowController`` owns framing, geometry
-restore/save, pinning/always-on-top, click-through, summon/hide and the Qt
-event hooks the palette calls from its thin ``showEvent`` / ``hideEvent`` /
-``changeEvent`` overrides.
+restore/save, unconditional always-on-top, click-through, summon/hide and the
+Qt event hooks the palette calls from its thin ``showEvent`` / ``hideEvent``
+/ ``changeEvent`` overrides.
 
 These tests drive it with an offscreen ``QWidget`` and a recording stand-in
 for the header bar, so no ``PaletteWindow`` (and therefore no save, watcher or
@@ -14,6 +14,7 @@ than raised.
 
 from __future__ import annotations
 
+import inspect
 import logging
 import os
 from types import SimpleNamespace
@@ -33,7 +34,6 @@ from mewgenics_overlay.ui import raisewindow  # noqa: E402
 from mewgenics_overlay.ui import windowstate as ws  # noqa: E402
 from mewgenics_overlay.ui.windowstate import (  # noqa: E402
     CLICK_THROUGH_DEFAULT,
-    PIN_DEFAULT,
     WindowController,
 )
 
@@ -62,11 +62,7 @@ class FakeChrome:
     """Records the state syncs WindowController pushes to the header bar."""
 
     def __init__(self):
-        self.pinned = []
         self.click_through = []
-
-    def set_pinned(self, value):
-        self.pinned.append(bool(value))
 
     def set_click_through(self, value):
         self.click_through.append(bool(value))
@@ -262,54 +258,52 @@ def test_set_click_through_accepts_truthy_and_falsy_values(make_ctl):
     assert h.ctl.click_through is False
 
 
-# ── 4. pinning / always-on-top ─────────────────────────────────────────────
-def test_pin_defaults_to_true_and_is_reported_through_the_property(make_ctl):
+# ── 4. always-on-top (unconditional, no toggle) ────────────────────────────
+def test_the_pin_toggle_api_is_gone(make_ctl):
+    # Regression: the overlay is always on top, so the controller no longer
+    # carries pin state or a toggle/helper for it.
     h = make_ctl()
 
-    assert h.ctl.pinned is PIN_DEFAULT
-    assert h.chrome.pinned == []
+    for name in ("pinned", "toggle_pin", "set_pinned"):
+        assert not hasattr(h.ctl, name)
+    assert not hasattr(h.chrome, "set_pinned")
+    # ``on_show`` applies topmost unconditionally, so the native helper takes
+    # no on/off argument (a bound method's signature drops ``self``).
+    assert list(inspect.signature(
+        h.ctl._set_topmost_win32).parameters) == []
 
 
-def test_toggle_pin_syncs_the_chrome_and_never_raises_off_windows(
+def test_configure_frame_keeps_generic_linux_topmost_unconditionally(
         make_ctl, monkeypatch):
+    # No pin state changes this: generic X11/Wayland always gets the Qt flag.
     monkeypatch.setattr(ws.sys, "platform", "linux")
     monkeypatch.delenv("HYPRLAND_INSTANCE_SIGNATURE", raising=False)
     h = make_ctl()
 
-    h.ctl.toggle_pin(False)
-    assert h.ctl.pinned is False
-    assert h.chrome.pinned == [False]
+    h.ctl.configure_frame()
 
-    h.ctl.toggle_pin(True)
-    assert h.ctl.pinned is True
-    assert h.chrome.pinned == [False, True]
+    assert h.window.windowFlags() & Qt.WindowType.WindowStaysOnTopHint
 
 
-def test_toggle_pin_on_hyprland_does_not_try_to_show_or_flag(make_ctl,
+def test_on_show_applies_topmost_without_an_on_off_argument(make_ctl,
                                                             monkeypatch):
-    # Hyprland stacking is handled by compositor rules; the controller must
-    # only update its own state and the button.
-    monkeypatch.setattr(ws.sys, "platform", "linux")
-    monkeypatch.setenv("HYPRLAND_INSTANCE_SIGNATURE", "1")
+    monkeypatch.setattr(ws.sys, "platform", "win32")
     h = make_ctl()
     calls = []
     monkeypatch.setattr(h.ctl, "_set_topmost_win32",
-                        lambda on: calls.append(on))
+                        lambda: calls.append(True))
 
-    h.ctl.toggle_pin(False)
+    h.ctl.on_show()
 
-    assert h.ctl.pinned is False
-    assert h.chrome.pinned == [False]
-    assert calls == []                 # no native call on Hyprland
-    assert h.window.isVisible() is False   # and no forced show
+    assert calls == [True]             # exactly once, no flag argument
 
 
-def test_toggle_pin_uses_the_native_path_on_windows_without_raising(
+def test_native_topmost_failure_is_logged_and_swallowed(
         make_ctl, monkeypatch, caplog):
     """The native SetWindowPos path is unavailable under Linux.
 
     It must degrade to a logged warning, never an exception that would take
-    the overlay down for a cosmetic pin.
+    the overlay down for a cosmetic always-on-top.
     """
     monkeypatch.setattr(ws.sys, "platform", "win32")
     monkeypatch.delenv("HYPRLAND_INSTANCE_SIGNATURE", raising=False)
@@ -317,11 +311,9 @@ def test_toggle_pin_uses_the_native_path_on_windows_without_raising(
     caplog.clear()
 
     with caplog.at_level(logging.WARNING, logger="mewgenics_overlay.ui"):
-        h.ctl.toggle_pin(True)         # must not raise
+        h.ctl.on_show()                # real native path; must not raise
 
-    assert h.ctl.pinned is True
-    assert h.chrome.pinned == [True]
-    assert any("native topmost toggle failed" in r.message
+    assert any("native always-on-top setup failed" in r.message
                for r in caplog.records)
 
 
@@ -363,11 +355,12 @@ def test_on_show_sets_topmost_natively_on_windows(make_ctl, monkeypatch):
     monkeypatch.setattr(ws.sys, "platform", "win32")
     h = make_ctl()
     seen = []
-    monkeypatch.setattr(h.ctl, "_set_topmost_win32", seen.append)
+    monkeypatch.setattr(h.ctl, "_set_topmost_win32",
+                        lambda: seen.append(True))
 
     h.ctl.on_show()
 
-    assert seen == [h.ctl.pinned]
+    assert seen == [True]
 
 
 def test_on_show_is_inert_off_windows(make_ctl, monkeypatch):

@@ -123,7 +123,7 @@ src/mewgenics_overlay/
     layout.py             build(window): constructs and wires the whole widget tree
     tablectl.py           TableCoordinator: focus, partner rows, sorting, best match
     assets.py             AssetLoader: resources.gpak worker thread + result drain
-    chrome.py             frameless top bar: drag grip, title/status, pin /
+    chrome.py             frameless top bar: drag grip, title/status,
                           click-through / hide buttons, zoom restyle
     searchbox.py          cat search box + result dropdown (focus/clear state)
     partnertable.py       partner table: sorting, rendering, tooltips, malady lines
@@ -309,7 +309,7 @@ Plus `scripts/gui_smoke.py` for the real UI offscreen.
 
 ## 8. Status / roadmap
 
-- Latest release: **v0.2.7** (in-game integration: the companion mod's focus bridge, a "Show in game" button, follow the save the game is actually playing, and the Hyprland Lua-dispatch raise fallback). **v0.3.0** is reserved for when the companion mod is complete; until then the in-game integration work ships as incremental **0.2.x** releases.
+- Latest release: **v0.2.8** (in-game integration: the companion mod's focus bridge, a "Show in game" button, follow the save the game is actually playing, and the Hyprland Lua-dispatch raise fallback). **v0.3.0** is reserved for when the companion mod is complete; until then the in-game integration work ships as incremental **0.2.x** releases.
 - Known gaps: per-NPC donation counters and Butch chapter progress are not
   recoverable from the save; Frank/retired is heuristic (abilities+stat
   gains); aggression is displayed for future fighter-room optimisation but

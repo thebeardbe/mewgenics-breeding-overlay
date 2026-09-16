@@ -2,8 +2,8 @@
 
 Extracted from ``PaletteWindow`` (god-file split, step 6): owns everything the
 window does as an OS object rather than as a content view - framing flags,
-geometry restore/save, always-on-top pinning (native on Windows), the
-click-through toggle, summon/hide, and the focus-loss auto click-through.
+geometry restore/save, always-on-top (native on Windows), the click-through
+toggle, summon/hide, and the focus-loss auto click-through.
 
 It knows nothing about breeding data: the live settings dict and the "persist
 settings" callable arrive from the host, and the host keeps its own Qt event
@@ -27,7 +27,6 @@ from mewgenics_overlay.ui.chrome import TopBar
 
 log = logging.getLogger("mewgenics_overlay.ui")
 
-PIN_DEFAULT = True               # 📌 button starts engaged
 CLICK_THROUGH_DEFAULT = False    # window starts interactive
 
 
@@ -35,7 +34,7 @@ class WindowController(QObject):
     """Window-level behaviour for the overlay palette.
 
     ``window`` is the palette widget and ``chrome`` its header bar (whose
-    pin/click-through buttons mirror this state). ``settings`` is the live
+    click-through button mirrors this state). ``settings`` is the live
     settings dict and ``save_settings`` persists it after geometry changes.
     """
 
@@ -52,15 +51,10 @@ class WindowController(QObject):
         self._chrome = chrome
         self._settings = settings
         self._save_settings = save_settings
-        self._pinned = PIN_DEFAULT
         self._click_through = CLICK_THROUGH_DEFAULT
         self._dialog_open = False
 
     # ── state (mutated through the methods below) ──────────────────────────
-    @property
-    def pinned(self) -> bool:
-        return self._pinned
-
     @property
     def click_through(self) -> bool:
         return self._click_through
@@ -77,10 +71,11 @@ class WindowController(QObject):
     def configure_frame(self) -> None:
         """Frameless palette; the Qt topmost flag only where it is safe.
 
-        Pinning is done natively on Windows (SetWindowPos) and via compositor
-        rules on Hyprland; only generic X11/Wayland keep the Qt flag, which
-        re-creates the native window when toggled (Windows hides it -> the
-        "can't find it anymore" bug).
+        The overlay is kept above the game natively on Windows (SetWindowPos,
+        re-applied in :meth:`on_show`) and via compositor rules on Hyprland;
+        only generic X11/Wayland keep the Qt flag, which re-creates the native
+        window when toggled (Windows hides it -> the "can't find it anymore"
+        bug).
         """
         flags = Qt.WindowType.FramelessWindowHint
         if sys.platform != "win32" and not os.environ.get(
@@ -118,38 +113,23 @@ class WindowController(QObject):
         self._settings["window_rect"] = [g.x(), g.y(), g.width(), g.height()]
         self._save_settings()
 
-    # ── pin / always-on-top ────────────────────────────────────────────────
-    def toggle_pin(self, checked: bool) -> None:
-        """Pin toggle. Never re-creates the native window on Windows."""
-        self._pinned = bool(checked)
-        self._chrome.set_pinned(self._pinned)
-        if sys.platform == "win32":
-            self._set_topmost_win32(self._pinned)
-        elif not os.environ.get("HYPRLAND_INSTANCE_SIGNATURE"):
-            # generic X11/Wayland: Qt flag fallback (may flash once)
-            self._window.setWindowFlag(
-                Qt.WindowType.WindowStaysOnTopHint, self._pinned)
-            self._window.show()
-        # Hyprland: stacking is controlled by compositor rules - visual only.
-
-    def _set_topmost_win32(self, on: bool) -> None:
-        """Set/unset always-on-top without touching window flags (no HWND
-        re-creation -> the overlay can't get 'lost')."""
+    # ── always-on-top ──────────────────────────────────────────────────────
+    def _set_topmost_win32(self) -> None:
+        """Keep the overlay above other windows without touching window flags
+        (no HWND re-creation -> the overlay can't get 'lost')."""
         try:
             import ctypes
             hwnd = int(self._window.winId())
-            HWND_TOPMOST, HWND_NOTOPMOST = -1, -2
+            HWND_TOPMOST = -1
             SWP_NOSIZE, SWP_NOMOVE, SWP_NOACTIVATE = 0x0001, 0x0002, 0x0010
             ctypes.windll.user32.SetWindowPos(
-                hwnd,
-                HWND_TOPMOST if on else HWND_NOTOPMOST,
-                0, 0, 0, 0,
+                hwnd, HWND_TOPMOST, 0, 0, 0, 0,
                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
             )
         except Exception:
-            # Never crash the overlay for a cosmetic pin; keep a log line so
-            # the failure is visible instead of silent.
-            log.warning("native topmost toggle failed (topmost=%s)", on)
+            # Never crash the overlay for a cosmetic always-on-top; keep a log
+            # line so the failure is visible instead of silent.
+            log.warning("native always-on-top setup failed")
 
     # ── click-through ──────────────────────────────────────────────────────
     def on_click_through_clicked(self, checked: bool) -> None:
@@ -188,7 +168,7 @@ class WindowController(QObject):
     # ── Qt event hooks (called from the host's event overrides) ────────────
     def on_show(self) -> None:
         if sys.platform == "win32":
-            self._set_topmost_win32(self._pinned)
+            self._set_topmost_win32()
 
     def on_hide(self) -> None:
         self.save_geometry()

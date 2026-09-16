@@ -2,7 +2,7 @@
 
 Layout (compact, always-summonable):
 
-    [header: title · save · status · pin · close]
+    [header: title · save · status · close]
     [cat search: QLineEdit + results popup list]
     [focused cat: name, chips (gender/room/gen/age), stats, lovers, open-in-MBM]
     [partners table: name | room | risk% | compat | exp/stat | >=7 | note]
@@ -35,7 +35,7 @@ from PySide6.QtWidgets import (
     QApplication,
     QLineEdit,
     QListWidget,
-    QSystemTrayIcon,
+    QMenu,
     QTableWidgetItem,
     QWidget,
 )
@@ -130,6 +130,11 @@ class PaletteWindow(QWidget):
         # Outbound in-game bridge (the "Show in game" select); attached by
         # app.main() once the BridgeController exists.
         self._bridge: Optional[BridgeController] = None
+        # Whether a tray icon exists to summon the overlay back. app.main()
+        # sets it once the tray is built (``--no-tray`` and a tray-less
+        # desktop leave it off); the close button reads it to decide between
+        # hiding and quitting.
+        self.tray_available = False
         # Remembers the keys we just asked the game for, so the mod's report
         # of that same selection is not applied as if the player clicked it.
         self._select_echo = SelectEchoFilter()
@@ -208,10 +213,6 @@ class PaletteWindow(QWidget):
 
     # ── window behaviour (delegated to WindowController) ───────────────────
     @property
-    def _pinned(self) -> bool:
-        return self._win.pinned
-
-    @property
     def _click_through(self) -> bool:
         return self._win.click_through
 
@@ -222,9 +223,6 @@ class PaletteWindow(QWidget):
     @_dialog_open.setter
     def _dialog_open(self, on: bool) -> None:
         self._win.dialog_open = on
-
-    def _toggle_pin(self, checked: bool) -> None:
-        self._win.toggle_pin(checked)
 
     def _on_ct_clicked(self, checked: bool) -> None:
         self._win.on_click_through_clicked(checked)
@@ -254,12 +252,48 @@ class PaletteWindow(QWidget):
         self._win.save_geometry()
 
     def _on_close_clicked(self) -> None:
-        """Hide when a tray icon can bring us back; otherwise quit."""
-        if QSystemTrayIcon.isSystemTrayAvailable():
+        """Hide the overlay when it can be summoned again; otherwise quit.
+
+        The header close button and the window menu's "Hide overlay" action
+        share this path. The overlay can only be summoned back through a tray
+        icon or a live global hotkey; with neither, hiding would leave the
+        process running invisibly with no way back, so quit instead. The
+        explicit Quit action (:meth:`_quit`) is separate and works either way.
+        """
+        if self.tray_available or self.hotkey_active:
+            log.info("close: hiding the overlay (tray=%s, global hotkey=%s)",
+                     self.tray_available, self.hotkey_active)
             self.hide()
         else:
-            self.shutdown()
-            QApplication.instance().quit()
+            log.info("close: quitting the app - no tray icon is available "
+                     "and no global hotkey is active, so the overlay could "
+                     "not be summoned back")
+            self._quit()
+
+    def contextMenuEvent(self, event):  # noqa: N802 (Qt API)
+        """Right-click anywhere on the overlay (header or body) for window
+        actions. Widgets with their own context menu - the partner and
+        donation tables, the search field - keep theirs; everything else
+        propagates here, so the menu is reachable from the header and the
+        empty body."""
+        self._window_menu().exec(event.globalPos())
+        event.accept()
+
+    def _window_menu(self) -> QMenu:
+        """The overlay's Hide/Quit menu (right-click; tray wording)."""
+        menu = QMenu(self)
+        hide_action = menu.addAction("Hide overlay")
+        hide_action.triggered.connect(self._on_close_clicked)
+        menu.addSeparator()
+        quit_action = menu.addAction("Quit")
+        quit_action.triggered.connect(self._quit)
+        return menu
+
+    def _quit(self) -> None:
+        """Leave the application for real, with or without a tray icon."""
+        app = QApplication.instance()
+        if app is not None:
+            app.quit()
 
     # ── zoom (delegated to ZoomController) ─────────────────────────────────
     def _zoom_inc(self) -> None:

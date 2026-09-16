@@ -1,13 +1,13 @@
 """TopBar - the overlay's header row (grip, title, status, action buttons).
 
 Extracted from ``PaletteWindow`` (god-file split, step 3): owns the frameless
-drag grip, the title and status labels, and the three icon buttons (pin,
-click-through, hide).
+drag grip, the title and status labels, and the two icon buttons
+(click-through, hide).
 
-It knows nothing about the window behind it: the initial checked states and
+It knows nothing about the window behind it: the initial checked state and
 the button actions arrive as plain values and callables, and the host drives
 the labels and the per-zoom styling through ``set_title`` / ``set_status`` /
-``set_pinned`` / ``set_click_through`` / ``restyle`` / ``scale_buttons``.
+``set_click_through`` / ``restyle`` / ``scale_buttons``.
 """
 
 from __future__ import annotations
@@ -27,7 +27,6 @@ from mewgenics_overlay.ui.hotkeybinding import DEFAULT_TEXT
 
 _HEAD_SPACING = 12              # gap between grip / title / status / buttons
 _HEAD_MARGINS = (4, 2, 6, 2)    # header padding inside the palette frame
-_PIN_TEXT = "📌"
 _CT_TEXT = "🧿"
 _CLOSE_TEXT = "✕"
 _BTN_BASE_W = 46                # icon-button width at 100% zoom
@@ -38,13 +37,14 @@ _BTN_MIN_H = 22                 # shortest the buttons may shrink to
 
 def _click_through_tip(hotkey: str) -> str:
     """Click-through tooltip, naming the combo that summons the overlay."""
-    return ("Click-through: let mouse clicks reach Mewgenics. "
-            f"{hotkey} / tray to interact.")
+    return ("Let mouse clicks pass through the overlay to the game below.\n"
+            f"Press {hotkey} or use the tray icon to use the overlay again.")
 
 
 def _close_tip(hotkey: str) -> str:
     """Hide-button tooltip, naming the combo that summons the overlay."""
-    return f"Hide ({hotkey} / tray) - quits when no tray is available"
+    return (f"Hide the overlay. Press {hotkey} or use the tray icon to bring "
+            "it back.")
 
 
 class _DragLabel(QLabel):
@@ -79,22 +79,18 @@ class _DragLabel(QLabel):
 class TopBar(QWidget):
     """The palette header row: drag grip, title, status and icon buttons.
 
-    ``pinned`` / ``click_through`` seed the checkable buttons; ``on_pin`` and
-    ``on_click_through`` receive the new checked state, ``on_hide`` takes no
-    arguments.
+    ``click_through`` seeds the checkable button; ``on_click_through``
+    receives the new checked state, ``on_hide`` takes no arguments.
     """
 
     def __init__(
         self,
-        pinned: bool = True,
         click_through: bool = False,
-        on_pin: Optional[Callable[[bool], None]] = None,
         on_click_through: Optional[Callable[[bool], None]] = None,
         on_hide: Optional[Callable[[], None]] = None,
         parent: Optional[QWidget] = None,
     ) -> None:
         super().__init__(parent)
-        self._on_pin = on_pin
         self._on_click_through = on_click_through
         self._on_hide = on_hide
 
@@ -121,12 +117,6 @@ class TopBar(QWidget):
         head.addWidget(self._title)
         head.addWidget(self._status, 1)
 
-        self._btn_pin = self._icon_button(
-            _PIN_TEXT,
-            "Keep above the game (native pin on Windows, "
-            "Hyprland rules on Linux)",
-            checkable=True, checked=bool(pinned))
-        self._btn_pin.clicked.connect(self._emit_pin)
         self._btn_ct = self._icon_button(
             _CT_TEXT,
             _click_through_tip(DEFAULT_TEXT),
@@ -135,7 +125,6 @@ class TopBar(QWidget):
         self._btn_close = self._icon_button(
             _CLOSE_TEXT, _close_tip(DEFAULT_TEXT))
         self._btn_close.clicked.connect(self._emit_hide)
-        head.addWidget(self._btn_pin)
         head.addWidget(self._btn_ct)
         head.addWidget(self._btn_close)
 
@@ -152,10 +141,6 @@ class TopBar(QWidget):
         return btn
 
     # ── callbacks to the host ─────────────────────────────────────────────
-    def _emit_pin(self, checked: bool) -> None:
-        if self._on_pin is not None:
-            self._on_pin(checked)
-
     def _emit_click_through(self, checked: bool) -> None:
         if self._on_click_through is not None:
             self._on_click_through(checked)
@@ -185,10 +170,6 @@ class TopBar(QWidget):
         self._btn_close.setToolTip(_close_tip(description))
 
     # ── button state ──────────────────────────────────────────────────────
-    def set_pinned(self, on: bool) -> None:
-        """Mirror the pin state without re-firing the click callback."""
-        self._set_checked(self._btn_pin, on)
-
     def set_click_through(self, on: bool) -> None:
         """Mirror the click-through state without re-firing the callback."""
         self._set_checked(self._btn_ct, on)
@@ -215,5 +196,5 @@ class TopBar(QWidget):
         """Buttons share one height and one glyph width at every zoom."""
         h = max(_BTN_MIN_H, int(_BTN_BASE_H * zoom))
         w = max(_BTN_MIN_W, int(_BTN_BASE_W * zoom))
-        for btn in (self._btn_pin, self._btn_ct, self._btn_close):
+        for btn in (self._btn_ct, self._btn_close):
             btn.setFixedSize(w, h)

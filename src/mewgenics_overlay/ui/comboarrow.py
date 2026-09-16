@@ -22,6 +22,18 @@ def arrow_file(color: str) -> Path:
     return path
 
 
+def qss_url(path: Path) -> str:
+    """A Qt stylesheet ``url(...)`` that survives a Windows path.
+
+    Native Windows paths use backslashes and often contain spaces (the user
+    profile directory), neither of which the QSS parser can express in the
+    bare ``url(C:\\Users\\a b\\x.png)`` form, so the rule parses and the combo
+    draws no arrow. POSIX separators plus a quoted value give a form Qt
+    accepts everywhere, with the same image as before on Linux.
+    """
+    return 'url("{}")'.format(path.as_posix())
+
+
 def _render_arrow(path: Path, color: str) -> None:
     from PySide6.QtGui import QColor, QPainter, QPen, QPixmap
 
@@ -42,7 +54,7 @@ def style_combo(combo, color: str) -> None:
     """Attach a visible arrow to *combo* using the given #rrggbb colour."""
     file = arrow_file(color)
     combo.setStyleSheet(
-        f"QComboBox::down-arrow {{ image: url({file}); width: 14px; "
+        f"QComboBox::down-arrow {{ image: {qss_url(file)}; width: 14px; "
         "height: 14px; }\n"
         "QComboBox::drop-down { border: none; width: 22px; }"
     )

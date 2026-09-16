@@ -88,11 +88,9 @@ def build(window) -> None:
 
 
 def _build_chrome(window, outer: QVBoxLayout) -> None:
-    """Header bar (drag grip, title, status, pin/click-through/hide)."""
+    """Header bar (drag grip, title, status, click-through/hide)."""
     window._chrome = TopBar(
-        pinned=_win_state.PIN_DEFAULT,
         click_through=_win_state.CLICK_THROUGH_DEFAULT,
-        on_pin=window._toggle_pin,
         on_click_through=window._on_ct_clicked,
         on_hide=window._on_close_clicked,
     )

@@ -1,10 +1,12 @@
 """TopBar chrome: the header row extracted from PaletteWindow (split step 3).
 
 ``mewgenics_overlay.ui.chrome`` owns the frameless drag grip, the title and
-status labels and the three icon buttons (pin / click-through / hide). The
-initial states and the actions arrive as plain values and callables, so the
-bar can be driven here without constructing a ``PaletteWindow`` (no save,
-watcher or timers) and without a real window (offscreen platform).
+status labels and the two icon buttons (click-through / hide). The overlay is
+always on top now, so the pin button and its state/helpers are gone; a
+regression test asserts they stay gone. The initial state and the actions
+arrive as plain values and callables, so the bar can be driven here without
+constructing a ``PaletteWindow`` (no save, watcher or timers) and without a
+real window (offscreen platform).
 
 The widget is self-contained; the only shared state it touches is the
 ``theme.ZOOM`` global read by ``restyle``, so an autouse fixture restores it.
@@ -22,7 +24,7 @@ import pytest  # noqa: E402
 pytest.importorskip("PySide6")
 
 from PySide6.QtCore import Qt  # noqa: E402
-from PySide6.QtWidgets import QApplication  # noqa: E402
+from PySide6.QtWidgets import QApplication, QPushButton  # noqa: E402
 
 from mewgenics_overlay.ui import theme as _theme  # noqa: E402
 from mewgenics_overlay.ui.chrome import (  # noqa: E402
@@ -73,44 +75,37 @@ def fixed_size(btn):
 
 
 # ── 1. constructor seeds button state ──────────────────────────────────────
-def test_constructor_seeds_defaults_pin_true_click_through_false(make_bar):
+def test_constructor_seeds_click_through_and_close_defaults(make_bar):
     bar = make_bar()
 
-    assert bar._btn_pin.isCheckable()
     assert bar._btn_ct.isCheckable()
-    assert bar._btn_pin.isChecked() is True
     assert bar._btn_ct.isChecked() is False
     assert bar._btn_close.isCheckable() is False
 
 
-@pytest.mark.parametrize("pinned,click_through", [
-    (False, True),
-    (True, False),
-    (False, False),
-    (True, True),
-])
-def test_constructor_seeds_buttons_from_arguments(make_bar, pinned,
-                                                  click_through):
-    bar = make_bar(pinned=pinned, click_through=click_through)
+def test_header_has_no_pin_button_any_more(make_bar):
+    # Regression: the overlay is unconditionally on top, so the header lost
+    # its pin button, its state and its callback wiring.
+    bar = make_bar()
 
-    assert bar._btn_pin.isChecked() is pinned
+    assert not hasattr(bar, "_btn_pin")
+    assert not hasattr(bar, "set_pinned")
+    assert not hasattr(bar, "_on_pin")
+    buttons = bar.findChildren(QPushButton)
+    assert len(buttons) == 2           # click-through + hide only
+    for btn in buttons:
+        assert "pin" not in btn.toolTip().lower()
+
+
+@pytest.mark.parametrize("click_through", [True, False])
+def test_constructor_seeds_click_through_from_the_argument(make_bar,
+                                                           click_through):
+    bar = make_bar(click_through=click_through)
+
     assert bar._btn_ct.isChecked() is click_through
 
 
 # ── 2. button clicks fire the matching callback exactly once ───────────────
-def test_pin_click_fires_on_pin_once_with_the_new_state(make_bar):
-    seen = []
-    bar = make_bar(pinned=False, on_pin=seen.append)
-
-    bar._btn_pin.click()
-
-    assert seen == [True]
-    assert bar._btn_pin.isChecked() is True
-
-    bar._btn_pin.click()               # toggling back notifies again
-    assert seen == [True, False]
-
-
 def test_click_through_click_fires_on_click_through_once_with_new_state(
         make_bar):
     seen = []
@@ -138,31 +133,15 @@ def test_close_click_fires_on_hide_once(make_bar):
 
 def test_clicks_without_host_callbacks_do_not_raise(make_bar):
     # The host may wire only some actions; unconnected buttons must be inert.
-    bar = make_bar(on_pin=None, on_click_through=None, on_hide=None)
+    bar = make_bar(on_click_through=None, on_hide=None)
 
-    bar._btn_pin.click()
     bar._btn_ct.click()
     bar._btn_close.click()
 
-    assert bar._btn_pin.isChecked() is False  # started pinned=True
     assert bar._btn_ct.isChecked() is True    # started click-through=False
 
 
 # ── 3. programmatic sync must not loop back into the host ──────────────────
-def test_set_pinned_syncs_button_without_firing_the_callback(make_bar):
-    seen = []
-    bar = make_bar(pinned=True, on_pin=seen.append)
-
-    bar.set_pinned(False)
-
-    assert bar._btn_pin.isChecked() is False
-    assert seen == []
-
-    # Signals must be unblocked afterwards: a real click still notifies.
-    bar._btn_pin.click()
-    assert seen == [True]
-
-
 def test_set_click_through_syncs_button_without_firing_the_callback(make_bar):
     seen = []
     bar = make_bar(click_through=False, on_click_through=seen.append)
@@ -178,13 +157,12 @@ def test_set_click_through_syncs_button_without_firing_the_callback(make_bar):
 
 def test_programmatic_sync_accepts_truthy_and_falsy_values(make_bar):
     seen = []
-    bar = make_bar(on_pin=seen.append, on_click_through=seen.append)
+    bar = make_bar(on_click_through=seen.append)
 
-    bar.set_pinned(0)
     bar.set_click_through(1)
+    bar.set_click_through(0)
 
-    assert bar._btn_pin.isChecked() is False
-    assert bar._btn_ct.isChecked() is True
+    assert bar._btn_ct.isChecked() is False
     assert seen == []
 
 
@@ -240,7 +218,7 @@ def test_scale_buttons_uses_the_old_header_maths(make_bar, zoom, exp_w,
 
     bar.scale_buttons(zoom)
 
-    for btn in (bar._btn_pin, bar._btn_ct, bar._btn_close):
+    for btn in (bar._btn_ct, bar._btn_close):
         assert fixed_size(btn) == (exp_w, exp_h, exp_w, exp_h), \
             f"zoom {zoom}: expected {exp_w}x{exp_h}"
 
@@ -250,7 +228,7 @@ def test_scale_buttons_never_goes_below_the_unchanged_minimums(make_bar):
 
     bar.scale_buttons(0.01)            # absurd zoom-out still clamps
 
-    for btn in (bar._btn_pin, bar._btn_ct, bar._btn_close):
+    for btn in (bar._btn_ct, bar._btn_close):
         assert fixed_size(btn) == (_BTN_MIN_W, _BTN_MIN_H,
                                    _BTN_MIN_W, _BTN_MIN_H)
 
@@ -319,17 +297,3 @@ def test_tooltips_follow_the_live_hotkey_description(make_bar):
     for btn in (bar._btn_ct, bar._btn_close):
         assert "Ctrl+Alt+K" in btn.toolTip()
         assert "Ctrl+Shift+B" not in btn.toolTip()
-
-
-def test_pin_tooltip_has_no_hotkey_copy(make_bar):
-    # The pin button never names the shortcut; a hotkey refresh must leave it
-    # untouched.
-    bar = make_bar()
-    before = bar._btn_pin.toolTip()
-
-    setter = (getattr(bar, "set_hotkey", None)
-              or getattr(bar, "set_hotkey_tooltip", None))
-    if setter is not None:
-        setter("Ctrl+Alt+K")
-
-    assert bar._btn_pin.toolTip() == before

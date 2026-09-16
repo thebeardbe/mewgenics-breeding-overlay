@@ -97,9 +97,6 @@ class FakePalette(QWidget):
         self.in_game_available = True
 
     # callbacks connected by layout.build / the widgets it creates
-    def _toggle_pin(self, checked):
-        self.calls.append(("pin", checked))
-
     def _on_ct_clicked(self, checked):
         self.calls.append(("click_through", checked))
 
@@ -515,13 +512,15 @@ def test_swap_toggle_reaches_the_later_created_coordinator(make_host):
 
 
 def test_chrome_buttons_reach_the_host_callbacks(make_host):
+    # The header carries click-through and hide only; the pin button and its
+    # callback were removed with the unconditional always-on-top change.
     host = make_host()
 
-    host._chrome._btn_pin.click()
+    assert not hasattr(host._chrome, "_btn_pin")
     host._chrome._btn_ct.click()
     host._chrome._btn_close.click()
 
-    assert any(c[0] == "pin" for c in host.calls)
+    assert not any(c[0] == "pin" for c in host.calls)
     assert any(c[0] == "click_through" for c in host.calls)
     assert ("close",) in host.calls
 

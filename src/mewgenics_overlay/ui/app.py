@@ -278,6 +278,10 @@ def main(argv=None) -> int:
     tray = None
     if not args.no_tray:
         tray = _build_tray(app, palette)
+    # The close button hides only when the overlay can be summoned back: a
+    # tray icon (built above, absent for --no-tray or a tray-less desktop) or
+    # a live global hotkey (installed just below).
+    palette.tray_available = tray is not None
 
     # The palette owns the hotkey (config -> registration + focused-window
     # shortcut); the tray tooltip follows every accepted change.

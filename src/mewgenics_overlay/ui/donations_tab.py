@@ -238,10 +238,17 @@ class DonationsTab(QWidget):
         label = ("Unpin - allow donation" if getattr(cat, "is_pinned", False)
                  else "Pin for breeding")
         action = menu.addAction(label)
+        # Same availability gate as the card button and the partner rows: the
+        # outbound select appears only while a game is connected.
+        show_action = None
+        if bool(getattr(palette, "in_game_available", False)):
+            show_action = menu.addAction("Show in game")
         chosen = menu.exec(self._table.viewport().mapToGlobal(pos))
         if chosen is action:
             palette.set_pinned(cat, not getattr(cat, "is_pinned", False))
             self.refresh(palette._session)
+        elif show_action is not None and chosen is show_action:
+            palette.show_in_game(cat.db_key)
 
     def _render_slot(self, slot) -> None:
         self._table.setSortingEnabled(False)
