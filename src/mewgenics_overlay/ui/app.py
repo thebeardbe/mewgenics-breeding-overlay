@@ -328,8 +328,27 @@ def main(argv=None) -> int:
 
     scanner = LiveSaveScanner(palette)
 
+    # An explicit `--save` choice is opened from the first scan result, not
+    # inline: deciding whether the game is already running walks the process
+    # table (on Windows psutil enumerates every process), and nothing that
+    # touches the process table may run on the UI thread. Where there is no
+    # such check to make - following is off, or the host has no process table
+    # - the choice opens straight away instead of waiting for a scan.
+    pending_manual_save = args.save if (args.save and follow.enabled
+                                        and detector_available) else None
+
     def _on_scan_result(found, present: bool) -> None:
         """Adopt one live-save scan, back on the UI thread."""
+        nonlocal pending_manual_save
+        if pending_manual_save is not None:
+            path, pending_manual_save = pending_manual_save, None
+            if found or present:
+                # The game is up: mark it online *before* applying the choice,
+                # so the choice pins and this same result cannot follow over
+                # it. A queued "game connected" report does the same, so
+                # whichever signal lands first has already marked it online.
+                follow.note_game_online()
+            palette.open_save_manual(path)
         if not follow.enabled:
             return
         if found:
@@ -435,14 +454,17 @@ def main(argv=None) -> int:
             show_cat.activated.connect(_show_focused_cat_in_game)
 
     if args.save:
-        # Apply the explicit startup choice before the queued "game
-        # connected" notification arrives, so an already-running game is
-        # marked online first and the choice pins instead of being overridden
-        # by the live save. With no game running the detector sees nothing and
-        # the choice stays unpinned.
-        if detector_available and livesave.game_process_running():
-            follow.note_game_online()
-        palette.open_save_manual(args.save)
+        # The explicit startup choice must pin before the follow policy can act
+        # on a running game. `_on_scan_result` marks an already-running game
+        # online first, then opens the choice (so it pins instead of being
+        # overridden by the live save); with no detector or no following there
+        # is nothing to pin against, so the choice opens right here.
+        if pending_manual_save is None:
+            palette.open_save_manual(args.save)
+        else:
+            # The game-presence check runs on the scanner worker; the result
+            # handler opens the choice once it is back.
+            _detect_live_save()
     if not args.hidden:
         palette.show()
 

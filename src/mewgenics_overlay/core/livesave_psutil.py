@@ -6,6 +6,16 @@ the detector, built on psutil's process API. psutil is an optional dependency:
 without it :func:`resolve` reports the detector unavailable (and logs once)
 instead of raising.
 
+A process the scan cannot read does not fail silently: a matched game process
+whose open files cannot be read is logged at WARNING once per process, so an
+elevated game (which denies its handles to a non-elevated overlay) shows up at
+the default log level instead of only at debug. A process whose *name* cannot
+be read is a different matter: psutil's Windows ``name()`` is the basename of
+``exe()``, so that failure never identifies the game (a matched process has
+already been named) and can only be an unrelated protected system process or
+one that exited mid-scan; it stays at debug so it cannot consume the one
+warning that names the game.
+
 ``open_files()`` enumerates every handle the game process holds, which is far
 more expensive than reading one ``/proc`` entry, so callers must run a scan on
 the background worker (``ui/app.py`` ``LiveSaveScanner``), never the UI thread.
@@ -36,6 +46,22 @@ SelectSave = Callable[[Iterable[str], str], Optional[str]]
 _PSUTIL_MODULE: Optional[object] = None
 _PSUTIL_TRIED = False
 _psutil_warned = False
+_blind_warned = False
+
+
+def _warn_blind(message: str, *args: object) -> None:
+    """Warn once that a matched game process could not be read.
+
+    The scan reruns every few seconds, so a persistent failure (an elevated
+    game whose handles psutil cannot open) must not flood the log. At the
+    default INFO level the first occurrence still has to be visible, or the
+    detector stays silently blind to the game it exists to find.
+    """
+    global _blind_warned
+    if _blind_warned:
+        return
+    _blind_warned = True
+    log.warning(message, *args)
 
 
 def import_psutil() -> Optional[object]:
@@ -116,6 +142,12 @@ def _game_processes(psutil_module: object, game_exe: str) -> Iterable[object]:
             try:
                 name = proc.name()
             except (error, OSError) as exc:
+                # A name that cannot be read means an unrelated protected
+                # process (psutil's name() is the basename of exe(), so the
+                # failure is the same one) or one that exited mid-scan: either
+                # way it is not the game we could have matched, so the skip
+                # stays at debug. Only the matched game's failures are warning
+                # material (see find_live_save).
                 log.debug("livesave: cannot name psutil pid %s: %s",
                           getattr(proc, "pid", "?"), exc)
                 continue
@@ -131,14 +163,22 @@ def find_live_save(psutil_module: object, game_exe: str, suffix: str,
 
     ``open_files()`` enumerates every handle the process owns, so this belongs
     on the background scan thread. Never raises: a vanished process or a denied
-    handle is debug-logged and skipped. *select* is the shared candidate rule
-    (suffix match, temp exclusion, canonicalisation) from the ``/proc`` path.
+    handle is skipped. The process *is* the game at this point, so a read
+    failure is warned about once instead of only being debug-logged: a game
+    running elevated reads as no game at all, which is exactly the case that
+    must not be invisible. *select* is the shared candidate rule (suffix match,
+    temp exclusion, canonicalisation) from the ``/proc`` path.
     """
     error = getattr(psutil_module, "Error", OSError)
     for proc in _game_processes(psutil_module, game_exe.casefold()):
         try:
             open_files = proc.open_files()
         except (error, OSError) as exc:
+            _warn_blind(
+                "livesave: cannot read the open files of the game process "
+                "(psutil pid %s), so the live-save detector is blind to it "
+                "(an elevated game denies its handles): %s",
+                getattr(proc, "pid", "?"), exc)
             log.debug("livesave: cannot read open files of psutil pid %s: %s",
                       getattr(proc, "pid", "?"), exc)
             continue
