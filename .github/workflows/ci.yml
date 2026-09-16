@@ -91,4 +91,11 @@ jobs:
         # declares testpaths = ["tests"].
         env:
           QT_QPA_PLATFORM: offscreen
-        run: python -m pytest -q
+        run: |
+          # The save-dependent modules skip when the variable is unset or
+          # points at a missing file, which would still look green. Fail
+          # loudly instead, so the sample fetched above is proven to be in
+          # effect rather than assumed.
+          test -s "$MEWGENICS_SAMPLE_SAV" \
+            || { echo "::error::sample save missing at '$MEWGENICS_SAMPLE_SAV'"; exit 1; }
+          python -m pytest -q
