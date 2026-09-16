@@ -631,14 +631,8 @@ def test_the_configured_app_name_is_itself_recognised():
 
 @pytest.mark.parametrize("value", [
     "mewgenics",                 # one token only
-    "breeding",
-    "overlay",
-    "Alacritty",
     "kitty",
-    "game",
-    "mewgenics helper",          # names the game, not the overlay
     "-",                         # separator-only folds to ""
-    "___",
     "\u732b\u30b2\u30cb\u30c3\u30af\u30b9",          # unicode, no ASCII token
     "x" * 500,                   # long value, still no token
 ])

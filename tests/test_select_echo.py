@@ -495,34 +495,24 @@ def test_an_expired_echo_is_also_honoured_on_the_raise_path(make_host,
 
 
 # ── two commands in quick succession ───────────────────────────────────────
-def test_two_quick_commands_both_stay_remembered(make_host, cat_session,
-                                                 clock):
+def test_two_quick_commands_are_both_suppressed_within_the_window(
+        make_host, cat_session, clock):
     ctl = _FakeBridge(delivered=1)
     host = make_host(cat_session, ctl)
     host.show_in_game(1)
     clock.advance(0.2)
     host.show_in_game(2)
     # Key 1 is 0.7 s old and key 2 is 0.5 s old: both are still inside the
-    # window, so the first command's echo must not be mistaken for a click.
+    # window, so neither command's echo may be mistaken for a click.
     clock.advance(0.5)
 
     host.select_reported_cat(bridge.FocusRequest(key=1))
 
     assert host._tablectl.keys == []          # the late echo is dropped
 
-
-def test_the_second_quick_command_is_still_suppressed(make_host, cat_session,
-                                                      clock):
-    ctl = _FakeBridge(delivered=1)
-    host = make_host(cat_session, ctl)
-    host.show_in_game(1)
-    clock.advance(0.2)
-    host.show_in_game(2)
-    clock.advance(0.15)                       # both still inside the window
-
     host.select_reported_cat(bridge.FocusRequest(key=2))
 
-    assert host._tablectl.keys == []
+    assert host._tablectl.keys == []          # and so is the second echo
 
 
 def test_a_real_click_between_two_quick_commands_is_honoured(make_host,

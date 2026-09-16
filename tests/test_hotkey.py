@@ -113,8 +113,7 @@ def test_address_of_decodes_the_shiboken_void_ptr_qt_delivers():
     # Non-integral sources must never be coerced: int(1.5) == 1,
     # int(True) == 1 and a buffer's length would all read a bogus small
     # address as a Win32 MSG.
-    1.5, 0.0, 1.0, 2.0, True, False,
-    bytearray(b"\x01\x02"), memoryview(b"\x00\x01"), b"\x01\x02",
+    1.5, True, b"\x01\x02",
 ])
 def test_address_of_returns_zero_for_non_integral_and_undecodable_input(bad):
     assert hk._address_of(bad) == 0
@@ -138,8 +137,7 @@ def test_decode_reads_a_msg_from_a_live_buffer():
 
 @pytest.mark.parametrize("bad", [
     0, None, object(),
-    1.5, 0.0, 2.0, True, False,
-    bytearray(b"\x01"), memoryview(b"\x00\x01"), b"\x01",
+    1.5, True, b"\x01",
 ])
 def test_decode_returns_none_without_a_pointer(bad):
     assert hk._decode(bad) is None

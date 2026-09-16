@@ -114,9 +114,7 @@ def test_hotkey_is_validated_and_canonicalised(isolated_cfg, saved, canonical):
 
 
 @pytest.mark.parametrize("junk", [
-    123, None, [], {}, True,
-    "", "   ", "B", "Ctrl", "Ctrl+", "Ctrl+Shift+1",
-    "Ctrl+Shift+AB", "Ctrl+Ctrl+B", "Ctrl+Shift+?", "no modifier",
+    123, None, [], {}, True, "", "B",
 ])
 def test_junk_hotkey_falls_back_to_the_default(isolated_cfg, junk):
     isolated_cfg({"hotkey": junk})

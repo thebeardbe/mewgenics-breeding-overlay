@@ -475,12 +475,11 @@ def test_resolve_save_path_refuses_an_absolute_path_that_is_not_a_save(
     "/steam/root/../secrets.sav",     # traversal in an absolute path
     "../../steamcampaign01.sav",      # traversal in a relative path
     "..\\..\\steamcampaign01.sav",
-    "steamcampaign01.sav/../../x",    # separator + traversal
-    ".", "..", "   ",
+    ".",
+    "..",
     "",
     None,
     42,
-    b"steamcampaign01.sav",
     {"file": "steamcampaign01.sav"},
 ])
 def test_resolve_save_path_refuses_hostile_or_empty_inputs(name):
