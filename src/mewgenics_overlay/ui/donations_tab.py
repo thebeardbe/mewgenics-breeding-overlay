@@ -33,6 +33,11 @@ log = logging.getLogger("mewgenics_overlay.ui")
 # from the clicked item, never from the row number (sorting shifts it).
 _CAT_KEY_ROLE = Qt.ItemDataRole.UserRole + 1
 
+# Item data role carrying the raw value a cell sorts on. Display text can be
+# decorated (the pinned-cat 📌 prefix) and must not leak into the order, so a
+# sortable cell stores its underlying value here as well as its display text.
+_SORT_ROLE = Qt.ItemDataRole.UserRole + 2
+
 _COLS = ["Cat", "Status", "Age", "Stats", "Donate?", "Why donate"]
 _COL_TIPS = [
     "The cat's name. 📌 = pinned (kept for breeding). Hover a row for the full story.",
@@ -50,14 +55,38 @@ _COL_TIPS = [
 ]
 
 
-class _NumItem(QTableWidgetItem):
-    """QTableWidgetItem that sorts numerically (Age/Stats columns)."""
+def _num_sort_key(value):
+    """Numeric sort value for an Age/Stats cell.
+
+    Age is normally an int; an unknown age ('?') has no number, so it sorts
+    after known ages ascending - the order the old text compare produced.
+    """
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float("inf")
+
+
+class _SortItem(QTableWidgetItem):
+    """QTableWidgetItem that sorts by a stored raw value, not display text.
+
+    ``setData(_SORT_ROLE, value)`` supplies the value to compare; the display
+    text is then free to carry decoration (e.g. the pinned-cat 📌) without
+    changing the order. An item with no stored value falls back to the base
+    class's display-text compare, so partially-built rows keep working.
+    """
 
     def __lt__(self, other) -> bool:
-        try:
-            return float(self.text()) < float(other.text())
-        except ValueError:
+        mine = self.data(_SORT_ROLE)
+        theirs = other.data(_SORT_ROLE)
+        if mine is None or theirs is None:
             return super().__lt__(other)
+        try:
+            return mine < theirs
+        except TypeError:
+            # Mixed value types in one column: keep a total order instead of
+            # letting a Qt compare surprise the sort.
+            return str(mine) < str(theirs)
 
 
 class DonationsTab(QWidget):
@@ -305,11 +334,22 @@ class DonationsTab(QWidget):
                     give = generic
             why = "\n".join(self._group_reasons(give, keep))
             _pin = "📌 " if getattr(cat, "is_pinned", False) else ""
-            cells = [f"{_pin}{cat.name}", cat_status(cat), str(getattr(cat, "age", "?")),
-                     str(base), rating, why]
-            for c_i, text in enumerate(cells):
-                it = (_NumItem(text) if c_i in (2, 3)
-                      else QTableWidgetItem(text))
+            status = cat_status(cat)
+            age = getattr(cat, "age", "?")
+            # (display text, raw sort value) per column. The Cat display keeps
+            # its pin marker; the sort value is the bare name, so a pinned cat
+            # lands in its alphabetical place instead of after every marker.
+            cells = [
+                (f"{_pin}{cat.name}", cat.name.lower()),
+                (status, status),
+                (str(age), _num_sort_key(age)),
+                (str(base), _num_sort_key(base)),
+                (rating, rating),
+                (why, why),
+            ]
+            for c_i, (text, sort_value) in enumerate(cells):
+                it = _SortItem(text)
+                it.setData(_SORT_ROLE, sort_value)
                 it.setData(_CAT_KEY_ROLE, cat.db_key)
                 it.setToolTip(self._row_tip(cat, slot, base, inj, rating, advice))
                 if c_i == 4:

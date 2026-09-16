@@ -8,6 +8,12 @@ row now stores its cat's ``db_key`` (``_CAT_KEY_ROLE``) and
 ``DonationsTab._cat_for_item`` resolves the cat from that key, falling back to
 the row number only for rows built outside ``_render_slot``.
 
+Sorting also moved off the display text: a pinned cat's Cat cell reads
+``📌 Name`` but carries the bare lower-cased name as its raw sort value
+(``_SORT_ROLE``), so the marker can no longer push it out of alphabetical
+order. The action tests below therefore locate a cat by finding the row that
+actually holds it, never by assuming a row number the marker might change.
+
 These tests build a real offscreen ``DonationsTab``, render real rows through
 ``_on_npc_selected`` -> ``_render_slot``, sort the real table, and drive the
 row menu with a recording ``QMenu`` replacement (the real ``exec`` blocks), so
@@ -173,10 +179,33 @@ def _action_on_sorted_row(qapp, fake_menu, candidates, order, view_row, action,
     qapp.processEvents()
     item = tab._table.item(view_row, 0)
     assert item is not None, f"no item at view row {view_row}"
-    shown = item.text().replace("\U0001f4cc ", "")   # drop the pin marker
+    shown = _strip_pin(item.text())                  # drop the pin marker
     fake_menu.choice = 0 if action == "pin" else 1
     tab._show_row_menu(tab._table.visualItemRect(item).center())
     return shown, palette, slot, item
+
+
+def _strip_pin(text):
+    """Display text with the pinned-cat marker removed."""
+    return text.replace("\U0001f4cc ", "")
+
+
+def _view_texts(tab):
+    """Raw Cat-cell display text of every row, top to bottom as shown."""
+    return [tab._table.item(r, 0).text()
+            for r in range(tab._table.rowCount())]
+
+
+def _row_holding(tab, name):
+    """The view row currently showing ``name`` (marker-insensitive).
+
+    Sorting defines where a row ends up, so a test that cares about a cat must
+    ask the real view which row holds it instead of assuming an index.
+    """
+    for row, text in enumerate(_view_texts(tab)):
+        if _strip_pin(text) == name:
+            return row
+    raise AssertionError(f"{name!r} is not in the view: {_view_texts(tab)}")
 
 
 # ── core regression: the action follows the row the user clicked ───────────
@@ -348,15 +377,106 @@ def test_show_in_game_omitted_when_no_game_is_connected(qapp, fake_menu):
     assert [a.text for a in fake_menu.menus[0].actions] == ["Pin for breeding"]
 
 
+# ── pinned cats sort by name, not by the marker (the reported bug) ─────────
+def test_pinned_cat_keeps_its_alphabetical_place_ascending(qapp):
+    """A 📌 marker must not move a cat in the ascending order."""
+    cats = _three_cats()
+    next(c for c in cats if c.name == "Bravo").is_pinned = True
+    tab = _new_tab(qapp, _FakePalette())
+    _render(tab, make_slot(cats))
+
+    tab._table.sortItems(0, Qt.SortOrder.AscendingOrder)
+    qapp.processEvents()
+
+    texts = _view_texts(tab)
+    assert [_strip_pin(t) for t in texts] == ["Alpha", "Bravo", "Charlie"]
+    # The pinned cat still shows its marker in its alphabetical place.
+    assert texts[1].startswith("\U0001f4cc ")
+    assert not texts[0].startswith("\U0001f4cc ")
+    assert not texts[2].startswith("\U0001f4cc ")
+
+
+def test_pinned_cat_keeps_its_alphabetical_place_descending(qapp):
+    """Descending order reverses the names, still ignoring the marker."""
+    cats = _three_cats()
+    next(c for c in cats if c.name == "Bravo").is_pinned = True
+    tab = _new_tab(qapp, _FakePalette())
+    _render(tab, make_slot(cats))
+
+    tab._table.sortItems(0, Qt.SortOrder.DescendingOrder)
+    qapp.processEvents()
+
+    texts = _view_texts(tab)
+    assert [_strip_pin(t) for t in texts] == ["Charlie", "Bravo", "Alpha"]
+    assert texts[1].startswith("\U0001f4cc ")
+
+
+def test_age_column_sorts_by_its_raw_value_not_the_display_text(qapp):
+    """Age compares numerically; an unknown age ('?') sorts last ascending.
+
+    Text order would put "10" before "2"; the raw value keeps 2 first. This
+    pins the other-column half of the fix.
+    """
+    cats = [make_cat("Alpha", 10, age=10),
+            make_cat("Bravo", 20, age="?"),
+            make_cat("Charlie", 30, age=2)]
+    tab = _new_tab(qapp, _FakePalette())
+    _render(tab, make_slot(cats))
+
+    tab._table.sortItems(2, Qt.SortOrder.AscendingOrder)
+    qapp.processEvents()
+
+    assert [_strip_pin(t) for t in _view_texts(tab)] == [
+        "Charlie", "Alpha", "Bravo"]
+
+
+# ── row actions follow the pinned cat wherever sorting put it ─────────────
 def test_show_in_game_on_sorted_row_still_sends_after_pin_state_check(
         qapp, fake_menu):
-    """A pinned cat's label flips, but "Show in game" keeps its index/key."""
+    """A pinned cat's label flips, but "Show in game" keeps its index/key.
+
+    The row is located by name rather than assumed: the assertion is about
+    which cat the row action resolves, not about how a marker collates.
+    """
     cats = _three_cats()
-    cats[1].is_pinned = True          # Alpha, which sorts to view row 0
-    shown, palette, slot, item = _action_on_sorted_row(
-        qapp, fake_menu, cats, Qt.SortOrder.AscendingOrder, 0, "show")
-    assert shown == "Alpha"
+    pinned = next(c for c in cats if c.name == "Alpha")
+    pinned.is_pinned = True
+    palette = _FakePalette()
+    tab = _new_tab(qapp, palette)
+    slot = make_slot(cats)
+    _render(tab, slot)
+    tab._table.sortItems(0, Qt.SortOrder.AscendingOrder)
+    qapp.processEvents()
+
+    row = _row_holding(tab, "Alpha")
+    item = tab._table.item(row, 0)
+    assert item.text().startswith("\U0001f4cc ")   # display keeps the marker
+    fake_menu.choice = 1
+    tab._show_row_menu(tab._table.visualItemRect(item).center())
+
     assert [a.text for a in fake_menu.menus[0].actions] == [
         "Unpin - allow donation", "Show in game"]
-    expected = next(c for c in slot.candidates if c.name == "Alpha")
-    assert palette.shown == [expected.db_key]
+    assert palette.shown == [pinned.db_key]
+
+
+def test_pin_action_targets_the_pinned_cat_in_its_sorted_row(qapp, fake_menu):
+    """Unpinning targets the cat whose marked cell was clicked."""
+    cats = _three_cats()
+    pinned = next(c for c in cats if c.name == "Bravo")
+    pinned.is_pinned = True
+    palette = _FakePalette()
+    tab = _new_tab(qapp, palette)
+    slot = make_slot(cats)
+    _render(tab, slot)
+    tab._table.sortItems(0, Qt.SortOrder.DescendingOrder)
+    qapp.processEvents()
+
+    row = _row_holding(tab, "Bravo")
+    item = tab._table.item(row, 0)
+    fake_menu.choice = 0
+    tab._show_row_menu(tab._table.visualItemRect(item).center())
+
+    assert [a.text for a in fake_menu.menus[0].actions] == [
+        "Unpin - allow donation", "Show in game"]
+    assert palette.pins == [(pinned, False)]
+    assert palette.shown == []

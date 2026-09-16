@@ -8,8 +8,11 @@ thin ``showEvent`` / ``hideEvent`` / ``changeEvent`` overrides.
 These tests drive it with an offscreen ``QWidget`` and a recording stand-in
 for the header bar, so no ``PaletteWindow`` (and therefore no save, watcher or
 timers) is ever constructed. The native Windows topmost path cannot run on
-Linux; the test for it asserts the failure is swallowed *and logged* rather
-than raised.
+Linux, so the platform is stubbed as the source guards it
+(``windowstate.sys.platform``); the tests then assert the raise path activates
+the window first, asserts topmost a bounded number of times and stops, and
+makes no topmost call at all when keep-on-top is off. One test proves the raw
+native call is swallowed *and logged* rather than raised when it really runs.
 """
 
 from __future__ import annotations
@@ -26,7 +29,7 @@ import pytest  # noqa: E402
 
 pytest.importorskip("PySide6")
 
-from PySide6.QtCore import QEvent, QRect, Qt  # noqa: E402
+from PySide6.QtCore import QEvent, QRect, Qt, QTimer  # noqa: E402
 from PySide6.QtGui import QGuiApplication  # noqa: E402
 from PySide6.QtWidgets import QApplication, QWidget  # noqa: E402
 
@@ -436,6 +439,140 @@ def test_toggle_activate_cycles_hidden_passive_active(make_ctl, qapp):
     h.ctl.toggle_activate()            # active -> hide
     qapp.processEvents()
     assert h.window.isVisible() is False
+
+
+# ── 5b. Windows raise: bounded topmost settle after activation ─────────────
+def test_engage_asserts_topmost_after_activation_not_before(make_ctl,
+                                                            monkeypatch):
+    """No topmost assert happens until the window is foreground.
+
+    ``show()`` runs the host's ``showEvent`` synchronously, which calls
+    ``on_show``; that is where the pre-fix code re-asserted topmost while the
+    game still held the foreground. The order log proves the native assert now
+    lands after ``activateWindow`` / ``setFocus`` and never during ``show``.
+    """
+    monkeypatch.setattr(ws.sys, "platform", "win32")
+    h = make_ctl(settings={"keep_on_top": True})
+    events = []
+    real_show = h.window.show
+
+    def show_with_host_showevent():
+        events.append("show")
+        h.ctl.on_show()                  # the host's showEvent -> on_show
+        real_show()
+
+    monkeypatch.setattr(h.window, "show", show_with_host_showevent)
+    monkeypatch.setattr(h.window, "raise_", lambda: events.append("raise"))
+    monkeypatch.setattr(h.window, "activateWindow",
+                        lambda: events.append("activate"))
+    monkeypatch.setattr(h.window, "setFocus",
+                        lambda: events.append("focus"))
+    monkeypatch.setattr(h.ctl, "_set_topmost_win32",
+                        lambda on: events.append(f"topmost:{on}"))
+
+    h.ctl.engage()
+    h.ctl._stop_topmost_timer()          # do not leave the burst running
+
+    assert events == ["show", "raise", "activate", "focus", "topmost:True"]
+
+
+def test_engage_topmost_reasserts_are_bounded_and_stop(make_ctl, monkeypatch):
+    """One assert after activation, then a fixed small burst, then done."""
+    monkeypatch.setattr(ws.sys, "platform", "win32")
+    h = make_ctl(settings={"keep_on_top": True})
+    calls = []
+    monkeypatch.setattr(h.ctl, "_set_topmost_win32", calls.append)
+
+    h.ctl.engage()
+
+    timer = h.ctl._topmost_timer
+    assert calls == [True]               # the one assert after activation
+    assert timer is not None and timer.isActive()
+    assert timer.interval() == ws.WIN32_TOPMOST_REASSERT_INTERVAL_MS
+    assert h.ctl._topmost_reasserts_left == ws.WIN32_TOPMOST_REASSERTS
+
+    # Drive the timeout slot exactly as the running timer would.
+    for _ in range(ws.WIN32_TOPMOST_REASSERTS):
+        h.ctl._reassert_win32_topmost()
+
+    assert calls == [True] * (1 + ws.WIN32_TOPMOST_REASSERTS)   # bounded
+    assert timer.isActive() is False           # and no loop is left running
+    assert h.ctl._topmost_reasserts_left == 0
+    assert not [t for t in h.ctl.findChildren(QTimer) if t.isActive()]
+
+
+def test_engage_makes_no_topmost_call_when_keep_on_top_is_off(make_ctl,
+                                                              monkeypatch):
+    """With keep-on-top off the raise is just raise + activate."""
+    monkeypatch.setattr(ws.sys, "platform", "win32")
+    h = make_ctl(settings={"keep_on_top": False})
+    calls = []
+    monkeypatch.setattr(h.ctl, "_set_topmost_win32", calls.append)
+    activated = []
+    monkeypatch.setattr(h.window, "raise_", lambda: activated.append("raise"))
+    monkeypatch.setattr(h.window, "activateWindow",
+                        lambda: activated.append("activate"))
+
+    h.ctl.engage()
+
+    assert calls == []                    # no topmost call at all
+    assert h.ctl._topmost_timer is None   # no burst was even created
+    assert activated == ["raise", "activate"]
+
+
+def test_turning_keep_on_top_off_stops_the_pending_burst(make_ctl,
+                                                         monkeypatch):
+    """The tray choice must not be overridden by a beat-still-pending assert."""
+    monkeypatch.setattr(ws.sys, "platform", "win32")
+    h = make_ctl(settings={"keep_on_top": True})
+    calls = []
+    monkeypatch.setattr(h.ctl, "_set_topmost_win32", calls.append)
+    h.ctl.engage()
+    assert h.ctl._topmost_timer.isActive()
+
+    h.ctl.set_keep_on_top(False)
+
+    assert h.ctl.keep_on_top is False
+    assert h.ctl._topmost_timer.isActive() is False
+    assert calls == [True, False]         # assert, then clear; nothing after
+
+
+def test_the_reassert_burst_stops_when_the_window_is_hidden(make_ctl,
+                                                            monkeypatch):
+    monkeypatch.setattr(ws.sys, "platform", "win32")
+    h = make_ctl(settings={"keep_on_top": True})
+    calls = []
+    monkeypatch.setattr(h.ctl, "_set_topmost_win32", calls.append)
+    h.ctl.engage()
+    h.window.hide()
+
+    h.ctl._reassert_win32_topmost()
+
+    assert calls == [True]                # no assert while hidden
+    assert h.ctl._topmost_timer.isActive() is False
+
+
+def test_stopping_a_burst_that_never_started_is_safe(make_ctl, monkeypatch):
+    monkeypatch.setattr(ws.sys, "platform", "win32")
+    h = make_ctl(settings={"keep_on_top": False})
+
+    h.ctl._stop_topmost_timer()           # no timer yet; must not raise
+
+    assert h.ctl._topmost_timer is None
+
+
+def test_engage_on_linux_never_touches_the_win32_burst(make_ctl, monkeypatch):
+    """Linux/Hyprland raise behaviour is unchanged."""
+    monkeypatch.setattr(ws.sys, "platform", "linux")
+    monkeypatch.delenv("HYPRLAND_INSTANCE_SIGNATURE", raising=False)
+    h = make_ctl(settings={"keep_on_top": True})
+    monkeypatch.setattr(h.ctl, "_set_topmost_win32",
+                        lambda on: pytest.fail("win32 topmost used on Linux"))
+
+    h.ctl.engage()
+    h.window.hide()
+
+    assert h.ctl._topmost_timer is None
 
 
 # ── 6. Qt event hooks ──────────────────────────────────────────────────────
