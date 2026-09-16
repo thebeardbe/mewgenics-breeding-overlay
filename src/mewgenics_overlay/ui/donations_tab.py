@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QComboBox,
@@ -23,6 +25,13 @@ from mewgenics_overlay.core.donations import (
 import mewgenics_overlay.ui.theme as _theme
 from PySide6.QtGui import QColor
 from mewgenics_overlay.ui.theme import wrap_tooltip as _wt
+
+log = logging.getLogger("mewgenics_overlay.ui")
+
+# Item data role carrying the cat's db_key on every cell of its row. A view
+# row is a position in the sorted view, so a row action must identify its cat
+# from the clicked item, never from the row number (sorting shifts it).
+_CAT_KEY_ROLE = Qt.ItemDataRole.UserRole + 1
 
 _COLS = ["Cat", "Status", "Age", "Stats", "Donate?", "Why donate"]
 _COL_TIPS = [
@@ -225,15 +234,14 @@ class DonationsTab(QWidget):
         return lines
 
     def _show_row_menu(self, pos) -> None:
-        index = self._table.indexAt(pos)
         slot = self._current_slot()
         palette = getattr(self, "_palette", None)
-        if not index.isValid() or slot is None or palette is None:
+        item = self._table.itemAt(pos)
+        if item is None or slot is None or palette is None:
             return
-        cats = slot.candidates
-        if index.row() >= len(cats):
+        cat = self._cat_for_item(slot, item)
+        if cat is None:
             return
-        cat = cats[index.row()]
         menu = QMenu(self)
         label = ("Unpin - allow donation" if getattr(cat, "is_pinned", False)
                  else "Pin for breeding")
@@ -249,6 +257,26 @@ class DonationsTab(QWidget):
             self.refresh(palette._session)
         elif show_action is not None and chosen is show_action:
             palette.show_in_game(cat.db_key)
+
+    @staticmethod
+    def _cat_for_item(slot, item):
+        """Resolve the cat a rendered row stands for.
+
+        The key stored on the row is authoritative: the view can be sorted, so
+        its row number no longer indexes ``slot.candidates``. A row built
+        outside :meth:`_render_slot` carries no key; for those only, fall back
+        to the row number so they keep working. That fallback is unsound once
+        the view is sorted, so it is logged rather than silent.
+        """
+        key = item.data(_CAT_KEY_ROLE)
+        if key is not None:
+            return next((c for c in slot.candidates if c.db_key == key), None)
+        row = item.row()
+        if not 0 <= row < len(slot.candidates):
+            return None
+        log.warning("donations: row %d has no stored cat key; falling back "
+                    "to its position (wrong under sorting)", row)
+        return slot.candidates[row]
 
     def _render_slot(self, slot) -> None:
         self._table.setSortingEnabled(False)
@@ -282,6 +310,7 @@ class DonationsTab(QWidget):
             for c_i, text in enumerate(cells):
                 it = (_NumItem(text) if c_i in (2, 3)
                       else QTableWidgetItem(text))
+                it.setData(_CAT_KEY_ROLE, cat.db_key)
                 it.setToolTip(self._row_tip(cat, slot, base, inj, rating, advice))
                 if c_i == 4:
                     it.setForeground(QColor(rating_colour[rating]))
