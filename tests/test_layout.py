@@ -513,7 +513,7 @@ def test_swap_toggle_reaches_the_later_created_coordinator(make_host):
 
 def test_chrome_buttons_reach_the_host_callbacks(make_host):
     # The header carries click-through and hide only; the pin button and its
-    # callback were removed with the unconditional always-on-top change.
+    # callback were removed when keep-on-top became a persisted tray setting.
     host = make_host()
 
     assert not hasattr(host._chrome, "_btn_pin")

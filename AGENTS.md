@@ -132,8 +132,9 @@ src/mewgenics_overlay/
     partneractions.py     partner row selection text, pin menu, double-click refocus
     roombar.py            room selector (Stimulation/Comfort from furniture)
     savepanel.py          campaign save-slot cards + file picker
-    windowstate.py        frameless window state: geometry, pin/topmost,
-                          click-through, engage/hide, OS event hooks
+    windowstate.py        frameless window state: geometry, keep-on-top
+                          (tray toggle, persisted), click-through, engage/hide,
+                          OS event hooks
     zoom.py               ZoomController: clamp/step/cycle, persistence, Ctrl+wheel
     themectl.py           ThemeController: theme choice, persistence, restyle order
     reloader.py           ReloadCoordinator: watcher, debounced reload, partner
@@ -309,7 +310,7 @@ Plus `scripts/gui_smoke.py` for the real UI offscreen.
 
 ## 8. Status / roadmap
 
-- Latest release: **v0.2.8** (in-game integration: the companion mod's focus bridge, a "Show in game" button, follow the save the game is actually playing, and the Hyprland Lua-dispatch raise fallback). **v0.3.0** is reserved for when the companion mod is complete; until then the in-game integration work ships as incremental **0.2.x** releases.
+- Latest release: **v0.2.9** (in-game integration: the companion mod's focus bridge, a "Show in game" button, follow the save the game is actually playing, and the Hyprland Lua-dispatch raise fallback). **v0.3.0** is reserved for when the companion mod is complete; until then the in-game integration work ships as incremental **0.2.x** releases.
 - Known gaps: per-NPC donation counters and Butch chapter progress are not
   recoverable from the save; Frank/retired is heuristic (abilities+stat
   gains); aggression is displayed for future fighter-room optimisation but

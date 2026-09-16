@@ -1,12 +1,12 @@
 """TopBar chrome: the header row extracted from PaletteWindow (split step 3).
 
 ``mewgenics_overlay.ui.chrome`` owns the frameless drag grip, the title and
-status labels and the two icon buttons (click-through / hide). The overlay is
-always on top now, so the pin button and its state/helpers are gone; a
-regression test asserts they stay gone. The initial state and the actions
-arrive as plain values and callables, so the bar can be driven here without
-constructing a ``PaletteWindow`` (no save, watcher or timers) and without a
-real window (offscreen platform).
+status labels and the two icon buttons (click-through / hide). Keep-on-top is
+now a persisted tray setting, so the header's pin button and its
+state/helpers are gone; a regression test asserts they stay gone. The initial
+state and the actions arrive as plain values and callables, so the bar can be
+driven here without constructing a ``PaletteWindow`` (no save, watcher or
+timers) and without a real window (offscreen platform).
 
 The widget is self-contained; the only shared state it touches is the
 ``theme.ZOOM`` global read by ``restyle``, so an autouse fixture restores it.
@@ -84,8 +84,8 @@ def test_constructor_seeds_click_through_and_close_defaults(make_bar):
 
 
 def test_header_has_no_pin_button_any_more(make_bar):
-    # Regression: the overlay is unconditionally on top, so the header lost
-    # its pin button, its state and its callback wiring.
+    # Regression: keep-on-top moved to a persisted tray setting, so the
+    # header lost its pin button, its state and its callback wiring.
     bar = make_bar()
 
     assert not hasattr(bar, "_btn_pin")

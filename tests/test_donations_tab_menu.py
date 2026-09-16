@@ -4,8 +4,9 @@
 offered; "Show in game" appears only while a game is connected
 (``palette.in_game_available``) and sends through the same outbound path as
 the partner rows and the card button. A right-click on a row must open this
-row menu, never the window's Hide/Quit menu, so Qt's CustomContextMenu
-routing to the table is part of the contract.
+row menu. The overlay itself no longer has a window-wide right-click menu
+(the window actions live on the tray), so Qt's CustomContextMenu routing to
+the table is the contract that keeps row menus working.
 
 These tests drive a real offscreen ``DonationsTab`` with a recording
 ``QMenu`` replacement (the real ``exec`` blocks) and a fake palette/host, so
@@ -33,7 +34,6 @@ from PySide6.QtWidgets import (  # noqa: E402
 )
 
 from mewgenics_overlay.ui import donations_tab as _dt  # noqa: E402
-from mewgenics_overlay.ui import palette  # noqa: E402
 from mewgenics_overlay.ui.donations_tab import DonationsTab  # noqa: E402
 
 
@@ -116,9 +116,27 @@ def _install_row(tab, cat):
 def _make_tab(qapp, palette, cat=None):
     cat = cat or make_cat()
     tab = DonationsTab(palette=palette)
+    _WIDGETS.append(tab)
     item = _install_row(tab, cat)
     qapp.processEvents()
     return tab, cat, item
+
+
+#: Widgets built by a test, destroyed before the next one so Qt never has to
+#: tear a shown table down at interpreter shutdown (which segfaults with this
+#: PySide6 build).
+_WIDGETS: list[QWidget] = []
+
+
+@pytest.fixture(autouse=True)
+def _destroy_widgets(qapp):
+    yield
+    while _WIDGETS:
+        widget = _WIDGETS.pop()
+        widget.hide()
+        widget.close()
+        widget.deleteLater()
+    qapp.processEvents()
 
 
 def _open_row_menu(tab, item):
@@ -181,11 +199,14 @@ def test_dismissing_the_row_menu_does_nothing(qapp, fake_menu):
     assert palette.shown == []
 
 
-# ── row menu beats the window menu ─────────────────────────────────────────
+# ── row menu is the menu a row right-click opens ───────────────────────────
 class RowHost(QWidget):
-    """Window-level host: a real palette menu plus the tab's palette surface."""
+    """Host window that provides the tab's palette surface.
 
-    contextMenuEvent = palette.PaletteWindow.contextMenuEvent
+    The overlay no longer defines a window-wide context menu, so this host has
+    no ``contextMenuEvent`` override: a row right-click is handled entirely by
+    the table's CustomContextMenu routing.
+    """
 
     def __init__(self, available=True):
         super().__init__()
@@ -193,14 +214,6 @@ class RowHost(QWidget):
         self.pins = []
         self.shown = []
         self._session = None
-        self.window_menu_calls = 0
-
-    def _window_menu(self):
-        # Record that the window menu would open; return a harmless fake so
-        # contextMenuEvent can call exec() without blocking.
-        self.window_menu_calls += 1
-        return _FakeMenu(SimpleNamespace(menus=[], choice=None,
-                                         last_pos=None))
 
     def set_pinned(self, cat, on):
         self.pins.append((cat, on))
@@ -210,12 +223,13 @@ class RowHost(QWidget):
         return True
 
 
-def test_row_right_click_opens_the_row_menu_not_the_window_menu(
-        qapp, fake_menu):
+def test_row_right_click_opens_the_row_menu(qapp, fake_menu):
     host = RowHost(available=True)
+    _WIDGETS.append(host)
     host.resize(700, 400)
     cat = make_cat()
     tab = DonationsTab(palette=host)
+    _WIDGETS.append(tab)
     tab.setParent(host)
     item = _install_row(tab, cat)
     host.show()
@@ -230,12 +244,3 @@ def test_row_right_click_opens_the_row_menu_not_the_window_menu(
     assert len(fake_menu.menus) == 1           # the row menu was built
     assert [a.text for a in fake_menu.menus[0].actions] == [
         "Pin for breeding", "Show in game"]
-    assert host.window_menu_calls == 0         # not the window menu
-
-    tab.hide()
-    tab.close()
-    tab.deleteLater()
-    host.hide()
-    host.close()
-    host.deleteLater()
-    qapp.processEvents()

@@ -86,6 +86,30 @@ def test_missing_file_returns_defaults(isolated_cfg):
     assert data == cfg.DEFAULTS
 
 
+# ── keep-on-top ────────────────────────────────────────────────────────────
+def test_keep_on_top_defaults_on(isolated_cfg):
+    assert cfg.DEFAULTS["keep_on_top"] is True
+    assert cfg.load()["keep_on_top"] is True
+
+
+@pytest.mark.parametrize("saved,expected", [
+    (False, False), (True, True), ("false", False), ("true", True),
+    ("no", False), ("yes", True), (0, False), (1, True),
+])
+def test_keep_on_top_is_coerced_to_a_bool(isolated_cfg, saved, expected):
+    isolated_cfg({"keep_on_top": saved})
+    assert cfg.load()["keep_on_top"] is expected
+
+
+def test_keep_on_top_persists_through_save_and_load(isolated_cfg):
+    data = cfg.load()
+    data["keep_on_top"] = False
+
+    cfg.save(data)
+
+    assert cfg.load()["keep_on_top"] is False
+
+
 # ── global hotkey coercion ──────────────────────────────────────────────────
 def test_hotkey_default_is_the_shipped_combo():
     from mewgenics_overlay.ui import hotkeybinding

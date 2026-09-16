@@ -1,9 +1,9 @@
 """WindowController: OS-level window behaviour extracted from PaletteWindow.
 
 ``mewgenics_overlay.ui.windowstate.WindowController`` owns framing, geometry
-restore/save, unconditional always-on-top, click-through, summon/hide and the
-Qt event hooks the palette calls from its thin ``showEvent`` / ``hideEvent``
-/ ``changeEvent`` overrides.
+restore/save, the user's persisted keep-on-top choice (native on Windows),
+click-through, summon/hide and the Qt event hooks the palette calls from its
+thin ``showEvent`` / ``hideEvent`` / ``changeEvent`` overrides.
 
 These tests drive it with an offscreen ``QWidget`` and a recording stand-in
 for the header bar, so no ``PaletteWindow`` (and therefore no save, watcher or
@@ -258,47 +258,99 @@ def test_set_click_through_accepts_truthy_and_falsy_values(make_ctl):
     assert h.ctl.click_through is False
 
 
-# ── 4. always-on-top (unconditional, no toggle) ────────────────────────────
+# ── 4. keep-on-top (persisted, tray-controlled) ────────────────────────────
+def test_keep_on_top_defaults_on(make_ctl):
+    h = make_ctl()                 # settings carries no keep_on_top yet
+
+    assert h.ctl.keep_on_top is True
+    # The default is not written to the settings dict until the user toggles.
+    assert "keep_on_top" not in h.settings
+
+
+def test_keep_on_top_reads_a_stored_off_choice(make_ctl):
+    h = make_ctl(settings={"keep_on_top": False})
+
+    assert h.ctl.keep_on_top is False
+
+
 def test_the_pin_toggle_api_is_gone(make_ctl):
-    # Regression: the overlay is always on top, so the controller no longer
-    # carries pin state or a toggle/helper for it.
+    # Regression: the old unconditional pin state was replaced by the
+    # persisted keep-on-top choice; the controller no longer carries pin
+    # state or a toggle/helper for it.
     h = make_ctl()
 
     for name in ("pinned", "toggle_pin", "set_pinned"):
         assert not hasattr(h.ctl, name)
     assert not hasattr(h.chrome, "set_pinned")
-    # ``on_show`` applies topmost unconditionally, so the native helper takes
-    # no on/off argument (a bound method's signature drops ``self``).
+    # ``_set_topmost_win32`` now takes the on/off choice it must apply (a
+    # bound method's signature drops ``self``).
     assert list(inspect.signature(
-        h.ctl._set_topmost_win32).parameters) == []
+        h.ctl._set_topmost_win32).parameters) == ["on"]
 
 
-def test_configure_frame_keeps_generic_linux_topmost_unconditionally(
+def test_configure_frame_honours_the_stored_choice_generically(
         make_ctl, monkeypatch):
-    # No pin state changes this: generic X11/Wayland always gets the Qt flag.
+    monkeypatch.setattr(ws.sys, "platform", "linux")
+    monkeypatch.delenv("HYPRLAND_INSTANCE_SIGNATURE", raising=False)
+
+    on = make_ctl(settings={"keep_on_top": True})
+    on.ctl.configure_frame()
+    assert on.window.windowFlags() & Qt.WindowType.WindowStaysOnTopHint
+
+    off = make_ctl(settings={"keep_on_top": False})
+    off.ctl.configure_frame()
+    assert not (off.window.windowFlags() & Qt.WindowType.WindowStaysOnTopHint)
+
+
+def test_set_keep_on_top_persists_and_applies_at_once(make_ctl, monkeypatch):
+    monkeypatch.setattr(ws.sys, "platform", "linux")
+    monkeypatch.delenv("HYPRLAND_INSTANCE_SIGNATURE", raising=False)
+    h = make_ctl()
+    h.ctl.configure_frame()
+    assert h.window.windowFlags() & Qt.WindowType.WindowStaysOnTopHint
+
+    h.ctl.set_keep_on_top(False)
+
+    assert h.ctl.keep_on_top is False
+    assert h.settings["keep_on_top"] is False
+    assert h.saves[-1]["keep_on_top"] is False
+    assert not (h.window.windowFlags() & Qt.WindowType.WindowStaysOnTopHint)
+
+    h.ctl.set_keep_on_top(True)
+
+    assert h.ctl.keep_on_top is True
+    assert h.settings["keep_on_top"] is True
+    assert h.window.windowFlags() & Qt.WindowType.WindowStaysOnTopHint
+
+
+def test_keep_on_top_survives_a_reload(make_ctl, monkeypatch):
+    monkeypatch.setattr(ws.sys, "platform", "linux")
+    monkeypatch.delenv("HYPRLAND_INSTANCE_SIGNATURE", raising=False)
+    first = make_ctl()
+    first.ctl.set_keep_on_top(False)
+
+    # A fresh controller built from the persisted settings (an app reload).
+    reloaded = make_ctl(settings=first.settings)
+    reloaded.ctl.configure_frame()
+
+    assert reloaded.ctl.keep_on_top is False
+    assert not (reloaded.window.windowFlags()
+                & Qt.WindowType.WindowStaysOnTopHint)
+
+
+def test_set_keep_on_top_accepts_truthy_and_falsy_values(make_ctl,
+                                                        monkeypatch):
     monkeypatch.setattr(ws.sys, "platform", "linux")
     monkeypatch.delenv("HYPRLAND_INSTANCE_SIGNATURE", raising=False)
     h = make_ctl()
 
-    h.ctl.configure_frame()
-
-    assert h.window.windowFlags() & Qt.WindowType.WindowStaysOnTopHint
-
-
-def test_on_show_applies_topmost_without_an_on_off_argument(make_ctl,
-                                                            monkeypatch):
-    monkeypatch.setattr(ws.sys, "platform", "win32")
-    h = make_ctl()
-    calls = []
-    monkeypatch.setattr(h.ctl, "_set_topmost_win32",
-                        lambda: calls.append(True))
-
-    h.ctl.on_show()
-
-    assert calls == [True]             # exactly once, no flag argument
+    h.ctl.set_keep_on_top(0)
+    assert h.ctl.keep_on_top is False
+    h.ctl.set_keep_on_top(1)
+    assert h.ctl.keep_on_top is True
 
 
-def test_native_topmost_failure_is_logged_and_swallowed(
+def test_native_topmost_setup_failure_is_logged_and_swallowed(
         make_ctl, monkeypatch, caplog):
     """The native SetWindowPos path is unavailable under Linux.
 
@@ -307,7 +359,7 @@ def test_native_topmost_failure_is_logged_and_swallowed(
     """
     monkeypatch.setattr(ws.sys, "platform", "win32")
     monkeypatch.delenv("HYPRLAND_INSTANCE_SIGNATURE", raising=False)
-    h = make_ctl()
+    h = make_ctl(settings={"keep_on_top": True})
     caplog.clear()
 
     with caplog.at_level(logging.WARNING, logger="mewgenics_overlay.ui"):
@@ -315,6 +367,42 @@ def test_native_topmost_failure_is_logged_and_swallowed(
 
     assert any("native always-on-top setup failed" in r.message
                for r in caplog.records)
+
+
+def test_native_topmost_clear_failure_is_logged_and_swallowed(
+        make_ctl, monkeypatch, caplog):
+    monkeypatch.setattr(ws.sys, "platform", "win32")
+    monkeypatch.delenv("HYPRLAND_INSTANCE_SIGNATURE", raising=False)
+    h = make_ctl(settings={"keep_on_top": False})
+    caplog.clear()
+
+    with caplog.at_level(logging.WARNING, logger="mewgenics_overlay.ui"):
+        h.ctl.set_keep_on_top(False)   # real native clear; must not raise
+
+    assert any("native always-on-top clear failed" in r.message
+               for r in caplog.records)
+
+
+def test_hyprland_leaves_stacking_alone_and_logs(make_ctl, monkeypatch, caplog):
+    # Hyprland owns stacking via compositor rules, so the Qt flag is never
+    # touched there; the requested value is only reported in the log.
+    monkeypatch.setattr(ws.sys, "platform", "linux")
+    monkeypatch.setenv("HYPRLAND_INSTANCE_SIGNATURE", "1")
+    h = make_ctl()
+    h.ctl.configure_frame()
+    before = h.window.windowFlags()
+    caplog.clear()
+
+    with caplog.at_level(logging.INFO, logger="mewgenics_overlay.ui"):
+        h.ctl.set_keep_on_top(False)
+        h.ctl.on_show()
+
+    assert h.window.windowFlags() == before
+    assert not (h.window.windowFlags() & Qt.WindowType.WindowStaysOnTopHint)
+    assert h.settings["keep_on_top"] is False
+    joined = "\n".join(r.getMessage() for r in caplog.records)
+    assert "Hyprland manages window stacking" in joined
+    assert "requested=False" in joined
 
 
 # ── 5. summon / hide ───────────────────────────────────────────────────────
@@ -351,29 +439,31 @@ def test_toggle_activate_cycles_hidden_passive_active(make_ctl, qapp):
 
 
 # ── 6. Qt event hooks ──────────────────────────────────────────────────────
-def test_on_show_sets_topmost_natively_on_windows(make_ctl, monkeypatch):
+@pytest.mark.parametrize("choice", [True, False])
+def test_on_show_reapplies_the_stored_choice_natively_on_windows(
+        make_ctl, monkeypatch, choice):
     monkeypatch.setattr(ws.sys, "platform", "win32")
-    h = make_ctl()
+    h = make_ctl(settings={"keep_on_top": choice})
     seen = []
     monkeypatch.setattr(h.ctl, "_set_topmost_win32",
-                        lambda: seen.append(True))
+                        lambda on: seen.append(on))
 
     h.ctl.on_show()
 
-    assert seen == [True]
+    assert seen == [choice]
 
 
-def test_on_show_is_inert_off_windows(make_ctl, monkeypatch):
+def test_on_show_applies_the_qt_hint_off_windows(make_ctl, monkeypatch):
     monkeypatch.setattr(ws.sys, "platform", "linux")
-    h = make_ctl()
+    monkeypatch.delenv("HYPRLAND_INSTANCE_SIGNATURE", raising=False)
+    h = make_ctl(settings={"keep_on_top": True})
     seen = []
     monkeypatch.setattr(h.ctl, "_set_topmost_win32", seen.append)
-    flags = h.window.windowFlags()
 
     h.ctl.on_show()
 
     assert seen == []
-    assert h.window.windowFlags() == flags
+    assert h.window.windowFlags() & Qt.WindowType.WindowStaysOnTopHint
 
 
 def test_on_hide_saves_the_geometry(make_ctl):

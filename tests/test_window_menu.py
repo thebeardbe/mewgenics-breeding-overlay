@@ -1,22 +1,24 @@
-"""The overlay's right-click window menu and its shared close/hide path.
+"""The overlay's right-click is a no-op and the shared close/hide path.
 
-``ui/palette.py`` catches context-menu events that reach the window (the
-header, the empty body) and offers Hide overlay / Quit. The header's close
-button and the window menu's "Hide overlay" action both run the *same*
-``_on_close_clicked`` method (``layout.build`` wires ``on_hide`` to it), so
-every decision test here drives both surfaces through the parametrised
-``hide_source`` fixture and asserts they take the same branch.
+``ui/palette.py`` no longer catches context-menu events: the overlay-wide
+right-click menu (Hide overlay / Quit) was removed, because the window actions
+live on the tray icon whose menu already offers Show overlay, Toggle
+click-through, Keep on top, Choose save and Quit. Right-clicking the header or
+the empty body therefore does nothing again, while the partner/donation row
+menus and the search field's standard menu are unaffected (covered by
+``test_partneractions.py``, ``test_donations_tab_menu.py`` and
+``test_layout.py``).
 
-That branch is not "hide, unless a system tray exists": the overlay hides
+The header close button still runs ``_on_close_clicked``: it hides the overlay
 only when it can actually be summoned back, which requires a tray icon
-(``tray_available``) or a live global hotkey (``hotkey_active``). With
-neither, hiding would strand a running process with no way back, so the app
-quits instead and logs why. The explicit Quit action always leaves the
+(``tray_available``) or a live global hotkey (``hotkey_active``). With neither,
+hiding would strand a running process with no way back, so the app quits
+instead and logs why. The tray's Quit action is separate and always leaves the
 application, whatever the summon options are.
 
 These tests bind the real ``PaletteWindow`` methods onto a plain ``QWidget``
-and replace the palette module's ``QApplication`` with a recording fake, so
-no real ``PaletteWindow`` (save, watcher, asset loader, threads) is built and
+and replace the palette module's ``QApplication`` with a recording fake, so no
+real ``PaletteWindow`` (save, watcher, asset loader, threads) is built and
 nothing is actually quit.
 """
 
@@ -24,7 +26,6 @@ from __future__ import annotations
 
 import logging
 import os
-from types import SimpleNamespace
 
 # Must be set before the first QApplication is constructed.
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -35,7 +36,7 @@ pytest.importorskip("PySide6")
 
 from PySide6.QtCore import QPoint  # noqa: E402
 from PySide6.QtGui import QContextMenuEvent  # noqa: E402
-from PySide6.QtWidgets import QApplication, QMenu, QWidget  # noqa: E402
+from PySide6.QtWidgets import QApplication, QLineEdit, QWidget  # noqa: E402
 
 from mewgenics_overlay.ui import palette  # noqa: E402
 from mewgenics_overlay.ui.chrome import TopBar  # noqa: E402
@@ -71,7 +72,7 @@ class _FakeApplicationClass:
 
 
 class WindowHost(QWidget):
-    """A real widget carrying the real ``PaletteWindow`` menu methods.
+    """A real widget carrying the real ``PaletteWindow`` close methods.
 
     ``tray_available`` / ``hotkey_active`` mirror the two facts the real close
     path reads. On the real palette they are set by ``app.main`` (tray built)
@@ -79,8 +80,6 @@ class WindowHost(QWidget):
     attributes the tests set to enumerate every summon-option combination.
     """
 
-    contextMenuEvent = PaletteWindow.contextMenuEvent
-    _window_menu = PaletteWindow._window_menu
     _on_close_clicked = PaletteWindow._on_close_clicked
     _quit = PaletteWindow._quit
 
@@ -114,69 +113,86 @@ def fake_app(monkeypatch):
     return fake
 
 
-@pytest.fixture(params=["menu", "header"])
-def hide_source(request, make_host, qapp):
-    """The two surfaces that share the close path, as an invoker.
+@pytest.fixture
+def close_invoker(make_host, qapp):
+    """The header close button, wired to the host's real close path.
 
     ``layout.build`` wires the header's close button to the host's
-    ``_on_close_clicked`` and ``_window_menu`` connects the "Hide overlay"
-    action to the same method, so both must take the same branch in every
-    state. Parametrising here proves that across all the decision tests.
+    ``_on_close_clicked``, so clicking it must take the branch under test.
     """
     host = make_host()
-    if request.param == "menu":
-        def invoke():
-            action = next(a for a in host._window_menu().actions()
-                          if a.text() == "Hide overlay")
-            action.trigger()
-    else:
-        bar = TopBar(on_hide=host._on_close_clicked, parent=host)
-        host._chrome = bar
+    bar = TopBar(on_hide=host._on_close_clicked, parent=host)
+    host._chrome = bar
 
-        def invoke():
-            bar._btn_close.click()
+    def invoke():
+        bar._btn_close.click()
+
     return host, invoke
-
-
-def _action_texts(menu):
-    return [a.text() for a in menu.actions() if not a.isSeparator()]
-
-
-def _quit_action(menu):
-    return next(a for a in menu.actions() if a.text() == "Quit")
 
 
 def _messages(caplog):
     return [r.getMessage() for r in caplog.records]
 
 
-# ── menu contents ──────────────────────────────────────────────────────────
-def test_window_menu_offers_hide_then_a_separated_quit(make_host):
+# ── the overlay menu is gone; right-click is a no-op ───────────────────────
+def test_the_overlay_no_longer_defines_a_context_menu_handler():
+    # Regression: the window-wide Hide/Quit menu was removed in favour of the
+    # tray menu, so the palette must not define its own handler or menu.
+    assert "contextMenuEvent" not in PaletteWindow.__dict__
+    assert "_window_menu" not in PaletteWindow.__dict__
+
+
+def test_right_click_on_the_overlay_is_ignored(make_host, qapp):
     host = make_host()
+    host.show()
+    qapp.processEvents()
+    event = QContextMenuEvent(QContextMenuEvent.Reason.Mouse,
+                              QPoint(4, 5), QPoint(44, 55))
 
-    menu = host._window_menu()
+    qapp.sendEvent(host, event)
 
-    assert isinstance(menu, QMenu)
-    assert _action_texts(menu) == ["Hide overlay", "Quit"]
-    assert [(a.isSeparator(), a.text()) for a in menu.actions()] == [
-        (False, "Hide overlay"), (True, ""), (False, "Quit")]
+    # No handler accepts it, so nothing opens (Qt's default ignores it).
+    assert event.isAccepted() is False
 
 
-def test_window_menu_is_parented_to_the_window(make_host):
+class _RecordingField(QLineEdit):
+    """A search-field stand-in that records its own context menu handling."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.context_events = 0
+
+    def contextMenuEvent(self, event):  # noqa: N802 (Qt API)
+        self.context_events += 1
+        event.accept()
+
+
+def test_a_field_context_menu_still_reaches_the_field(make_host, qapp):
+    # Removing the window-wide handler must not swallow the child widgets'
+    # own menus: the search field keeps its standard context menu.
     host = make_host()
+    field = _RecordingField(host)
+    field.setText("Meeko")
+    host.show()
+    qapp.processEvents()
+    event = QContextMenuEvent(QContextMenuEvent.Reason.Mouse,
+                              QPoint(2, 2), QPoint(2, 2))
 
-    assert host._window_menu().parent() is host
+    qapp.sendEvent(field, event)
+
+    assert field.context_events == 1
+    assert event.isAccepted() is True
 
 
-# ── Hide overlay: hide when there is a way back ────────────────────────────
+# ── close button: hide when there is a way back ────────────────────────────
 @pytest.mark.parametrize("tray,hotkey,expected", [
     (True, False, "tray=True, global hotkey=False"),
     (False, True, "tray=False, global hotkey=True"),
     (True, True, "tray=True, global hotkey=True"),
 ])
 def test_close_hides_and_stays_alive_when_it_can_be_summoned(
-        hide_source, fake_app, qapp, caplog, tray, hotkey, expected):
-    host, invoke = hide_source
+        close_invoker, fake_app, qapp, caplog, tray, hotkey, expected):
+    host, invoke = close_invoker
     host.tray_available = tray
     host.hotkey_active = hotkey
     host.show()
@@ -193,10 +209,10 @@ def test_close_hides_and_stays_alive_when_it_can_be_summoned(
                for m in _messages(caplog)), _messages(caplog)
 
 
-# ── Hide overlay: quit when there is no way back ───────────────────────────
+# ── close button: quit when there is no way back ───────────────────────────
 def test_close_quits_when_neither_tray_nor_hotkey_is_available(
-        hide_source, fake_app, qapp, caplog):
-    host, invoke = hide_source
+        close_invoker, fake_app, qapp, caplog):
+    host, invoke = close_invoker
     host.tray_available = False
     host.hotkey_active = False
     host.show()
@@ -215,19 +231,19 @@ def test_close_quits_when_neither_tray_nor_hotkey_is_available(
     assert "no global hotkey" in joined
 
 
-# ── Quit action always quits ───────────────────────────────────────────────
+# ── the explicit Quit path always quits ────────────────────────────────────
 @pytest.mark.parametrize("tray,hotkey", [
     (False, False), (True, False), (False, True), (True, True),
 ])
-def test_quit_action_quits_regardless_of_the_summon_options(
-        make_host, fake_app, qapp, tray, hotkey):
+def test_quit_always_leaves_the_application(make_host, fake_app, qapp,
+                                            tray, hotkey):
     host = make_host()
     host.tray_available = tray
     host.hotkey_active = hotkey
     host.show()
     qapp.processEvents()
 
-    _quit_action(host._window_menu()).trigger()
+    host._quit()
     qapp.processEvents()
 
     assert fake_app.quit_calls == 1
@@ -255,21 +271,3 @@ def test_quit_without_a_running_qapplication_is_a_noop(monkeypatch, qapp):
     host = WindowHost()
 
     host._quit()               # must not raise
-
-
-# ── contextMenuEvent wiring ────────────────────────────────────────────────
-def test_context_menu_event_execs_the_window_menu_at_the_global_pos(
-        make_host, monkeypatch, qapp):
-    host = make_host()
-    host.show()
-    qapp.processEvents()
-    seen = []
-    monkeypatch.setattr(host, "_window_menu",
-                        lambda: SimpleNamespace(exec=seen.append))
-    event = QContextMenuEvent(QContextMenuEvent.Reason.Mouse,
-                              QPoint(4, 5), QPoint(44, 55))
-
-    host.contextMenuEvent(event)
-
-    assert seen == [event.globalPos()]
-    assert event.isAccepted()

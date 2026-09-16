@@ -139,17 +139,27 @@ def _build_tray(app: QApplication, palette: PaletteWindow):
     tray = QSystemTrayIcon(_make_tray_icon(), app)
     tray.setToolTip("Mewgenics Breeding Overlay")
     menu = QMenu()
-    act_show = QAction("Show overlay", None)
+    # Parent each action to the menu: PySide6 keeps a QAction alive only when
+    # it is constructed with its owner, so a menu of unparented actions loses
+    # every entry to garbage collection once _build_tray returns.
+    act_show = QAction("Show overlay", menu)
     act_show.triggered.connect(palette._engage)
-    act_ct = QAction("Toggle click-through", None)
+    act_ct = QAction("Toggle click-through", menu)
     act_ct.triggered.connect(
         lambda: palette.set_click_through(not palette._click_through))
-    act_save = QAction("Choose save…", None)
+    # Checkable and seeded from the stored choice, so the menu reflects what
+    # the overlay is doing and toggling it applies at once and persists.
+    act_top = QAction("Keep on top", menu)
+    act_top.setCheckable(True)
+    act_top.setChecked(palette._keep_on_top)
+    act_top.toggled.connect(palette.set_keep_on_top)
+    act_save = QAction("Choose save…", menu)
     act_save.triggered.connect(palette._pick_save)
-    act_quit = QAction("Quit", None)
+    act_quit = QAction("Quit", menu)
     act_quit.triggered.connect(app.quit)
     menu.addAction(act_show)
     menu.addAction(act_ct)
+    menu.addAction(act_top)
     menu.addAction(act_save)
     menu.addSeparator()
     menu.addAction(act_quit)

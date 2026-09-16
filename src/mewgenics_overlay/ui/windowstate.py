@@ -2,8 +2,8 @@
 
 Extracted from ``PaletteWindow`` (god-file split, step 6): owns everything the
 window does as an OS object rather than as a content view - framing flags,
-geometry restore/save, always-on-top (native on Windows), the click-through
-toggle, summon/hide, and the focus-loss auto click-through.
+geometry restore/save, the user's keep-on-top choice (native on Windows), the
+click-through toggle, summon/hide, and the focus-loss auto click-through.
 
 It knows nothing about breeding data: the live settings dict and the "persist
 settings" callable arrive from the host, and the host keeps its own Qt event
@@ -22,6 +22,7 @@ from PySide6.QtCore import QEvent, QObject, QRect, Qt
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import QWidget
 
+from mewgenics_overlay.ui import config as cfg
 from mewgenics_overlay.ui import raisewindow
 from mewgenics_overlay.ui.chrome import TopBar
 
@@ -52,6 +53,8 @@ class WindowController(QObject):
         self._settings = settings
         self._save_settings = save_settings
         self._click_through = CLICK_THROUGH_DEFAULT
+        self._keep_on_top = bool(
+            settings.get("keep_on_top", cfg.DEFAULTS["keep_on_top"]))
         self._dialog_open = False
 
     # ── state (mutated through the methods below) ──────────────────────────
@@ -67,6 +70,11 @@ class WindowController(QObject):
     def dialog_open(self, on: bool) -> None:
         self._dialog_open = bool(on)
 
+    @property
+    def keep_on_top(self) -> bool:
+        """The user's stored keep-on-top choice (tray "Keep on top")."""
+        return self._keep_on_top
+
     # ── framing / geometry ─────────────────────────────────────────────────
     def configure_frame(self) -> None:
         """Frameless palette; the Qt topmost flag only where it is safe.
@@ -75,13 +83,22 @@ class WindowController(QObject):
         re-applied in :meth:`on_show`) and via compositor rules on Hyprland;
         only generic X11/Wayland keep the Qt flag, which re-creates the native
         window when toggled (Windows hides it -> the "can't find it anymore"
-        bug).
+        bug). The stored "Keep on top" choice seeds the flag here.
         """
         flags = Qt.WindowType.FramelessWindowHint
-        if sys.platform != "win32" and not os.environ.get(
-                "HYPRLAND_INSTANCE_SIGNATURE"):
+        if self._uses_qt_topmost() and self._keep_on_top:
             flags |= Qt.WindowType.WindowStaysOnTopHint
         self._window.setWindowFlags(flags)
+
+    @staticmethod
+    def _hyprland() -> bool:
+        """True when a Hyprland session owns window stacking via rules."""
+        return bool(os.environ.get("HYPRLAND_INSTANCE_SIGNATURE"))
+
+    @classmethod
+    def _uses_qt_topmost(cls) -> bool:
+        """True where the Qt topmost flag is the safe mechanism."""
+        return sys.platform != "win32" and not cls._hyprland()
 
     def restore_geometry(self) -> None:
         """Restore the last window rect, clamped to a visible screen.
@@ -114,22 +131,61 @@ class WindowController(QObject):
         self._save_settings()
 
     # ── always-on-top ──────────────────────────────────────────────────────
-    def _set_topmost_win32(self) -> None:
-        """Keep the overlay above other windows without touching window flags
+    def set_keep_on_top(self, on: bool) -> None:
+        """Apply the tray's "Keep on top" choice immediately and persist it."""
+        self._keep_on_top = bool(on)
+        self._settings["keep_on_top"] = self._keep_on_top
+        self._save_settings()
+        self._apply_keep_on_top()
+
+    def _apply_keep_on_top(self) -> None:
+        """Apply the stored choice: native on Windows, the Qt hint on generic
+        X11/Wayland, and a log note on Hyprland (which owns stacking)."""
+        if sys.platform == "win32":
+            self._set_topmost_win32(self._keep_on_top)
+        elif self._hyprland():
+            self._log_hyprland_stacking()
+        else:
+            self._set_topmost_qt(self._keep_on_top)
+
+    def _set_topmost_win32(self, on: bool) -> None:
+        """Set or clear native topmost without touching window flags
         (no HWND re-creation -> the overlay can't get 'lost')."""
         try:
             import ctypes
             hwnd = int(self._window.winId())
             HWND_TOPMOST = -1
+            HWND_NOTOPMOST = -2
             SWP_NOSIZE, SWP_NOMOVE, SWP_NOACTIVATE = 0x0001, 0x0002, 0x0010
             ctypes.windll.user32.SetWindowPos(
-                hwnd, HWND_TOPMOST, 0, 0, 0, 0,
+                hwnd, HWND_TOPMOST if on else HWND_NOTOPMOST, 0, 0, 0, 0,
                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
             )
         except Exception:
             # Never crash the overlay for a cosmetic always-on-top; keep a log
             # line so the failure is visible instead of silent.
-            log.warning("native always-on-top setup failed")
+            log.warning("native always-on-top %s failed",
+                        "setup" if on else "clear")
+
+    def _set_topmost_qt(self, on: bool) -> None:
+        """Add/remove the Qt topmost hint (generic X11/Wayland only).
+
+        Toggling this flag re-creates the native window, so a visible window
+        is re-shown to stay on screen; nothing is done when the flag already
+        matches, to avoid a needless re-creation.
+        """
+        have = bool(self._window.windowFlags()
+                    & Qt.WindowType.WindowStaysOnTopHint)
+        if have == on:
+            return
+        self._window.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, on)
+        if self._window.isVisible():
+            self._window.show()
+
+    def _log_hyprland_stacking(self) -> None:
+        """Hyprland owns stacking via compositor rules; say so in the log."""
+        log.info("keep on top: Hyprland manages window stacking from its "
+                 "compositor rules (requested=%s)", self._keep_on_top)
 
     # ── click-through ──────────────────────────────────────────────────────
     def on_click_through_clicked(self, checked: bool) -> None:
@@ -167,8 +223,13 @@ class WindowController(QObject):
 
     # ── Qt event hooks (called from the host's event overrides) ────────────
     def on_show(self) -> None:
-        if sys.platform == "win32":
-            self._set_topmost_win32()
+        """Apply the keep-on-top choice when the window is shown.
+
+        Windows loses the native topmost state when the window is re-created,
+        so it is re-asserted here; the generic X11/Wayland hint and the
+        Hyprland log note are idempotent.
+        """
+        self._apply_keep_on_top()
 
     def on_hide(self) -> None:
         self.save_geometry()

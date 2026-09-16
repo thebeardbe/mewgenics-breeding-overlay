@@ -28,6 +28,9 @@ DEFAULTS = {
     "include_adventure": True,    # consider Adventure cats as partners
     "order": "risk",            # partner sort: "risk" (safe first) or "quality"
     "max_partners": 100,
+    # Keep the overlay above other windows. Toggled from the tray menu; on
+    # Windows this is a native topmost call, on Hyprland compositor rules.
+    "keep_on_top": True,
     # In-game bridge (mewgenics-breeding-mod): loopback TCP focus requests.
     "bridge_enabled": True,
     "bridge_port": bridge.DEFAULT_PORT,

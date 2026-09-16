@@ -35,7 +35,6 @@ from PySide6.QtWidgets import (
     QApplication,
     QLineEdit,
     QListWidget,
-    QMenu,
     QTableWidgetItem,
     QWidget,
 )
@@ -230,6 +229,15 @@ class PaletteWindow(QWidget):
     def set_click_through(self, on: bool) -> None:
         self._win.set_click_through(on)
 
+    @property
+    def _keep_on_top(self) -> bool:
+        """Whether the overlay stays above other windows (tray choice)."""
+        return self._win.keep_on_top
+
+    def set_keep_on_top(self, on: bool) -> None:
+        """Apply and persist the tray's "Keep on top" choice."""
+        self._win.set_keep_on_top(on)
+
     def _engage(self) -> None:
         self._win.engage()
 
@@ -254,11 +262,10 @@ class PaletteWindow(QWidget):
     def _on_close_clicked(self) -> None:
         """Hide the overlay when it can be summoned again; otherwise quit.
 
-        The header close button and the window menu's "Hide overlay" action
-        share this path. The overlay can only be summoned back through a tray
-        icon or a live global hotkey; with neither, hiding would leave the
-        process running invisibly with no way back, so quit instead. The
-        explicit Quit action (:meth:`_quit`) is separate and works either way.
+        The header close button hides the overlay only when a tray icon or a
+        live global hotkey can summon it back; with neither, hiding would
+        leave the process running invisibly with no way back, so quit instead.
+        The tray's Quit action is separate and works either way.
         """
         if self.tray_available or self.hotkey_active:
             log.info("close: hiding the overlay (tray=%s, global hotkey=%s)",
@@ -269,25 +276,6 @@ class PaletteWindow(QWidget):
                      "and no global hotkey is active, so the overlay could "
                      "not be summoned back")
             self._quit()
-
-    def contextMenuEvent(self, event):  # noqa: N802 (Qt API)
-        """Right-click anywhere on the overlay (header or body) for window
-        actions. Widgets with their own context menu - the partner and
-        donation tables, the search field - keep theirs; everything else
-        propagates here, so the menu is reachable from the header and the
-        empty body."""
-        self._window_menu().exec(event.globalPos())
-        event.accept()
-
-    def _window_menu(self) -> QMenu:
-        """The overlay's Hide/Quit menu (right-click; tray wording)."""
-        menu = QMenu(self)
-        hide_action = menu.addAction("Hide overlay")
-        hide_action.triggered.connect(self._on_close_clicked)
-        menu.addSeparator()
-        quit_action = menu.addAction("Quit")
-        quit_action.triggered.connect(self._quit)
-        return menu
 
     def _quit(self) -> None:
         """Leave the application for real, with or without a tray icon."""
