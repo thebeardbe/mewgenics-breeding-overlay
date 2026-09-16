@@ -432,12 +432,25 @@ class BridgeServer:
             return
         try:
             self._read_loop(conn, peer)
+        except Exception:
+            # Serving one connection must never kill its thread with a bare
+            # traceback. The stop-triggered close below is already quiet inside
+            # _read_loop, so anything else here is a genuine bug: contain it,
+            # but keep it visible instead of swallowing it.
+            self._log.exception("bridge: connection %s failed", peer)
         finally:
             self._unregister(conn)
             conn.close()
 
     def _read_loop(self, conn: socket.socket, peer: tuple) -> None:
-        conn.settimeout(ACCEPT_TIMEOUT)
+        try:
+            conn.settimeout(ACCEPT_TIMEOUT)
+        except OSError as exc:
+            # stop() may close this socket before the thread reaches the loop;
+            # configuring a closed socket is a normal shutdown, not a failure.
+            self._log.debug(
+                "bridge: connection %s closed before read loop: %s", peer, exc)
+            return
         buffer = b""
         while not self._stop.is_set():
             try:
